@@ -143,7 +143,7 @@ def create_app(config_path: str | Path) -> FastAPI:
     def update_plugin(name: str, body: PluginUpdate):
         _, base = load_cfg()
         found, _ = discover([base / "plugins"])
-        defaults = found[name]["cls"].defaults if name in found else {}
+        defaults = found[name]["cls"].Params().model_dump(mode="json") if name in found else {}
 
         def update(raw):
             specs = config_mod.Config.model_validate({"plugins": raw.get("plugins") or []}).plugins
