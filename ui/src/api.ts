@@ -31,6 +31,7 @@ export interface EpisodeResult {
   at?: number
   at_s?: number
   stopped_by?: string
+  labeled_by?: 'person' | 'loop'
   message?: string
   details?: Record<string, unknown>
   candidates?: { reason: string; at: number }[]
@@ -93,6 +94,7 @@ export interface PluginInfo {
   group: 'core' | 'diagnosis' | 'safety' | 'output' | string
   icon: string
   capability: 'observe' | 'modify_actions' | 'control'
+  needs: ('robot' | 'world')[]
   manifest: { hooks?: string[]; step_rate_hz?: number; needs_frames?: boolean; requires?: string[]; conflicts?: string[] }
   schema: { properties?: Record<string, SchemaProp>; required?: string[] }
   params: Record<string, unknown>
@@ -171,6 +173,8 @@ export const api = {
     call<{ object: string; target: string; rows: TraceRow[]; milestones: { t: number; kind: string; message: string }[] }>(
       `/api/runs/${id}/trace/${episode}`,
     ),
+  label: (id: string, episode: number, success: boolean) =>
+    call<{ ok: boolean }>(`/api/runs/${id}/episodes/${episode}/label`, { method: 'POST', body: JSON.stringify({ success }) }),
   removePlugin: (name: string) => call<{ ok: boolean; output: string }>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   reveal: (id: string, episode?: number) =>
     call<{ path: string }>(`/api/runs/${id}/reveal${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
@@ -222,5 +226,6 @@ export const REASON_LABEL: Record<string, string> = {
   stopped: 'stopped',
   model_error: 'model error',
   error: 'error',
+  marked_failed: 'marked failed',
   unknown: 'unknown',
 }

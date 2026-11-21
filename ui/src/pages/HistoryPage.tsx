@@ -119,6 +119,8 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
                     {recoveriesOf(e) > 0 && <Tag tone="ok">recovered{recoveriesOf(e) > 1 ? ` ×${recoveriesOf(e)}` : ''}</Tag>}
                     <span className="ml-auto text-[12px] text-faint">{e.duration_s.toFixed(0)} s</span>
                   </div>
+                  {e.success == null && <LabelButtons runId={id} episode={e.episode} />}
+                  {e.labeled_by === 'person' && <p className="pl-5 text-[11.5px] text-dim">marked by a person</p>}
                   {e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason}{atOf(e) != null && ` at ${atOf(e)!.toFixed(1)} s`}</p>}
                 </button>
               </li>
@@ -162,6 +164,24 @@ function Harvest({ id }: { id: string }) {
         Local check only, nothing is uploaded. To gather several runs: <code className="text-dim">dreamkit harvest export {id}</code>
       </p>
     </Panel>
+  )
+}
+
+/** No world, nobody judged it: a person says ✓ or ✗ (the harvester's dataset follows). */
+function LabelButtons({ runId, episode }: { runId: string; episode: number }) {
+  const queryClient = useQueryClient()
+  const mark = useMutation({
+    mutationFn: (success: boolean) => api.label(runId, episode, success),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['run', runId] }); queryClient.invalidateQueries({ queryKey: ['harvest', runId] }) },
+  })
+  return (
+    <div className="mt-1 flex items-center gap-1.5 pl-5" onClick={(e) => e.stopPropagation()}>
+      <span className="text-[11.5px] text-warn">outcome unknown</span>
+      <button disabled={mark.isPending} onClick={() => mark.mutate(true)}
+        className="rounded-md border border-line bg-panel px-1.5 text-[12px] text-ok hover:bg-ok-soft" title="It worked">✓</button>
+      <button disabled={mark.isPending} onClick={() => mark.mutate(false)}
+        className="rounded-md border border-line bg-panel px-1.5 text-[12px] text-bad hover:bg-bad-soft" title="It failed">✗</button>
+    </div>
   )
 }
 
@@ -220,8 +240,13 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
       <Panel>
         <div className="flex flex-wrap items-center gap-3 px-4 pt-3 pb-2">
           <h2 className={clsx('text-[15px] font-medium', failed ? 'text-bad' : ep.success ? 'text-ok' : 'text-ink')}>
-            {failed ? `${ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']} at ${at!.toFixed(1)} s` : ep.success ? `Done in ${ep.duration_s.toFixed(1)} s` : 'Attempt'}
+            {failed ? `${ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']} at ${at!.toFixed(1)} s` : ep.success ? `Done in ${ep.duration_s.toFixed(1)} s` : 'Outcome unknown: mark it on the left'}
           </h2>
+          {failed && (ep.details as { source?: string } | undefined)?.source && (
+            <Tag tone="plain" title="What the verdict rests on: the robot's own signals, or the simulator's world">
+              from {(ep.details as { source?: string }).source === 'world' ? 'the simulator world' : 'robot signals'}
+            </Tag>
+          )}
           <div className="ml-auto flex items-center gap-1 rounded-md bg-base p-0.5 text-[12px]">
             {ep.recap?.video && (
               <button onClick={() => setMode(mode === 'recap' ? 'full' : 'recap')} className={clsx('rounded px-2 py-0.5', mode === 'recap' ? 'bg-signal text-base' : 'text-dim')}>Recap</button>

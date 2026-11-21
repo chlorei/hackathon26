@@ -14,3 +14,8 @@ def test_quiet_on_a_clean_grasp():
     result = replay("success_apple_bowl", plugins=["gripper-check"])
     assert not result.events.of("gripper-check")
     assert "gripper-check" not in result.result
+
+
+def test_works_without_the_simulator_world():
+    result = replay("grasped_air", plugins=["gripper-check"], world=False)
+    assert result.result["gripper-check"]["events"][0]["kind"] == "empty"

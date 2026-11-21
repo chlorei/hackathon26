@@ -53,9 +53,19 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
             )}
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-line px-4 py-3 md:grid-cols-4">
-            <Sparkline live={stream.live} field="d" label="Hand to object" unit="cm" scale={100} color="#2f8fb3" />
-            <Sparkline live={stream.live} field="z" label="Object lifted" unit="cm" scale={100} color="#1f8a5b" max={20} />
-            <Sparkline live={stream.live} field="dt" label="Object to target" unit="cm" scale={100} color="#8a5cc2" />
+            {stream.mode?.startsWith('robot') ? (
+              <>
+                <Sparkline live={stream.live} field="grip" label="Gripper opening" unit="" scale={1} color="#2f8fb3" max={1} />
+                <Sparkline live={stream.live} field="track" label="Tracking error" unit="rad" scale={1} color="#c8402f" warnAbove={0.12} />
+                <div className="text-[12px]"><span className="text-dim">Positions</span><p className="mt-2 text-faint">Robot only: no world</p></div>
+              </>
+            ) : (
+              <>
+                <Sparkline live={stream.live} field="d" label="Hand to object" unit="cm" scale={100} color="#2f8fb3" />
+                <Sparkline live={stream.live} field="z" label="Object lifted" unit="cm" scale={100} color="#1f8a5b" max={20} />
+                <Sparkline live={stream.live} field="dt" label="Object to target" unit="cm" scale={100} color="#8a5cc2" />
+              </>
+            )}
             {live.data?.mock ? (
               <div className="text-[12px]"><span className="text-dim">Model round trip</span><p className="mt-2 text-faint">Mock: no model calls</p></div>
             ) : <Sparkline live={stream.live} field="rtt" label="Model round trip" unit="ms" color="#d9822b" warnAbove={700} />}
@@ -70,6 +80,7 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
             <span className={clsx('mt-1.5 h-2 w-2 shrink-0 rounded-full', running ? 'animate-pulse bg-signal' : 'bg-faint')} />
             <div className="min-w-0 flex-1">
               <p className="text-[14px]">{stream.task || live.data?.task || 'Run'}</p>
+              {stream.mode && <p className="text-[12px] text-dim">{stream.mode}</p>}
               <p className="text-[12px] text-dim">
                 {running ? 'Your loop is running' : 'Finished'}{live.data?.mock ? ', mock policy' : live.data?.model ? `, ${live.data.model}` : ''}
               </p>

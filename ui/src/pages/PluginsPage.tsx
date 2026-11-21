@@ -5,18 +5,20 @@ import { Download, GitBranch, Loader2, Trash2 } from 'lucide-react'
 import { api, type PluginInfo, type SchemaProp } from '../api'
 import { Button, ICON_BY_PLUGIN, Input, Panel, PanelTitle, PluginIcon, StatusDot, Tag, Toggle } from '../ui'
 
-const MAIN: { name: string; step: string }[] = [
-  { name: 'failure-monitor', step: 'Detect' },
-  { name: 'recovery', step: 'Recover' },
-  { name: 'harvester', step: 'Learn' },
+/** Plugins grouped by what they are for, in the order a failure goes through them: Detect → Recover → Learn. */
+const STAGES: { key: 'detect' | 'recover' | 'learn'; n: number; title: string; hint: string; lead: string }[] = [
+  { key: 'detect', n: 1, title: 'Detect', hint: 'Notice what went wrong, and when', lead: 'failure-monitor' },
+  { key: 'recover', n: 2, title: 'Recover', hint: 'Act on it: fix the attempt, or keep the robot safe', lead: 'recovery' },
+  { key: 'learn', n: 3, title: 'Learn', hint: 'Keep the videos and data that come out of it', lead: 'harvester' },
 ]
-const GROUPS: { key: string; title: string; hint: string }[] = [
-  { key: 'core', title: 'Core', hint: 'The loop around the model' },
-  { key: 'diagnosis', title: 'Diagnosis', hint: 'Did it work, and what went wrong' },
-  { key: 'safety', title: 'Safety', hint: 'Catch trouble before it reaches the robot' },
-  { key: 'output', title: 'Output', hint: 'Recordings, recaps, reports' },
-]
-const CAPABILITY: Record<string, string> = { observe: 'observe', modify_actions: 'modifies actions', control: 'control' }
+const CAPABILITY: Record<string, string> = { observe: 'watches', modify_actions: 'adjusts actions', control: 'controls the robot' }
+
+function stageOf(p: PluginInfo): 'detect' | 'recover' | 'learn' {
+  if (p.name === 'failure-monitor') return 'detect'
+  if (p.capability === 'control' || p.capability === 'modify_actions') return 'recover'
+  if (p.group === 'output' || p.name === 'harvester') return 'learn'
+  return 'detect'
+}
 
 export default function PluginsPage() {
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
@@ -25,70 +27,48 @@ export default function PluginsPage() {
   useEffect(() => {
     for (const p of list) ICON_BY_PLUGIN[p.name] = p.icon
   }, [list])
-  if (plugins.isLoading) return <p className="text-[13px] text-dim">Loading plugins…</p>
-  if (plugins.isError) return <p className="text-[13px] text-bad">Cannot reach the dreamkit server: {(plugins.error as Error).message}</p>
-  const main = MAIN.map((m) => ({ ...m, plugin: list.find((p) => p.name === m.name) }))
-  const basic = list.filter((p) => !MAIN.some((m) => m.name === p.name))
+  if (plugins.isLoading) return <p className="text-dim">Loading plugins…</p>
+  if (plugins.isError) return <p className="text-bad">Cannot reach the dreamkit server: {(plugins.error as Error).message}</p>
+  const on = list.filter((p) => p.enabled).length
   const toggle = (name: string) => setOpen(open === name ? null : name)
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
-      <div className="space-y-4">
-        <section>
-          <div className="mb-3 flex items-baseline justify-between">
-            <h1 className="text-[24px] font-bold tracking-[-0.015em]">Plugins</h1>
-            <span className="text-[13px] text-dim">Changes apply the next time your loop calls dreamkit.wrap()</span>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h1 className="text-[26px] font-bold tracking-[-0.015em]">Plugins</h1>
+            <p className="mt-1 text-dim">{on} of {list.length} on. Changes apply the next time your loop starts (<code className="text-ink">dreamkit.wrap()</code>).</p>
           </div>
-          <div className="grid gap-3 lg:grid-cols-3">
-            {main.map((m, i) => (
-              <Panel key={m.name} className={clsx('flex flex-col', m.plugin?.enabled && 'border-ink/25')}>
-                <div className="flex items-start gap-3 px-5 pt-4">
-                  <PluginIcon name={m.name} icon={m.plugin?.icon} className="mt-1 !h-5 !w-5 text-ink" />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[12px] font-semibold uppercase tracking-[.06em] text-dim">{i + 1}. {m.step}</p>
-                    <p className="text-[16px] font-semibold">{m.name}</p>
-                  </div>
-                  {m.plugin && <EnableToggle plugin={m.plugin} />}
-                </div>
-                <p className="px-5 pt-1.5 pb-3 text-[13px] leading-snug text-dim">{m.plugin?.description ?? 'Not installed.'}</p>
-                {m.plugin && <StatusLine plugin={m.plugin} className="px-5 pb-3" />}
-                {m.plugin && (
-                  <button onClick={() => toggle(m.name)} className="mt-auto border-t border-line px-5 py-2.5 text-left text-[13px] text-dim hover:text-ink">
-                    {open === m.name ? 'Close settings' : 'Settings'}
-                  </button>
-                )}
+        </div>
+        {STAGES.map((stage) => {
+          const items = list.filter((p) => stageOf(p) === stage.key)
+            .sort((a, b) => Number(b.name === stage.lead) - Number(a.name === stage.lead))
+          if (!items.length) return null
+          return (
+            <section key={stage.key}>
+              <div className="mb-2.5 flex items-baseline gap-3">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-[13px] font-bold text-white">{stage.n}</span>
+                <h2 className="text-[19px] font-semibold">{stage.title}</h2>
+                <span className="text-dim">{stage.hint}</span>
+              </div>
+              <Panel>
+                {items.map((p) => (
+                  <PluginRow key={p.name} plugin={p} lead={p.name === stage.lead} open={open === p.name} onOpen={() => toggle(p.name)} />
+                ))}
               </Panel>
-            ))}
-          </div>
-          {main.map((m) => m.plugin && open === m.name && (
-            <Panel key={m.name} className="mt-3"><PluginRow plugin={m.plugin} open onOpen={() => toggle(m.name)} /></Panel>
-          ))}
-        </section>
-
-        <section className="space-y-3">
-          <h2 className="pt-2 text-[13px] font-semibold uppercase tracking-[.06em] text-dim">Basic</h2>
-          {GROUPS.map((g) => {
-            const items = basic.filter((p) => (GROUPS.some((x) => x.key === p.group) ? p.group : 'diagnosis') === g.key)
-            if (!items.length) return null
-            return (
-              <Panel key={g.key}>
-                <PanelTitle right={<span className="text-[12px] text-dim">{g.hint}</span>}>{g.title}</PanelTitle>
-                <div className="border-t border-line">
-                  {items.map((p) => <PluginRow key={p.name} plugin={p} open={open === p.name} onOpen={() => toggle(p.name)} />)}
-                </div>
-              </Panel>
-            )
-          })}
-        </section>
+            </section>
+          )
+        })}
         {(plugins.data?.problems.length ?? 0) > 0 && (
           <Panel className="border-bad/40">
             <PanelTitle>Refused by the plugin standard</PanelTitle>
-            <pre className="mx-5 mb-4 max-h-60 overflow-auto rounded-lg bg-log p-3 font-mono text-[12px] whitespace-pre-wrap text-[#e8e6e1]">
+            <pre className="mx-5 mb-4 max-h-60 overflow-auto rounded-lg bg-log p-3 font-mono text-[12.5px] whitespace-pre-wrap text-[#e8e6e1]">
               {plugins.data?.problems.join('\n\n')}
             </pre>
           </Panel>
         )}
       </div>
-      <div className="space-y-4">
+      <div className="space-y-5 xl:sticky xl:top-[80px] xl:self-start">
         <AddFromGitHub />
         <Catalogue />
       </div>
@@ -104,30 +84,24 @@ function useSetPlugins() {
   }
 }
 
-function EnableToggle({ plugin }: { plugin: PluginInfo }) {
-  const set = useSetPlugins()
-  const update = useMutation({ mutationFn: (enabled: boolean) => api.updatePlugin(plugin.name, { enabled }), onSuccess: (d) => set(d) })
-  return <Toggle checked={plugin.enabled} disabled={!plugin.installed || update.isPending} onChange={(v) => update.mutate(v)} />
-}
-
 /** Status dot, ms per step, errors and why it was switched off — from the most recent run. */
 function StatusLine({ plugin, className }: { plugin: PluginInfo; className?: string }) {
   const s = plugin.stats
   const tone = !plugin.enabled ? 'off' : plugin.refused || s?.disabled ? 'bad' : s?.errors ? 'warn' : 'ok'
-  const text = !plugin.enabled ? 'off'
-    : plugin.refused ? `not loaded: ${plugin.refused}`
+  const text = !plugin.enabled ? 'Off'
+    : plugin.refused ? `Not running: ${plugin.refused}`
     : s?.disabled ? s.disabled
-    : s ? `${s.ms_per_step.toFixed(3)} ms/step${s.errors ? `, ${s.errors} error${s.errors > 1 ? 's' : ''}` : ', no errors'}`
-    : 'on, no run yet'
+    : s ? (s.errors ? `${s.errors} error${s.errors > 1 ? 's' : ''} last run` : 'Healthy last run') + ` · ${s.ms_per_step.toFixed(2)} ms/step`
+    : 'On · no run yet'
   return (
-    <div className={clsx('flex items-start gap-2 text-[12px]', className)} title={s?.last_error ?? undefined}>
+    <div className={clsx('flex items-start gap-2 text-[13px]', className)} title={s?.last_error ?? undefined}>
       <span className="mt-[3px]"><StatusDot tone={tone} /></span>
       <span className={clsx(tone === 'bad' ? 'text-bad' : 'text-dim')}>{text}</span>
     </div>
   )
 }
 
-function PluginRow({ plugin, open, onOpen }: { plugin: PluginInfo; open: boolean; onOpen: () => void }) {
+function PluginRow({ plugin, open, onOpen, lead }: { plugin: PluginInfo; open: boolean; onOpen: () => void; lead?: boolean }) {
   const set = useSetPlugins()
   const queryClient = useQueryClient()
   const [values, setValues] = useState<Record<string, unknown>>(plugin.params)
@@ -148,22 +122,26 @@ function PluginRow({ plugin, open, onOpen }: { plugin: PluginInfo; open: boolean
   const external = plugin.source && plugin.source !== 'builtin'
   return (
     <div className="border-b border-line last:border-0">
-      <div className="flex items-center gap-3 px-5 py-3">
-        <PluginIcon name={plugin.name} icon={plugin.icon} className={plugin.enabled ? 'text-ink' : 'text-faint'} />
+      <div className={clsx('flex items-center gap-4 px-5', lead ? 'py-4' : 'py-3.5')}>
+        <span className={clsx('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', plugin.enabled ? 'bg-raised text-ink' : 'bg-raised/60 text-faint')}>
+          <PluginIcon name={plugin.name} icon={plugin.icon} className="!h-[18px] !w-[18px]" />
+        </span>
         <button onClick={onOpen} className="min-w-0 flex-1 text-left" aria-expanded={open}>
-          <span className="flex flex-wrap items-center gap-2 text-[14px] font-medium">
+          <span className={clsx('flex flex-wrap items-center gap-2 font-semibold', lead ? 'text-[16.5px]' : 'text-[15px]')}>
             {plugin.name}
+            {lead && <Tag tone="plain">main</Tag>}
             {plugin.capability !== 'observe' && <Tag tone={plugin.capability === 'control' ? 'signal' : 'warn'}>{CAPABILITY[plugin.capability]}</Tag>}
+            {plugin.needs?.includes('world') && <Tag tone="plain" title="Reads positions and contacts, which only the simulator has: off on a real robot">sim only</Tag>}
             {external && <Tag tone="steel">{plugin.source === 'pip' ? 'installed' : plugin.source}</Tag>}
             {!plugin.installed && <Tag tone="bad">not installed</Tag>}
           </span>
-          <span className="block truncate text-[12.5px] text-dim">{plugin.description}</span>
+          <span className="mt-0.5 block text-[13.5px] leading-snug text-dim">{plugin.description}</span>
           {plugin.capability === 'control' && plugin.conflicts.length > 0 && (
-            <span className="block text-[12px] text-dim">conflicts with {plugin.conflicts.join(', ')}: only one control plugin can be on</span>
+            <span className="mt-0.5 block text-[12.5px] text-dim">Conflicts with {plugin.conflicts.join(', ')}: only one control plugin can be on.</span>
           )}
         </button>
-        <StatusLine plugin={plugin} className="hidden w-56 shrink-0 md:flex" />
-        <button onClick={onOpen} className="text-[12.5px] text-dim hover:text-ink">{open ? 'Close' : 'Settings'}</button>
+        <StatusLine plugin={plugin} className="hidden w-60 shrink-0 lg:flex" />
+        <Button variant="quiet" onClick={onOpen} className="!px-2.5">{open ? 'Close' : 'Settings'}</Button>
         <Toggle checked={plugin.enabled} disabled={!plugin.installed || update.isPending} onChange={(v) => update.mutate({ enabled: v })} />
       </div>
       {open && (

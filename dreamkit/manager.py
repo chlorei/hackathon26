@@ -104,6 +104,7 @@ def describe(found: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
         out.append({
             "name": name, "description": cls.description(), "source": entry["source"], "origin": entry["origin"],
             "manifest": cls.manifest.model_dump(), "group": cls.manifest.group, "icon": cls.manifest.icon,
+            "needs": cls.manifest.needs,
             "capability": cls.manifest.capability, "schema": cls.Params.model_json_schema(),
             "defaults": cls.Params().model_dump(mode="json"),
         })
@@ -161,6 +162,8 @@ class PluginManager:
         self._contexts: dict[str, PluginContext] = {}
         self._core: Context | None = None
         self.step_ms_over = 0
+        self.world = True  # set per attempt by the Kit
+        self.inactive: dict[str, str] = {}  # plugins off for lack of the world (a real robot)
         candidates: list[Plugin] = []
         for spec in specs:
             if not spec.enabled:
@@ -224,6 +227,17 @@ class PluginManager:
             place(p)
         return ordered
 
+    def set_world(self, available: bool) -> list[str]:
+        """Whether this attempt has a simulator world; returns the plugins that go quiet without it."""
+        self.world = available
+        off = [p.name for p in self.plugins if "world" in p.manifest.needs and not available]
+        for name in off:
+            self.inactive[name] = "needs the simulator world (sim only): off on this robot"
+        for p in self.plugins:
+            if available and p.name in self.inactive:
+                del self.inactive[p.name]
+        return off
+
     @property
     def names(self) -> list[str]:
         return [p.name for p in self.plugins]
@@ -253,7 +267,7 @@ class PluginManager:
         for name, ctx in self._contexts.items():
             if name in self.stats:
                 self.stats[name].suppressed_events = ctx.suppressed_events
-        return {name: s.as_dict() for name, s in self.stats.items()}
+        return {name: {**s.as_dict(), "inactive": self.inactive.get(name)} for name, s in self.stats.items()}
 
     # -- running hooks ------------------------------------------------------------------------------------------------
     def call(self, hook: str, core: Context) -> float:
@@ -271,6 +285,8 @@ class PluginManager:
                 stats.steps += 1
             if stats.disabled or hook not in m.hooks:
                 continue  # undeclared hooks are never called (§11)
+            if "world" in m.needs and not self.world:
+                continue  # sim only, and this is a robot
             if hook == "on_step" and core.step % max(1, int(round(20 / m.step_rate_hz))):
                 continue
             ctx = self.context(core, plugin)

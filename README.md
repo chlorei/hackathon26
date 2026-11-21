@@ -33,6 +33,52 @@ keeps the history with videos, recaps and harvested datasets.
 > Its numbers (failure rates, "recovery 20% → 100%") say that the *mechanism* works, nothing about Dream-1. Mock runs
 > carry a **mock: scripted failures** badge in the panel and the report. Real numbers come from runs without `--mock`.
 
+## On a real robot
+
+dreamkit does not need the simulator. Give `step()` what your robot reports instead of an env:
+
+```python
+with client.episode("put apple into the bowl", state=read_state()):
+    while client.t < 60:
+        client.set_observation(frames, observation)
+        reply = client.get_action()
+        for left, right in rows(reply):
+            robot.command(left, right)
+            client.step(state=read_state(),          # {"left": 6 joints + gripper, "right": …}
+                        images=read_cameras(),       # optional, for camera-check / recorder / harvester
+                        command=(left, right))
+```
+
+Plugins then see `ctx.robot` (joints, gripper, command vs measured, tracking error, cameras, model latency) but no
+`ctx.world` (positions, contacts). What changes:
+
+| | simulator (`env=`) | real robot (`state=`) |
+|---|---|---|
+| failure-monitor | all reasons, precise times | `grasped_air` (the fingers met), `dropped` (holding, then the fingers closed in without being told to open), `collision` (the arm can't follow a steady command), `stalled`, `camera_failure`; `slow_model` as a warning |
+| success-check | measured | unknown: ✓ / ✗ in History, or `client.label(True)` from your loop |
+| recovery | arms home via the simulator's own path; lift 5 cm on grasped air | eases to `home_joints_rad`; opens the gripper on grasped air |
+| harvester | success/ and failed/ | unlabeled/ until labelled, then moved |
+| plugins with `needs: [robot, world]` | on | off, marked **sim only** |
+
+Try it without a robot: `python examples/sim_loop.py --mock --no-world` gives dreamkit only state, cameras and
+commands from the simulator, exactly what a robot would. `python examples/world_vs_robot.py --mock` judges the same
+attempts both ways:
+
+```
+attempt                with world                   robot only (state, gripper, commands)
+success                success                      unknown (to label)
+dropped                dropped @9.7s                dropped @9.6s
+grasped_air            grasped_air @5.3s            grasped_air @5.3s
+released_off_target    released_off_target @9.7s    unknown (to label)
+not_reached            not_reached @4.6s            grasped_air @5.2s
+stalled                stalled @2.2s                stalled @2.2s
+collision              collision @4.0s              collision @4.0s
+fell_off_table         fell_off_table @8.8s         dropped @8.1s
+```
+
+(Mock: the failures are scripted on purpose. Where the robot cannot know — where the fruit landed, whether it is in
+the bowl — it says unknown instead of guessing.)
+
 ## Install
 
 You need **Python 3.11–3.13**, **git**, **[uv](https://docs.astral.sh/uv/)** (`curl -LsSf https://astral.sh/uv/install.sh | sh`)

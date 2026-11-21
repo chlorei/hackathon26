@@ -38,13 +38,12 @@ export default function App() {
       <header className="sticky top-0 z-20 border-b border-line bg-panel">
         <div className="mx-auto flex h-[56px] max-w-[1680px] items-center gap-6 px-7">
           <a href="#/live" className="flex items-baseline gap-2">
-            <span className="text-[17px] font-bold tracking-[-0.015em]">dreamkit</span>
-            <span className="text-[12px] text-dim">for Dream-1</span>
+            <span className="text-[19px] font-bold tracking-[-0.02em]">dreamkit</span>
           </a>
           <nav className="flex gap-1" aria-label="Main">
             {tabs.map((t) => (
               <button key={t.page} onClick={() => go(t.hash)} aria-current={route.page === t.page ? 'page' : undefined}
-                className={clsx('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13.5px] transition-colors',
+                className={clsx('flex items-center gap-2 rounded-lg px-3.5 py-2 text-[15px] transition-colors',
                   route.page === t.page ? 'bg-raised font-medium text-ink' : 'text-dim hover:text-ink')}>
                 <t.icon className="h-4 w-4" strokeWidth={1.75} /> {t.label}
               </button>

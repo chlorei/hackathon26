@@ -31,6 +31,7 @@ export interface RunStream {
   status: 'idle' | 'connecting' | 'running' | 'finished' | 'stopped' | 'error' | 'aborted'
   plugins: string[]
   task: string
+  mode?: string
   live: LiveStore
 }
 
@@ -81,6 +82,9 @@ export function useRunStream(runId: string | null): RunStream {
           case 'episode_start':
             return { ...s, status: 'running', task: record.task, current: { episode: record.episode, scene: record.scene, attempt: record.attempt } }
           case 'event': {
+            if (record.plugin === 'dreamkit' && record.message.startsWith('mode: ')) {
+              return { ...s, mode: record.message.slice(6).split(';')[0], events: [...s.events, record] }
+            }
             const events = s.events.length >= MAX_EVENTS ? [...s.events.slice(-MAX_EVENTS + 1), record] : [...s.events, record]
             return { ...s, events }
           }

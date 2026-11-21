@@ -59,6 +59,7 @@ class MockClient:
 
     def get_action(self, **_: Any) -> dict[str, Any]:
         if self.plan is None:
+            self.planned = True  # this attempt counts even if planning fails below
             if self.after_recovery:
                 self.behavior = self.recovery_behaviors[(self.recoveries - 1) % len(self.recovery_behaviors)]
             else:
@@ -81,8 +82,9 @@ class MockClient:
             self.recoveries += 1
             self.after_recovery = True
         else:
-            if self.plan is not None or self.after_recovery:
+            if self.plan is not None or self.after_recovery or getattr(self, "planned", False):
                 self.attempt += 1
+            self.planned = False
             self.after_recovery = False
         self.plan = None
 
@@ -151,7 +153,7 @@ class MockClient:
 
         wait(1, self._n(10))
         if behavior == "stalled":
-            move(p + [0.0, 0.0, 0.16], 1, 40)
+            move(p + [0.0, 0.0, 0.10], 1, 40)  # starts towards the fruit, then freezes above it
             wait(1, 2400)
         elif behavior == "not_reached":
             off = p + [0.0, -0.09, 0.05]

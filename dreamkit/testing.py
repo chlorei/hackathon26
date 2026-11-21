@@ -162,10 +162,12 @@ def fixtures() -> list[str]:
 class ReplayEnv:
     """Stands in for the simulator: state() as recorded, no physics, no MuJoCo."""
 
-    def __init__(self, fx: Fixture):
+    def __init__(self, fx: Fixture, world: bool = True):
         self.fx = fx
         self.i = 0
-        self.dreamkit_world = fx.world()
+        self._world = fx.world() if world else None
+        if world:
+            self.dreamkit_world = self._world
 
     def state(self) -> dict[str, np.ndarray]:
         a = self.fx.arrays
@@ -173,7 +175,8 @@ class ReplayEnv:
 
     def at(self, i: int) -> None:
         self.i = i
-        self.dreamkit_world.at(i)
+        if self._world is not None:
+            self._world.at(i)
 
 
 class ReplayClient:
@@ -227,12 +230,14 @@ class ReplayResult:
                 and (plugin is None or e.get("plugin") == plugin)]
 
 
-def replay(fixture: str | Path, plugins: list[Any], keep: bool = False, extra_dirs: list[Path] | None = None) -> ReplayResult:
-    """Plays one recorded attempt through these plugins (names, or {name: params}) and returns what they did."""
+def replay(fixture: str | Path, plugins: list[Any], keep: bool = False, extra_dirs: list[Path] | None = None,
+           world: bool = True) -> ReplayResult:
+    """Plays one recorded attempt through these plugins (names, or {name: params}) and returns what they did.
+    world=False plays it as a real robot would report it: state, gripper, commands, cameras — no positions/contacts."""
     from .kit import Kit  # noqa: PLC0415
 
     fx = Fixture(fixture)
-    env = ReplayEnv(fx)
+    env = ReplayEnv(fx, world=world)
     tmp = Path(tempfile.mkdtemp(prefix="dreamkit-replay-"))
     specs = [p if isinstance(p, (str, dict)) else str(p) for p in plugins]
     kit = Kit(ReplayClient(fx), config=None, console=False, runs_dir=str(tmp), plugins=specs,

@@ -188,16 +188,18 @@ class Harvester(Plugin):
     def on_episode_end(self, ctx: PluginContext) -> None:
         if not self.ok:
             return
+        outcome_known = ctx.result.get("success") is not None
         success = ctx.result.get("success") is True
-        split = "success" if success else "failed"
+        # no world and nobody judged it: kept as unlabeled/ until it is marked in History (or by client.label())
+        split = "success" if success else "failed" if outcome_known else "unlabeled"
         target = ctx.files.path(f"{split}/ep{ctx.episode:03d}")
         outcome = {
             "run_id": ctx.run_id, "episode": ctx.episode, "scene": ctx.scene, "attempt": ctx.attempt,
-            "task": ctx.task, "model": ctx.model, "success": success,
+            "task": ctx.task, "model": ctx.model, "success": success if outcome_known else None,
             "reason": None if success else ctx.result.get("reason"), "at_s": ctx.result.get("at_s"),
             "message": ctx.result.get("message"), "frames": self.frames,
         }
-        keep = self.frames >= self.params.min_frames and (success or self.params.save_failed)
+        keep = self.frames >= self.params.min_frames and (success or not outcome_known or self.params.save_failed)
         ctx.defer(self._finish, keep, ctx.task, np.array(self.states), np.array(self.actions), outcome, target)
         if keep:
             ctx.result["harvester"] = {"split": split, "path": ctx.files.relative(target), "frames": self.frames}

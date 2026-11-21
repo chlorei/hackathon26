@@ -55,6 +55,9 @@ class Manifest(BaseModel):
     needs_frames: bool = False
     requires: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
+    ## What it reads: "robot" (state, gripper, command, cameras — every robot) and/or "world" (positions,
+    ## contacts — only the simulator). A plugin that needs the world is off on a real robot ("sim only").
+    needs: list[Literal["robot", "world"]] = Field(default_factory=lambda: ["robot"])
 
     @field_validator("hooks")
     @classmethod

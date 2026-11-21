@@ -136,6 +136,7 @@ class Kit:
         self._requests = 0
         self._frozen: dict[str, np.ndarray] = {}
         self.info: dict[str, Any] = {
+            "mode": None,
             "id": self.run_id, "task": "", "model": "", "mock": bool(getattr(client, "mock", False)),
             "started": time.time(), "plugins": self.manager.names, "control": self.manager.control,
             "refused": self.manager.refused, "status": "running", "light": cfg.light, "standard": "1",
@@ -243,21 +244,30 @@ class Kit:
             client.reset_episode()
 
     # -- the robot's side ---------------------------------------------------------------------------------------
-    def step(self, env: Any = None, *, images: dict[str, np.ndarray] | None = None,
-             command: tuple[Any, Any] | None = None) -> None:
-        """Call after every executed action row (20 Hz). Runs on_step; may end the attempt (inside episode())."""
+    def step(self, env: Any = None, *, state: dict[str, Any] | None = None,
+             images: dict[str, np.ndarray] | None = None, command: tuple[Any, Any] | None = None) -> None:
+        """Call after every executed action row (20 Hz). Runs on_step; may end the attempt (inside episode()).
+
+        Simulator: step(env, images=..., command=...) — the plugins get ctx.robot and ctx.world.
+        Real robot: step(state={"left": 7 values, "right": 7 values}, images=..., command=(left, right)) — no world;
+        plugins that need it go quiet ("sim only")."""
         ctx = self.ctx
         if not self._in_episode:
-            self._begin(ctx.task, env, images)
+            self._begin(ctx.task, env, images, state=state)
         if env is not None and env is not ctx.env:
             ctx.env = env
             ctx.world = _world(env)
+            self._announce_world()
         ctx.step += 1
         ctx.t = ctx.step * STEP_S
-        state = getattr(ctx.env, "state", None)
-        if callable(state):
-            ctx.state = state()
+        if state is None:
+            read = getattr(ctx.env, "state", None)
+            state = read() if callable(read) else None
+        if state is not None:
+            ctx.state = {k: np.asarray(v, dtype=float) for k, v in state.items()}
         ctx.command = command
+        ctx.robot.update(ctx.state, command)
+        ctx.robot.last_timing = ctx.timing
         ctx.frames_new = images is not None
         if images is not None:
             ctx.frames = self._faults(dict(images))
@@ -269,6 +279,27 @@ class Kit:
         self._beat()
         if ctx.result.get("success") is True:  # success-check said so: the attempt is done
             raise EndEpisode("success", "success-check")
+
+    def label(self, success: bool, episode: int | None = None) -> None:
+        """The outcome, from your loop (a sensor, an operator): for a robot without a world, success is not measured.
+        During an attempt it sets this attempt's outcome; afterwards, the given (or the last) attempt's."""
+        if self._in_episode and episode in (None, self.ctx.episode):
+            self.ctx.result["success"] = bool(success)
+            self.ctx.result["labeled_by"] = "loop"
+            return
+        ep = next((e for e in reversed(self.ctx.episodes) if episode in (None, e["episode"])), None)
+        if ep is not None:
+            ep["success"], ep["labeled_by"] = bool(success), "loop"
+            if success:
+                ep["reason"] = None
+            self._save()
+
+    def _announce_world(self) -> None:
+        off = self.manager.set_world(self.ctx.world.available)
+        mode = "simulator: robot + world" if self.ctx.world.available else "robot only (no world)"
+        if mode != self.info.get("mode"):
+            self.info["mode"] = mode
+            self.ctx.event("dreamkit", "info", f"mode: {mode}" + (f"; sim only, off here: {', '.join(off)}" if off else ""))
 
     def _faults(self, frames: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         f = self.config.faults
@@ -282,9 +313,10 @@ class Kit:
 
     @contextmanager
     def episode(self, task: str | None = None, env: Any = None, images: dict[str, np.ndarray] | None = None,
-                **info: Any) -> Iterator["Kit"]:
-        """One attempt. A stop by the control plugin, or success, ends the block quietly."""
-        self._begin(task or self.ctx.task, env, images, **info)
+                state: dict[str, Any] | None = None, **info: Any) -> Iterator["Kit"]:
+        """One attempt. A stop by the control plugin, or success, ends the block quietly.
+        Give env= in the simulator, or state= (and images=) on a real robot."""
+        self._begin(task or self.ctx.task, env, images, state=state, **info)
         try:
             yield self
         except EndEpisode as end:
@@ -304,7 +336,8 @@ class Kit:
         self._end()
 
     # -- internals ----------------------------------------------------------------------------------------------
-    def _begin(self, task: str, env: Any, images: dict[str, np.ndarray] | None, **info: Any) -> None:
+    def _begin(self, task: str, env: Any, images: dict[str, np.ndarray] | None, state: dict[str, Any] | None = None,
+               **info: Any) -> None:
         if self._in_episode:
             self._end()
         ctx = self.ctx
@@ -322,8 +355,12 @@ class Kit:
         ctx.result, ctx.actions, ctx.command, ctx.timing, ctx.reply = {}, None, None, None, None
         ctx._retry, ctx._telemetry, ctx._override, ctx._ui = False, {}, None, {}
         self._frozen = {}
-        state = getattr(ctx.env, "state", None)
-        ctx.state = state() if callable(state) else {}
+        if state is None:
+            read = getattr(ctx.env, "state", None)
+            state = read() if callable(read) else None
+        ctx.state = {k: np.asarray(v, dtype=float) for k, v in state.items()} if state else {}
+        ctx.robot.reset(ctx.state)
+        self._announce_world()
         if images is None and hasattr(ctx.env, "images") and self.wants_frames:
             try:
                 images = ctx.env.images()
@@ -373,6 +410,8 @@ class Kit:
         except Exception:
             pass
         r = ctx.result
+        if r.get("success") is not None:
+            r["success"] = bool(r["success"])  # a numpy bool from a plugin would fail every `is False`
         if r.get("success") is None and r.get("reason") not in (None, "timeout"):
             r["success"] = False  # nobody judged success, but a failure was found: that settles it
         ctx.result["recap"] = history.episode_recap(ctx, self.run_dir, self.deferred)  # after the recorder closed
@@ -386,7 +425,7 @@ class Kit:
         result = {
             "episode": ctx.episode, "scene": ctx.scene, "attempt": ctx.attempt, "task": ctx.task,
             "success": r.get("success"),
-            "reason": None if r.get("success") else r.get("reason", "unknown"),
+            "reason": r.get("reason", "timeout") if r.get("success") is False else None,  # unknown outcome: no reason
             "duration_s": round(ctx.t, 2), "requests": self._requests,
             "wall_s": round(time.time() - self._episode_started, 2), "retry_requested": ctx._retry,
             **{k: v for k, v in r.items() if k not in ("success", "reason")},

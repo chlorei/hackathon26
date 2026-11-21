@@ -1,4 +1,5 @@
-"""gripper-check: a dreamkit plugin that watches the grippers themselves (PLUGIN_STANDARD.md)."""
+"""gripper-check: a dreamkit plugin that watches the grippers themselves, from the robot's own signals — commanded
+vs measured opening — so it works on a real robot as well as in the simulator (PLUGIN_STANDARD.md)."""
 
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ class GripperCheck(Plugin):
     name = "gripper-check"
     Params = Params
     manifest = Manifest(group="diagnosis", icon="Hand", capability="observe",
-                        hooks=["on_episode_start", "on_step", "on_episode_end"], step_rate_hz=10)
+                        hooks=["on_episode_start", "on_step", "on_episode_end"], step_rate_hz=10, needs=["robot"])
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.closed_at = {s: None for s in SIDES}
@@ -36,12 +37,12 @@ class GripperCheck(Plugin):
         self.events: list[dict] = []
 
     def on_step(self, ctx: PluginContext) -> None:
-        if ctx.command is None or not ctx.world.available:
+        if ctx.robot.command("left") is None or not ctx.robot.available:
             return
         p = self.params
-        for i, side in enumerate(SIDES):
-            commanded = float(ctx.command[i][6])
-            measured = ctx.world.grip(side)
+        for side in SIDES:
+            commanded = ctx.robot.grip_command(side)
+            measured = ctx.robot.grip(side)
             if commanded >= p.closed_cmd:
                 self.closed_at[side], self.grip[side] = None, None
                 self.flagged[side].clear()

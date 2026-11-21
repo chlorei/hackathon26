@@ -47,7 +47,7 @@ class SuccessCheck(Plugin):
         p = self.params
         obj, tgt = ctx.world.pos(self.obj), ctx.world.pos(self.target)
         radius = p.radius_bowl_m if self.target == "bowl" else p.radius_plate_m
-        return float(np.linalg.norm(obj[:2] - tgt[:2])) < radius and tgt[2] - p.below_m < obj[2] < tgt[2] + p.above_m
+        return bool(float(np.linalg.norm(obj[:2] - tgt[:2])) < radius and tgt[2] - p.below_m < obj[2] < tgt[2] + p.above_m)
 
     def _released(self, ctx: PluginContext) -> bool:
         return ctx.command is None or all(float(row[6]) >= self.params.open_above for row in ctx.command)
@@ -67,7 +67,7 @@ class SuccessCheck(Plugin):
         if self.obj is None:
             return
         if ctx.result.get("success") is not True:
-            ok = self._inside(ctx)
+            ok = bool(self._inside(ctx))
             ctx.result["success"] = ok
             if ok:
                 ctx.emit("success", f"{self.obj} is in the {self.target}")
