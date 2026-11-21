@@ -234,6 +234,13 @@ function EpisodeView({ runId, ep, seconds, pages, onPage }: {
 
   const marks: Mark[] = (ep.timeline ?? []).map((m) => ({ t: m.t, label: m.message, tone: BAD_KINDS.has(m.kind) ? 'warn' : 'info' }))
   if (ep.success) marks.push({ t: ep.duration_s, label: 'task done', tone: 'ok' })
+  // other plugins' ctx.ui.mark (§7); failure-monitor's are its timeline above
+  for (const [plugin, block] of Object.entries(ep.ui ?? {})) {
+    if (plugin === 'failure-monitor') continue
+    for (const m of block.marks ?? []) {
+      marks.push({ t: m.t_s, label: `${plugin}: ${m.label}`, tone: m.level === 'error' ? 'bad' : m.level === 'warn' ? 'warn' : m.level === 'success' ? 'ok' : 'info' })
+    }
+  }
   const seek = (t: number) => {
     setMode('full')
     const v = video.current
