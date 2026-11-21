@@ -47,7 +47,7 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
   return (
     <div className="space-y-4">
     <StatusBar task={stream.task || live.data?.task || 'Run'} mode={stream.mode} running={running} mock={Boolean(live.data?.mock)}
-      model={live.data?.model} current={current} episodes={stream.episodes} events={stream.events} live={stream.live}
+      model={live.data?.model} current={current} episodes={stream.episodes} live={stream.live}
       onFolder={() => api.reveal(runId)} onHistory={() => onOpenRun(runId)} />
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0 space-y-4">
@@ -103,10 +103,10 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
 }
 
 /** The run in one line: task, attempt, clock, successes, the model's mean round trip, money spent when known. */
-function StatusBar({ task, mode, running, mock, model, current, episodes, events, live, onFolder, onHistory }: {
+function StatusBar({ task, mode, running, mock, model, current, episodes, live, onFolder, onHistory }: {
   task: string; mode?: string; running: boolean; mock: boolean; model?: string
   current: { episode: number; scene: number; attempt: number } | null
-  episodes: EpisodeResult[]; events: EventRecord[]; live: LiveStore
+  episodes: EpisodeResult[]; live: LiveStore
   onFolder: () => void; onHistory: () => void
 }) {
   const ok = episodes.filter((e) => e.success).length
@@ -114,9 +114,6 @@ function StatusBar({ task, mode, running, mock, model, current, episodes, events
     .filter((l): l is { mean_ms: number; calls: number } => Boolean(l && l.mean_ms != null && l.calls))
   const calls = lat.reduce((a, l) => a + l.calls, 0)
   const meanMs = calls ? lat.reduce((a, l) => a + l.mean_ms * l.calls, 0) / calls : null
-  // money: what a plugin that counts it reported last (reliability at the end of a run; a budget plugin as it goes)
-  const spent = [...events].reverse().find((e) => typeof e.data?.spent_usd === 'number' || typeof e.data?.cost_cents === 'number')
-  const usd = spent ? (typeof spent.data.spent_usd === 'number' ? Number(spent.data.spent_usd) : Number(spent.data.cost_cents) / 100) : null
   const item = (label: string, value: ReactNode, title?: string) => (
     <div className="min-w-0" title={title}>
       <p className="text-[11px] tracking-wide text-faint uppercase">{label}</p>
@@ -138,7 +135,7 @@ function StatusBar({ task, mode, running, mock, model, current, episodes, events
         {item('Time', running && current ? <LiveClock live={live} /> : '–')}
         {item('Succeeded', `${ok} / ${episodes.length}`)}
         {item('Model round trip', meanMs == null ? (mock ? 'mock' : '–') : meanMs >= 1000 ? `${(meanMs / 1000).toFixed(1)} s avg` : `${Math.round(meanMs)} ms avg`, calls ? `${calls} calls` : undefined)}
-        {usd != null && item('Spent', `$${usd.toFixed(2)}`, `reported by ${spent!.plugin}`)}
+        <Spent live={live} episodes={episodes} mock={mock} running={running} />
         <div className="ml-auto flex gap-1">
           <Button variant="quiet" onClick={onFolder}><FolderOpen className="h-4 w-4" /> Folder</Button>
           <Button variant="quiet" onClick={onHistory}>History</Button>
@@ -270,6 +267,32 @@ function CameraView({ live, cam, running, large }: { live: LiveStore; cam: strin
         {running && has && <span className="h-1.5 w-1.5 rounded-full bg-signal" />}
         {CAMS[cam]}
       </span>
+    </div>
+  )
+}
+
+/** Money as it goes (dreamkit.cost, telemetry spent_usd); with a budget (budget-guard's budget_usd), how far in. */
+function Spent({ live, episodes, mock, running }: { live: LiveStore; episodes: EpisodeResult[]; mock: boolean; running: boolean }) {
+  useLive(live)
+  const v = live.points.length ? live.points[live.points.length - 1].v : {}
+  const done = episodes.reduce((a, e) => a + (e.cost_usd ?? 0), 0)
+  const spent = Math.max(done, running && typeof v.spent_usd === 'number' ? v.spent_usd : 0)
+  const budget = typeof v.budget_usd === 'number' && v.budget_usd > 0 ? v.budget_usd : null
+  const perAttempt = episodes.length ? done / episodes.length : 0
+  const left = budget && perAttempt > 0 ? Math.max(0, Math.floor((budget - spent) / perAttempt)) : null
+  const share = budget ? spent / budget : 0
+  return (
+    <div className="min-w-[120px]" title={mock ? 'a mock run calls no model: nothing is billed' : 'model time, at the price per robot-hour in dreamkit.yaml'}>
+      <p className="text-[11px] tracking-wide text-faint uppercase">Spent</p>
+      <p className="text-[15px] font-semibold tabular-nums">${spent.toFixed(2)}
+        {budget != null && <span className="text-[12px] font-normal text-dim"> of ${budget.toFixed(2)}{left != null ? ` · ~${left} attempts left` : ''}</span>}
+        {mock && budget == null && <span className="text-[12px] font-normal text-dim"> mock</span>}
+      </p>
+      {budget != null && (
+        <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-raised" role="progressbar" aria-valuenow={Math.round(share * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="budget used">
+          <div className={clsx('h-full rounded', share >= 0.95 ? 'bg-bad' : share >= 0.8 ? 'bg-warn' : 'bg-ok')} style={{ width: `${Math.min(100, share * 100)}%` }} />
+        </div>
+      )}
     </div>
   )
 }

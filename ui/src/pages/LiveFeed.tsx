@@ -102,7 +102,7 @@ export default function Feed({ events, episodes, current, running, onWatch, page
                 <span className="text-[13px] font-semibold">{ep == null ? 'Run' : `Attempt ${ep}`}</span>
                 {r && <span className={clsx('text-[12px]', r.success ? 'text-ok' : r.success === false ? 'text-bad' : 'text-dim')}>{r.success ? '✓ success' : r.success === false ? `✗ ${(r.reason ?? 'failed').replace(/_/g, ' ')}` : 'unknown'}</span>}
                 {live && <span className="text-[12px] text-signal">running</span>}
-                {r && <span className="text-[12px] text-faint">{r.duration_s.toFixed(1)} s</span>}
+                {r && <span className="text-[12px] text-faint">{r.duration_s.toFixed(1)} s{typeof r.cost_usd === 'number' ? ` · $${r.cost_usd.toFixed(2)}` : ''}</span>}
                 <span className="ml-auto text-[11px] text-faint">{evs.length}</span>
               </button>
               {pinned.length > 0 && (

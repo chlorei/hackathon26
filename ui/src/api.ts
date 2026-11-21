@@ -38,6 +38,7 @@ export interface EpisodeResult {
   timeline?: { t: number; kind: string; message: string }[]
   duration_s: number
   requests: number
+  cost_usd?: number  // what this attempt's model calls cost (dreamkit.cost)
   videos: string[]
   latency?: { mean_ms: number; p95_ms: number; max_ms: number; n: number }
   recap?: { headline: string; moments: { t: number; text: string; tone: 'bad' | 'good' | 'info'; verdict?: boolean }[]; video: string | null }
