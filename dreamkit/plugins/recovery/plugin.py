@@ -35,6 +35,8 @@ class Params(BaseModel):
     lift_m: float = Field(0.05, gt=0, le=0.3, description="How far to lift a hand that grasped air",
                           json_schema_extra={"unit": "m"})
     lift_s: float = Field(1.0, gt=0, le=10, description="How long that lift takes", json_schema_extra={"unit": "s"})
+    home_joints_rad: list[float] = Field([0.0] * 6, description="The home pose on a real robot (six joints); the "
+                                         "simulator uses Dream Labs' own home path", json_schema_extra={"unit": "rad"})
     retry_attempts: int = Field(1, ge=0, le=10, description="Retries of a failed scene once recoveries are used up",
                                 json_schema_extra={"unit": ""})
     retry_reasons: list[str] = Field(["dropped", "released_off_target", "grasped_air",
@@ -85,12 +87,18 @@ class Recovery(Plugin):
         self.used += 1
         ctx.store["segment"] = ctx.store.get("segment", 0) + 1  # failure-monitor judges the next try on its own
         n = f"({self.used}/{self.params.max_recoveries})"
-        if reason == "grasped_air":
+        if reason == "grasped_air" and ctx.world.available:
             side = verdict.get("side") or min(SIDES, key=lambda s: float(ctx.state[s][6]))
             rows = self._lift(ctx, side)
             self.actions.append("lift")
             ctx.emit("info", f"grasped air: opening the {side} gripper and lifting it {self.params.lift_m * 100:.0f} cm, "
                              f"continuing {n}", reason=reason, action="lift")
+        elif reason == "grasped_air":  # a real robot: no IK here, so open the hand and ask again from where it is
+            side = verdict.get("side") or min(SIDES, key=lambda s: float(ctx.state[s][6]))
+            ctx.reset_policy()
+            rows = self._open(ctx, side)
+            self.actions.append("open")
+            ctx.emit("info", f"grasped air: opening the {side} gripper, asking again {n}", reason=reason, action="open")
         else:
             ctx.reset_policy()
             rows = self._home(ctx)
@@ -110,13 +118,33 @@ class Recovery(Plugin):
         return [(np.asarray(st["left"], dtype=float), np.asarray(st["right"], dtype=float))] * n
 
     def _home(self, ctx: PluginContext) -> list[tuple[np.ndarray, np.ndarray]]:
-        steps = max(1, int(round(self.params.home_s / STEP_S)))
-        try:  # Dream Labs' own home path, their file untouched
+        try:  # in the simulator: Dream Labs' own home path, their file untouched
             yam_env = importlib.import_module(type(ctx.env).__module__)
             path = yam_env.home_path(ctx.env.state(), seconds=self.params.home_s, hz=1 / STEP_S)
             return [(np.asarray(a, dtype=float), np.asarray(b, dtype=float)) for a, b in path]
         except (AttributeError, ImportError):
-            return self._hold(ctx, steps)  # not the simulator (a replay): hold where the arms are
+            pass
+        # any robot: ease from the measured state to the home pose (home_joints_rad, gripper open)
+        state = ctx.robot.state
+        if not state:
+            return []
+        home = np.r_[np.asarray(self.params.home_joints_rad, dtype=float), 1.0]
+        steps = max(1, int(round(self.params.home_s / STEP_S)))
+        rows = []
+        for i in range(1, steps + 1):
+            a = i / steps
+            a = a * a * (3 - 2 * a)
+            rows.append(tuple(state[s] + (home - state[s]) * a for s in SIDES))
+        return rows
+
+    def _open(self, ctx: PluginContext, side: str) -> list[tuple[np.ndarray, np.ndarray]]:
+        st = ctx.robot.state
+        rows = []
+        for i in range(1, 11):
+            this = st[side].copy()
+            this[6] = st[side][6] + (1.0 - st[side][6]) * i / 10
+            rows.append((this, st["right"]) if side == "left" else (st["left"], this))
+        return rows
 
     def _lift(self, ctx: PluginContext, side: str) -> list[tuple[np.ndarray, np.ndarray]]:
         """Joint targets that raise one tool point by lift_m, keeping its orientation (damped least squares)."""
@@ -167,6 +195,8 @@ class Recovery(Plugin):
             ctx.emit("success" if worked else "info", f"{self.used} recover{'y' if self.used == 1 else 'ies'} in this "
                      f"attempt, {'and then it worked' if worked else 'and it still failed'}")
         reason = ctx.result.get("reason")
+        if ctx.result.get("success") is None and not reason:
+            ctx.emit("info", "outcome unknown (no world): not retrying; mark it in History")
         if ctx.result.get("success") is False and reason in self.params.retry_reasons:
             if ctx.attempt - 1 < self.params.retry_attempts:
                 ctx.request_retry()

@@ -37,6 +37,10 @@ class InstallRequest(BaseModel):
     name: str
 
 
+class Label(BaseModel):
+    success: bool
+
+
 def _heartbeat(folder: Path) -> dict[str, Any] | None:
     try:
         return json.loads((folder / "live.json").read_text())
@@ -113,11 +117,13 @@ def create_app(config_path: str | Path) -> FastAPI:
                 "source": entry["source"] if entry else None,
                 "group": entry["group"] if entry else "diagnosis", "icon": entry["icon"] if entry else "Plug",
                 "capability": entry["capability"] if entry else "observe",
+                "needs": entry["needs"] if entry else ["robot"],
                 "manifest": entry["manifest"] if entry else {},
                 "schema": entry["schema"] if entry else {},
                 "defaults": entry["defaults"] if entry else {},
                 "params": {**(entry["defaults"] if entry else {}), **(spec.params if spec else {})},
-                "stats": stats.get(name), "refused": refused.get(name), "stats_run": run_id,
+                "stats": stats.get(name), "refused": refused.get(name) or (stats.get(name) or {}).get("inactive"),
+                "stats_run": run_id,
             }
             if row["capability"] == "control":
                 others = [n for n in all_control if n != name]
@@ -237,6 +243,44 @@ def create_app(config_path: str | Path) -> FastAPI:
             raise HTTPException(409, "this run is still being written; stop the loop first")
         shutil.rmtree(folder)
         return {"ok": True}
+
+    @app.post("/api/runs/{run_id}/episodes/{episode}/label")
+    def label_episode(run_id: str, episode: int, body: Label):
+        """A person's verdict for an attempt the robot could not judge (no world): ✓ or ✗ in History."""
+        from . import history
+
+        folder = run_folder(run_id)
+        info = storage.read_run(folder)
+        ep = next((e for e in (info or {}).get("episodes", []) if e.get("episode") == episode), None)
+        if ep is None:
+            raise HTTPException(404, "no such attempt")
+        ep["success"], ep["labeled_by"] = body.success, "person"
+        if body.success:
+            ep["reason"] = None
+        elif not ep.get("reason"):
+            ep["reason"] = "marked_failed"
+            ep["message"] = "marked failed by a person"
+        # the harvester's dataset of this attempt moves out of unlabeled/
+        src = folder / "harvester" / "unlabeled" / f"ep{episode:03d}"
+        if src.is_dir():
+            split = "success" if body.success else "failed"
+            dst = folder / "harvester" / split / src.name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                shutil.rmtree(dst)
+            shutil.move(str(src), dst)
+            meta = dst / "dreamkit.json"
+            if meta.is_file():
+                data = json.loads(meta.read_text())
+                data.update(success=body.success, labeled_by="person")
+                meta.write_text(json.dumps(data, indent=2))
+            ep["harvester"] = {**(ep.get("harvester") or {}), "split": split, "path": f"harvester/{split}/{src.name}"}
+        from .kit import _summary
+
+        info["summary"] = _summary(info["episodes"])
+        storage.write_json(folder / "run.json", info)
+        history.write_run(folder, info, info["episodes"])
+        return {"ok": True, "episode": ep}
 
     @app.post("/api/runs/{run_id}/reveal")
     def reveal(run_id: str, episode: int | None = None):

@@ -67,4 +67,4 @@ class CameraCheck(Plugin):
             self.reported = True
             ctx.result["camera-check"] = {"problems": problems}
             ctx.ui.badge("camera failure", "error")
-            ctx.verdict("camera_failure", ctx.t, "; ".join(problems))
+            ctx.verdict("camera_failure", ctx.t, "; ".join(problems), source="robot")  # cameras are the robot's

@@ -50,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fault-at", type=float, default=5.0, help="seconds into the attempt")
     parser.add_argument("--fault-episode", type=int, help="only in this attempt (1-based)")
     parser.add_argument("--light", action="store_true", help="fewer camera frames, less CPU")
+    parser.add_argument("--no-world", action="store_true", help="give dreamkit only state, images and commands — what "
+                        "a real robot reports — not the simulator (no positions, no contacts)")
     parser.add_argument("--fake-rtt-ms", type=float, help="mock only: report this model round trip")
     args = parser.parse_args(argv)
 
@@ -100,7 +102,9 @@ def main(argv: list[str] | None = None) -> int:
                 images = dc.capture(env, windows, keep=steps % dc.FRAME_EVERY_STEPS == 0)
                 steps += 1
 
-            with client.episode(args.task, env=env, images=images, seed=seed, positions=positions):
+            # a real robot reports only its state, cameras and the commands it ran: --no-world plays exactly that
+            world = {} if args.no_world else {"env": env}
+            with client.episode(args.task, images=images, state=env.state(), seed=seed, positions=positions, **world):
                 dc.feed(client, env, windows, args.task, args.model, steps, every=0, station=poses)
                 while client.t < args.seconds:
                     reply = client.get_action()  # physics holds while the model thinks
@@ -115,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
                         if kept:
                             dc.feed(client, env, windows, args.task, args.model, steps, station=poses)
                         steps += 1
-                        client.step(env, images=images, command=(l, r))
+                        client.step(state=env.state(), images=images, command=(l, r), **world)
                         if client.t >= args.seconds:
                             break
                         if not args.fast:

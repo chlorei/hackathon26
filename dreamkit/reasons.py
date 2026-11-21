@@ -19,6 +19,7 @@ REASONS: dict[str, str] = {
     "stopped": "stopped by the user",
     "model_error": "model error",
     "error": "error in the loop",
+    "marked_failed": "marked failed by a person",
 }
 ## Codes for a failure of the task itself (what failure-monitor diagnoses and recovery can act on).
 FAILURES = ("dropped", "released_off_target", "grasped_air", "not_reached", "collision",

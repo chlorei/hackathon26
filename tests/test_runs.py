@@ -96,3 +96,13 @@ def test_harvested_episodes_pass_dream_labs_dataset_checks(make_config, tmp_path
     report = harvest.validate(out)
     assert report["ok"], report
     assert report["state_dim"] == 14 and report["action_dim"] == 14 and len(report["video_keys"]) == 3
+
+
+def test_no_world_live_loop_finds_grasped_air_and_dropped(make_config):
+    code, info, _ = _run(make_config(), "--no-world", "--episodes", "3", "--seconds", "16",
+                         "--behaviors", "grasped_air,dropped,success")
+    eps = info["episodes"]
+    assert info["mode"] == "robot only (no world)"
+    assert [e["reason"] for e in eps[:2]] == ["grasped_air", "dropped"]
+    assert all(e["details"]["source"] == "robot" for e in eps[:2])
+    assert eps[2]["success"] is None  # the robot cannot see the bowl: a person labels it

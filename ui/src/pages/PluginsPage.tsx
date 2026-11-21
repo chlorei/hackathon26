@@ -154,6 +154,7 @@ function PluginRow({ plugin, open, onOpen }: { plugin: PluginInfo; open: boolean
           <span className="flex flex-wrap items-center gap-2 text-[14px] font-medium">
             {plugin.name}
             {plugin.capability !== 'observe' && <Tag tone={plugin.capability === 'control' ? 'signal' : 'warn'}>{CAPABILITY[plugin.capability]}</Tag>}
+            {plugin.needs?.includes('world') && <Tag tone="plain" title="Reads positions and contacts, which only the simulator has: off on a real robot">sim only</Tag>}
             {external && <Tag tone="steel">{plugin.source === 'pip' ? 'installed' : plugin.source}</Tag>}
             {!plugin.installed && <Tag tone="bad">not installed</Tag>}
           </span>

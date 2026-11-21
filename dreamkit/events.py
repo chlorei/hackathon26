@@ -140,9 +140,11 @@ class Emitter:
         elif type_ == "episode_end":
             r = payload.get("result", {})
             ok = r.get("success")
-            mark = "[green]✓ success[/green]" if ok else ("[red]✗ fail[/red]" if ok is False else "[dim]? unknown[/dim]")
-            why = "" if ok else f"  reason: [bold]{r.get('reason')}[/bold]" + (
-                f" at {r.get('at'):.1f}s" if isinstance(r.get("at"), (int, float)) else "")
+            mark = "[green]✓ success[/green]" if ok else ("[red]✗ fail[/red]" if ok is False else
+                                                          "[yellow]? outcome unknown[/yellow] (no world: mark it in History)")
+            at = r.get("at_s", r.get("at"))
+            why = "" if ok is not False else f"  reason: [bold]{r.get('reason')}[/bold]" + (
+                f" at {at:.1f}s" if isinstance(at, (int, float)) else "")
             c.print(f"{mark}{why}  ({payload.get('duration_s', 0):.1f}s sim)")
         elif type_ == "run_end":
             c.rule(f"[bold]{payload.get('successes')}/{payload.get('attempts')} succeeded[/bold]"

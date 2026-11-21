@@ -161,3 +161,64 @@ class ReplayWorld(World):
 
     def joint_limits(self, side: str) -> np.ndarray:
         return np.asarray(self._limits.get(side, [[-np.pi, np.pi]] * 6))
+
+
+class Robot:
+    """ctx.robot: what every robot reports, simulator or not (PLUGIN_STANDARD.md §6).
+
+    Built by the core each step from the state the loop passes (env.state() or state=...), the row it executed
+    (command=...), the cameras (images=...) and the model's last timing."""
+
+    def __init__(self) -> None:
+        self.state: dict[str, np.ndarray] = {}
+        self.prev: dict[str, np.ndarray] = {}
+        self.cmd: tuple[np.ndarray, np.ndarray] | None = None
+        self.prev_cmd: tuple[np.ndarray, np.ndarray] | None = None
+        self.last_timing: dict[str, Any] | None = None
+
+    @property
+    def available(self) -> bool:
+        return all(s in self.state for s in SIDES)
+
+    def update(self, state: dict[str, Any] | None, command: tuple[Any, Any] | None) -> None:
+        self.prev, self.prev_cmd = self.state, self.cmd
+        self.state = {s: np.asarray(state[s], dtype=float) for s in SIDES} if state else {}
+        self.cmd = (np.asarray(command[0], dtype=float), np.asarray(command[1], dtype=float)) if command is not None else None
+
+    def reset(self, state: dict[str, Any] | None) -> None:
+        self.state = {s: np.asarray(state[s], dtype=float) for s in SIDES} if state else {}
+        self.prev, self.cmd, self.prev_cmd = {}, None, None
+
+    def joints(self, side: str) -> np.ndarray:
+        """Measured joint angles, radians (6)."""
+        return self.state[side][:6]
+
+    def grip(self, side: str) -> float:
+        """Measured gripper opening, 0 closed … 1 open."""
+        return float(self.state[side][6])
+
+    def command(self, side: str) -> np.ndarray | None:
+        """The row executed this step (6 joints + gripper), or None."""
+        return None if self.cmd is None else self.cmd[SIDES.index(side)]
+
+    def grip_command(self, side: str) -> float | None:
+        c = self.command(side)
+        return None if c is None else float(c[6])
+
+    def tracking_error(self, side: str) -> float:
+        """Largest |commanded − measured| joint angle this step, radians (0 when nothing was commanded)."""
+        c = self.command(side)
+        return 0.0 if c is None else float(np.max(np.abs(c[:6] - self.state[side][:6])))
+
+    def command_speed(self, side: str) -> float:
+        """How far the command moved since the last step, radians (largest joint)."""
+        if self.cmd is None or self.prev_cmd is None:
+            return 0.0
+        i = SIDES.index(side)
+        return float(np.max(np.abs(self.cmd[i][:6] - self.prev_cmd[i][:6])))
+
+    def speed(self, side: str) -> float:
+        """Largest measured joint speed, rad/s."""
+        if side not in self.prev:
+            return 0.0
+        return float(np.max(np.abs(self.state[side][:6] - self.prev[side][:6]))) / 0.05

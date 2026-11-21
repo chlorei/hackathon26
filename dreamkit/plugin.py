@@ -15,7 +15,7 @@ from pydantic import BaseModel, ValidationError
 from . import reasons as reasons_mod
 from .standard import HOOKS, UNIT_SUFFIX, Manifest, NoParams, PluginStandardError, Problem, check_class
 from .task import parse
-from .world import World
+from .world import Robot, World
 
 if TYPE_CHECKING:  # pragma: no cover
     from .events import Emitter
@@ -109,6 +109,7 @@ class Context:
     episodes: list[dict[str, Any]] = field(default_factory=list)
     emitter: Emitter | None = None
     world: World = field(default_factory=lambda: World(None))
+    robot: Robot = field(default_factory=Robot)
     _retry: bool = False
     _telemetry: dict[str, float] = field(default_factory=dict)
     _override: tuple[Any, Any, str] | None = None
@@ -309,6 +310,7 @@ class PluginContext:
     store = property(lambda self: self._core.store)  # shared between plugins, by agreement
     episodes = property(lambda self: list(self._core.episodes))
     world = property(lambda self: self._core.world)
+    robot = property(lambda self: self._core.robot)
     target = property(lambda self: self._core.target)
     frames_new = property(lambda self: self._core.frames_new and self._plugin.manifest.needs_frames)
 
@@ -373,7 +375,7 @@ class PluginContext:
 
     def verdict(self, reason: str, at_s: float, message: str, **details: Any) -> None:
         """Report a failure as it happens (any capability). The control plugin may act on it; failure-monitor writes
-        the attempt's final reason."""
+        the attempt's final reason. Say what it rests on: source="robot" (state, gripper, command) or "world"."""
         if not reasons_mod.is_reason(reason):
             raise _refuse("§7", f"{self._name}: ctx.verdict", f"{reason!r} is not a reason code",
                           "Use a code from dreamkit.reasons.REASONS.")

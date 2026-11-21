@@ -1,4 +1,9 @@
-"""failure-monitor: why an attempt failed and when, from what ctx.world measures every step (PLUGIN_STANDARD.md).
+"""failure-monitor: why an attempt failed and when (PLUGIN_STANDARD.md).
+
+Two sources. On any robot (ctx.robot: state, gripper, command): grasped_air (the fingers met), dropped (holding, then
+the fingers closed in without being told to open), collision (the arm cannot follow a steady command), stalled,
+slow_model, camera_failure. In the simulator (ctx.world: positions, contacts) it is more precise and adds
+released_off_target, not_reached and fell_off_table. Every verdict says which: source "robot" or "world".
 
 Live: milestones in the feed and on the timeline, a verdict as soon as a failure is certain (recovery acts on it).
 At the end: the first cause in time, written to ctx.result (reason, at_s, details, message, candidates, timeline)."""
@@ -82,6 +87,18 @@ class Params(BaseModel):
     not_reached_s: float = Field(15.0, gt=0, le=600, description="No reach and no grasp this long is not reached",
                                  json_schema_extra={"unit": "s"})
     live_verdicts: bool = Field(True, description="Call failures mid-attempt (recovery acts on them)")
+    empty_below: float = Field(0.05, ge=0, le=1, description="Robot mode: a closed gripper measuring less than this "
+                               "holds nothing", json_schema_extra={"unit": ""})
+    hold_gap: float = Field(0.15, gt=0, le=1, description="Robot mode: fingers stopped this far above their command "
+                            "are holding something", json_schema_extra={"unit": ""})
+    grip_settle_s: float = Field(0.6, gt=0, le=5, description="Robot mode: how long the fingers get to close",
+                                 json_schema_extra={"unit": "s"})
+    track_err_rad: float = Field(0.12, gt=0, le=3, description="Robot mode: an arm this far from a steady command is "
+                                 "blocked (a collision)", json_schema_extra={"unit": "rad"})
+    steady_cmd_rad: float = Field(0.02, gt=0, le=1, description="Robot mode: a command moving less than this per "
+                                  "step is steady", json_schema_extra={"unit": "rad"})
+    blocked_s: float = Field(0.3, gt=0, le=5, description="Robot mode: blocked this long is a collision",
+                             json_schema_extra={"unit": "s"})
     trace_every: int = Field(2, ge=1, le=20, description="Keep every Nth step in the saved trace",
                              json_schema_extra={"unit": ""})
 
@@ -98,9 +115,26 @@ class FailureMonitor(Plugin):
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.rtts: list[tuple[float, float]] = []  # latency works on any robot
         self.mock_calls = False
-        self.active = ctx.world.available
+        self.world = ctx.world.available
+        self.active = self.world or ctx.robot.available
+        self.source = "world" if self.world else "robot"
+        self.verdicts: list[dict[str, Any]] = []
+        self.segment, self.seg_start_t, self.seg_grasp_from, self.verdict_given = 0, 0.0, 0, False
+        self.still_since: float | None = 0.0
+        self.stall: dict[str, Any] | None = None
+        self.stall_warned = False
+        self.milestones: list[dict[str, Any]] = []
+        self.rows: list[dict[str, Any]] = []
+        self.last_q = {s: np.asarray(ctx.state[s][:6], dtype=float) for s in SIDES} if ctx.state else None
         if not self.active:
-            ctx.emit("info", "no simulator world in episode() or step(): physics diagnosis is off")
+            ctx.emit("info", "no robot state and no simulator world: failure diagnosis is off")
+            return
+        if not self.world:
+            self.grip = {s: {"closed_since": None, "judged": False, "holding": False, "gap_closed": None,
+                             "blocked_since": None} for s in SIDES}
+            self.let_go = False  # the hand opened on purpose while holding something
+            self.obj = self.target = None
+            ctx.emit("info", "robot mode: judging from the robot's state, gripper and commands (no world)")
             return
         self.obj, self.target = ctx.target["object"], ctx.target["target"]
         self.rows: list[dict[str, Any]] = []
@@ -108,15 +142,8 @@ class FailureMonitor(Plugin):
         self.mock_calls = False
         self.contacts: dict[tuple[str, str], dict[str, Any]] = {}
         self.collisions: list[dict[str, Any]] = []
-        self.milestones: list[dict[str, Any]] = []
-        self.verdicts: list[dict[str, Any]] = []
         self.flags: dict[str, Any] = {"reached": False, "lifted": False, "grasping": {s: False for s in SIDES}}
-        self.last_q = {s: np.asarray(ctx.state[s][:6], dtype=float) for s in SIDES} if ctx.state else None
-        self.still_since: float | None = 0.0
-        self.stall: dict[str, Any] | None = None
-        self.stall_warned = False
         self.grasps: list[dict[str, Any]] = []
-        self.segment, self.seg_start_t, self.seg_grasp_from, self.verdict_given = 0, 0.0, 0, False
         if self.obj and ctx.world.has(self.obj):
             self.z0 = float(ctx.world.pos(self.obj)[2])
         else:
@@ -173,23 +200,15 @@ class FailureMonitor(Plugin):
             return
         if ctx.store.get("segment", 0) != self.segment:
             self._new_segment(ctx)
+        if not self.world:
+            self._stall(ctx)
+            self._robot_step(ctx)
+            return
         self._record(ctx)
         row = self.rows[-1]
         p = self.params
         self._contacts(ctx)
-        if ctx.state and self.last_q is not None:
-            q = {s: np.asarray(ctx.state[s][:6], dtype=float) for s in SIDES}
-            speed = max(float(np.max(np.abs(q[s] - self.last_q[s]))) for s in SIDES) / 0.05
-            self.last_q = q
-            if speed < p.stall_speed_rad_s:
-                if self.still_since is None:
-                    self.still_since = ctx.t
-                elif ctx.t - self.still_since >= p.stall_s and not self.stall_warned:
-                    self.stall_warned = True
-                    self.stall = {"at": round(self.still_since, 2)}
-                    self._milestone(ctx, "stalled", "warn", f"arms have not moved for {p.stall_s:.0f} s")
-            else:
-                self.still_since, self.stall_warned = None, False
+        self._stall(ctx)
         if not self.obj:
             return
         z = float(row["obj"][2])
@@ -238,6 +257,92 @@ class FailureMonitor(Plugin):
         if p.live_verdicts and not self.verdict_given:
             self._live_verdict(ctx, row)
 
+    def _stall(self, ctx: PluginContext) -> None:
+        p = self.params
+        if not ctx.state or self.last_q is None:
+            return
+        q = {s: np.asarray(ctx.state[s][:6], dtype=float) for s in SIDES}
+        speed = max(float(np.max(np.abs(q[s] - self.last_q[s]))) for s in SIDES) / 0.05
+        self.last_q = q
+        if speed < p.stall_speed_rad_s:
+            if self.still_since is None:
+                self.still_since = ctx.t
+            elif ctx.t - self.still_since >= p.stall_s and not self.stall_warned:
+                self.stall_warned = True
+                self.stall = {"at": round(self.still_since, 2)}
+                self._milestone(ctx, "stalled", "warn", f"arms have not moved for {p.stall_s:.0f} s")
+                if not self.world and self.let_go:
+                    self.stall = None  # it let go of the object and rests: finished, not stuck (robot mode)
+                elif not self.world and p.live_verdicts and not self.verdict_given:
+                    self._robot_verdict(ctx, "stalled", self.stall["at"], "arms stalled")
+        else:
+            self.still_since, self.stall_warned = None, False
+
+    # -- robot mode: the gripper's and the arm's own signals --------------------------------------------------
+    def _robot_verdict(self, ctx: PluginContext, reason: str, at: float, message: str, **details: Any) -> None:
+        self.verdict_given = True
+        v = {"reason": reason, "at": round(at, 2), "segment": self.segment, "source": "robot", **details}
+        self.verdicts.append(v)
+        ctx.verdict(reason, at, message, source="robot", **details)
+
+    def _robot_step(self, ctx: PluginContext) -> None:
+        p, r = self.params, ctx.robot
+        row: dict[str, Any] = {"t": round(ctx.t, 3)}
+        for s in SIDES:
+            g = self.grip[s]
+            cmd, meas = r.grip_command(s), r.grip(s)
+            err, steady = r.tracking_error(s), r.command_speed(s) < p.steady_cmd_rad
+            row[f"cmd_{s}"] = cmd if cmd is not None else meas
+            row[f"grip_{s}"] = meas
+            row[f"err_{s}"] = err
+            # collision: the arm cannot follow a command that is not moving
+            if cmd is not None and err > p.track_err_rad and steady:
+                g["blocked_since"] = ctx.t if g["blocked_since"] is None else g["blocked_since"]
+                if ctx.t - g["blocked_since"] >= p.blocked_s and not g.get("blocked_told"):
+                    g["blocked_told"] = True
+                    self._milestone(ctx, "collision", "warn", f"{s} arm blocked: {err:.2f} rad from a steady command",
+                                    side=s)
+                    if p.live_verdicts and not self.verdict_given:
+                        self._robot_verdict(ctx, "collision", g["blocked_since"], f"{s} arm blocked (collision)", side=s)
+            else:
+                g["blocked_since"] = None
+            if cmd is None:
+                continue
+            closed = cmd < p.close_cmd
+            if closed and g["closed_since"] is None:
+                g.update(closed_since=ctx.t, judged=False)
+            if closed and not g["judged"] and ctx.t - g["closed_since"] >= p.grip_settle_s:
+                g["judged"] = True
+                if meas <= p.empty_below:
+                    self._milestone(ctx, "grasp", "warn", f"{s} gripper closed on nothing", side=s)
+                    if p.live_verdicts and not self.verdict_given:
+                        self._robot_verdict(ctx, "grasped_air", g["closed_since"], f"{s} gripper closed on nothing",
+                                            side=s)
+                elif meas - cmd >= p.hold_gap:
+                    g["holding"], g["hold_width"] = True, meas
+                    self._milestone(ctx, "grasp", "info", f"{s} gripper holding something ({meas:.2f} wide)", side=s)
+            if not closed:
+                g["closed_since"] = None
+            if g["holding"]:
+                if cmd >= p.release_cmd:  # the policy opened the hand: a release, not a drop
+                    g["holding"], g["gap_closed"] = False, None
+                    self.let_go = True
+                    self._milestone(ctx, "release", "info", f"{s} gripper opened ({cmd:.2f})", emit=False)
+                elif meas - cmd < p.hold_gap / 2:  # nothing stops the fingers any more
+                    g["gap_closed"] = ctx.t if g["gap_closed"] is None else g["gap_closed"]
+                    if ctx.t - g["gap_closed"] >= p.release_window_s:  # and the hand was never told to open
+                        g["holding"] = False
+                        self._milestone(ctx, "separated", "warn",
+                                        f"{s} gripper lost its object (gripper at {cmd:.2f}, not opened)", side=s)
+                        if p.live_verdicts and not self.verdict_given:
+                            self._robot_verdict(ctx, "dropped", g["gap_closed"], f"dropped the object ({s} gripper "
+                                                "never opened)", side=s)
+                else:
+                    g["gap_closed"] = None
+        ctx.ui.series("grip", ctx.t, min(row["grip_left"], row["grip_right"]))
+        ctx.ui.series("track", ctx.t, max(row["err_left"], row["err_right"]), unit="rad")
+        self.rows.append(row)
+
     def _contacts(self, ctx: PluginContext) -> None:
         p = self.params
         now: dict[tuple[str, str], float] = {}
@@ -275,6 +380,12 @@ class FailureMonitor(Plugin):
     def _new_segment(self, ctx: PluginContext) -> None:
         """The control plugin restarted the task mid-attempt: judge what happens next on its own."""
         self.segment = ctx.store.get("segment", 0)
+        if not self.world:
+            self.seg_start_t, self.verdict_given, self.let_go = ctx.t, False, False
+            self.grip = {s: {"closed_since": None, "judged": False, "holding": False, "gap_closed": None,
+                             "blocked_since": None} for s in SIDES}
+            self.still_since, self.stall, self.stall_warned = None, None, False
+            return
         self.seg_start_t, self.seg_grasp_from, self.verdict_given = ctx.t, len(self.grasps), False
         fell = self.flags.get("fell")
         self.flags = {"reached": False, "lifted": False, "grasping": {s: False for s in SIDES}}
@@ -333,12 +444,14 @@ class FailureMonitor(Plugin):
         message = LABEL[verdict["reason"]].format(obj=self.obj, target=self.target or "target", what="contact")
         self.verdicts.append({**verdict, "segment": self.segment})
         details = {"side": verdict["side"]} if "side" in verdict else {}
-        ctx.verdict(verdict["reason"], verdict["at"], message, **details)
+        ctx.verdict(verdict["reason"], verdict["at"], message, source="world", **details)
 
     # -- the attempt's verdict ------------------------------------------------------------------------------------
-    def diagnose(self, ctx: PluginContext) -> dict[str, Any]:
+    def diagnose(self, ctx: PluginContext) -> dict[str, Any] | None:
         p = self.params
         cands: list[dict[str, Any]] = []
+        if not self.world:
+            return self._diagnose_robot(ctx)
         rows = self.rows
         end_t = rows[-1]["t"] if rows else ctx.t
         if self.obj and rows:
@@ -374,7 +487,7 @@ class FailureMonitor(Plugin):
         for v in ctx.store.get("verdicts", []):  # what other plugins (camera-check) or earlier segments called
             if not any(c["reason"] == v["reason"] and abs(c["at"] - v["at_s"]) < 0.5 for c in cands):
                 cands.append({"reason": v["reason"], "at": v["at_s"],
-                              "details": {"by": v.get("by"), "message": v.get("message")}})
+                              "details": {"by": v.get("by"), "message": v.get("message"), "source": v.get("source", "robot")}})
         if not cands:
             cands.append({"reason": "timeout", "at": round(end_t, 2)})
         earliest = min(c["at"] for c in cands)
@@ -383,6 +496,32 @@ class FailureMonitor(Plugin):
         best.setdefault("details", {})
         best["message"] = LABEL.get(best["reason"], reasons.label(best["reason"])).format(
             obj=self.obj or "object", target=self.target or "target", what=best.get("what", "contact"))
+        best["candidates"] = [{"reason": c["reason"], "at_s": c["at"]} for c in sorted(cands, key=lambda c: c["at"])]
+        return best
+
+    def _diagnose_robot(self, ctx: PluginContext) -> dict[str, Any] | None:
+        """Robot mode: only what the robot's own signals show. Nothing found = the outcome is unknown, not success."""
+        p = self.params
+        cands = [{"reason": v["reason"], "at": v["at"], "details": {k: v[k] for k in ("side",) if k in v}}
+                 for v in self.verdicts]
+        if self.stall and not any(c["reason"] == "stalled" for c in cands):
+            cands.append({"reason": "stalled", "at": self.stall["at"], "details": {}})
+        # slow_model is warned live, but without a world it does not turn an unknown outcome into a failure
+        for v in ctx.store.get("verdicts", []):
+            if v.get("by") != "failure-monitor":
+                cands.append({"reason": v["reason"], "at": v["at_s"], "details": {
+                    "by": v.get("by"), "message": v.get("message"), "source": v.get("source", "robot")}})
+        if not cands:
+            return None
+        earliest = min(c["at"] for c in cands)
+        best = min([c for c in cands if c["at"] - earliest <= p.tie_s],
+                   key=lambda c: PRIORITY.index(c["reason"]) if c["reason"] in PRIORITY else 99)
+        best["details"].setdefault("source", "robot")
+        best["message"] = {"grasped_air": "grasped air (the fingers closed on nothing)",
+                           "dropped": "dropped the object (the gripper never opened)",
+                           "collision": "collision (the arm could not follow its command)"}.get(
+            best["reason"], LABEL.get(best["reason"], reasons.label(best["reason"])).format(
+                obj="object", target="target", what="contact"))
         best["candidates"] = [{"reason": c["reason"], "at_s": c["at"]} for c in sorted(cands, key=lambda c: c["at"])]
         return best
 
@@ -395,25 +534,34 @@ class FailureMonitor(Plugin):
         if ctx.result.get("success") is True:
             return
         d = self.diagnose(ctx)
+        if d is None:  # robot mode, nothing wrong seen: the outcome stays unknown (labelled in History)
+            return
+        d["details"].setdefault("source", self.source)
         if ctx.result.get("reason") in ("stopped", "model_error", "error", "camera_failure") and d["reason"] == "timeout":
             return  # cut short by something else; that stays the reason
         if ctx.result.get("reason") in ("model_error", "error"):
             return
         ctx.result.update(reason=d["reason"], at_s=d["at"], details=d["details"], message=d["message"],
                           candidates=d["candidates"])
-        ctx.emit("error", f"{d['message']} at {d['at']:.1f} s", reason=d["reason"], at_s=float(d["at"]))
+        ctx.emit("error", f"{d['message']} at {d['at']:.1f} s", reason=d["reason"], at_s=float(d["at"]),
+                 source=d["details"]["source"])
 
     def _save_trace(self, ctx: PluginContext) -> None:
         every = self.params.trace_every
         out = []
         for r in self.rows[::every]:
             item = {"t": r["t"], "cmd_left": round(r["cmd_left"], 3), "cmd_right": round(r["cmd_right"], 3)}
+            if "grip_left" in r:
+                item.update(grip=round(min(r["grip_left"], r["grip_right"]), 3),
+                            err=round(max(r["err_left"], r["err_right"]), 3))
             if "obj" in r:
                 item.update(z=round(float(r["obj"][2]) - self.z0, 4), d=round(r["d"], 4))
                 if "target" in r:
                     item["dt"] = round(float(np.linalg.norm(r["obj"][:2] - r["target"][:2])), 4)
             out.append(item)
         path = ctx.files.path(ctx.files.episode_name("trace.json"))
-        payload = {"object": self.obj, "target": self.target, "rows": out, "milestones": self.milestones}
+        payload = {"object": self.obj, "target": self.target, "rows": out, "milestones": self.milestones,
+                   "source": self.source}
         ctx.defer(path.write_text, json.dumps(payload))
-        ctx.result["failure-monitor"] = {"trace": ctx.files.relative(path), "latency": self._latency()}
+        ctx.result["failure-monitor"] = {"trace": ctx.files.relative(path), "latency": self._latency(),
+                                         "source": self.source}

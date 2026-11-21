@@ -1,4 +1,4 @@
-# dreamkit plugin standard (v1.1)
+# dreamkit plugin standard (v1.3)
 
 Every plugin — built-in or from GitHub — follows this document. `dreamkit check <plugin>` enforces the rules
 marked **[check]**. If code and this document disagree, this document wins.
@@ -45,6 +45,7 @@ capability = "observe"                 # observe | modify_actions | control
 hooks = ["on_step", "on_episode_end"]  # only the hooks the class implements
 step_rate_hz = 5                       # 1–20; how often on_step runs
 needs_frames = false                   # true only if it reads camera images
+needs = ["robot"]                      # "robot" (any robot) or ["robot", "world"] (simulator only)
 requires = ["failure-monitor"]         # plugins that must run before this one
 conflicts = []                         # plugins that must not be on at the same time
 ```
@@ -145,21 +146,45 @@ Failure behaviour
 
 ---
 
-## 6. Reading the world
+## 6. Reading the robot and the world
 
-Use the helpers, not raw MuJoCo indexing, so every plugin measures the same thing the same way:
+Two levels. Use the helpers, not raw MuJoCo indexing, so every plugin measures the same thing the same way.
+
+**`ctx.robot` — always there** (a real robot reports it; so does the simulator):
+
+```python
+ctx.robot.joints("right")           # measured joint angles, radians (6)
+ctx.robot.grip("right")             # measured opening, 0 closed … 1 open
+ctx.robot.command("right")          # the row executed this step (6 joints + gripper)
+ctx.robot.grip_command("right")     # its gripper value
+ctx.robot.tracking_error("right")   # max |commanded − measured| joint, radians
+ctx.robot.command_speed("right")    # how far the command moved since the last step
+ctx.robot.speed("right")            # measured joint speed, rad/s
+ctx.robot.last_timing               # the model's last round trip
+ctx.frames                          # cameras (needs_frames = true)
+```
+
+**`ctx.world` — only in the simulator** (`client.step(env, ...)`; `ctx.world.available` is False otherwise):
 
 ```python
 ctx.world.pos("apple")              # np.array([x, y, z]) in metres, world frame (Z up)
 ctx.world.tcp("right")              # tool point of a hand
-ctx.world.grip("right")             # 0 closed … 1 open
 ctx.world.contacts()                # [(body_a, body_b), …]; contacts(with_force=True) adds force_n
 ctx.world.table_z                   # table height
 ctx.target                          # parsed task: {"object": "banana", "target": "plate"}
 ctx.t                               # simulated seconds since the attempt started
 ```
 
-If a plugin needs something the helpers lack, add it to `ctx.world` in the core, not inside the plugin.
+The loop says which it has: `client.step(env, images=..., command=...)` in the simulator, or
+`client.step(state={"left": …, "right": …}, images=..., command=(left, right))` on a robot. A plugin declares
+`needs = ["robot"]` or `["robot", "world"]`; the manager switches a world plugin off on a robot and the panel marks it
+**sim only**. Prefer `["robot"]`: a plugin that works from the robot's own signals works everywhere.
+
+Without a world, success cannot be measured: `success-check` leaves the outcome unknown, the panel asks a person for
+✓ / ✗ (or the loop calls `client.label(True)`), and `harvester` keeps the attempt in `unlabeled/` until then. Verdicts
+say what they rest on: `ctx.verdict(..., source="robot")` or `source="world"`.
+
+If a plugin needs something the helpers lack, add it to `ctx.robot` / `ctx.world` in the core, not inside the plugin.
 
 ---
 
@@ -325,6 +350,12 @@ Error messages always name the rule, the file and line when known, and the fix:
 - `contacts(with_force=True)` returns `(a, b, force_n)`.
 - Bundled fixtures: `collision_table` (the mock hits the table, not the bowl) instead of `collision_bowl`; also
   `released_near_target`.
+
+**v1.3** (real robots)
+- `ctx.robot` (always) and `ctx.world` (simulator only); `client.step(state=…)` without an env; manifest `needs`.
+- failure-monitor judges grasped_air, dropped, collision, stalled, slow_model, camera_failure from robot signals
+  when there is no world; verdicts carry `source`. Unknown outcomes are labelled by a person (or `client.label()`).
+- reason `marked_failed` for a ✗ given by a person.
 
 **v1.2** (cleanup)
 - `missed_target` is folded into `released_off_target` (details say whether it was a near miss).
