@@ -529,7 +529,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         cfg, base = load_cfg()
         world = apps_mod.world_available(cfg, base)
         out = []
-        for name, a in host.apps.items():
+        for a in host.apps.values():
             d = a.describe()
             d["inactive"] = ("needs Dream Labs' simulator (set sim_path in dreamkit.yaml, or pip install dreamlabs)"
                              if "world" in a.manifest.needs and not world else None)

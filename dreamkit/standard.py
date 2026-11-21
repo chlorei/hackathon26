@@ -179,7 +179,7 @@ def check_class(cls: type) -> list[Problem]:
         extra = [h for h in manifest.hooks if h not in implemented]
         if missing:
             out.append(Problem("§2", _where(cls, missing[0]), f"hooks {missing} are implemented but not declared",
-                               f"Add them to manifest hooks (undeclared hooks are never called)."))
+                               "Add them to manifest hooks (undeclared hooks are never called)."))
         if extra:
             out.append(Problem("§2", _where(cls, "manifest"), f"hooks {extra} are declared but not implemented",
                                "Remove them from manifest hooks."))
@@ -216,7 +216,7 @@ def check_class(cls: type) -> list[Problem]:
                                        f'Rename to {field_name}{suffix} and keep unit="{unit}".'))
             elif numeric and any(field_name.endswith(s) for s in UNIT_SUFFIX.values()):
                 out.append(Problem("§4", where, f"Params.{field_name} ends with a unit suffix but has no unit",
-                                   f'Add the matching unit to json_schema_extra.'))
+                                   'Add the matching unit to json_schema_extra.'))
     return out
 
 

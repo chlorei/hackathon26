@@ -18,7 +18,6 @@ import time
 from collections import deque
 from pathlib import Path
 
-import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))  # run from a checkout without installing
