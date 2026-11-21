@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ArrowLeft, Clapperboard, FileText, FolderOpen } from 'lucide-react'
+import { ArrowLeft, Clapperboard, FileText, FolderOpen, Trash2 } from 'lucide-react'
 import { api, REASON_LABEL, type EpisodeResult, type RunInfo } from '../api'
 import { AttemptStrip, Button, Outcome, Panel, PanelTitle, Tag, when, type Mark } from '../ui'
 
@@ -93,7 +93,8 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
           <p className="text-[12px] text-dim">{when(r.started)}, {r.mock ? 'mock policy' : r.model}, {r.summary.successes} of {r.summary.attempts} attempts worked</p>
         </div>
         <div className="ml-auto flex gap-2">
-          <Button onClick={() => api.reveal(id)} title={r.path}><FolderOpen className="h-4 w-4" /> Open folder</Button>
+          <Button onClick={() => api.reveal(id)}><FolderOpen className="h-4 w-4" /> Open folder</Button>
+          <DeleteRun id={id} live={Boolean(r.live)} onDone={onBack} />
           {r.report && <a href={`/media/${id}/report.html`} target="_blank" rel="noreferrer"><Button><FileText className="h-4 w-4" /> Report</Button></a>}
         </div>
       </div>
@@ -120,11 +121,27 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
               </li>
             ))}
           </ul>
-          {r.path && <p className="break-all border-t border-line px-4 py-2 font-mono text-[11px] text-faint">{r.path}</p>}
         </Panel>
         {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} /> : <p className="text-faint">This run has no finished attempts.</p>}
       </div>
     </div>
+  )
+}
+
+function DeleteRun({ id, live, onDone }: { id: string; live: boolean; onDone: () => void }) {
+  const queryClient = useQueryClient()
+  const [sure, setSure] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => api.deleteRun(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['runs'] }); onDone() },
+  })
+  if (live) return null
+  return sure ? (
+    <Button variant="stop" onClick={() => remove.mutate()} disabled={remove.isPending} onBlur={() => setSure(false)}>
+      <Trash2 className="h-4 w-4" /> Delete videos and results
+    </Button>
+  ) : (
+    <Button variant="quiet" onClick={() => setSure(true)}><Trash2 className="h-4 w-4" /> Delete run</Button>
   )
 }
 
@@ -189,11 +206,17 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
         {ep.recap?.headline && <p className="border-t border-line px-4 py-3 text-[13px] text-dim">{ep.recap.headline}</p>}
       </Panel>
 
-      {(ep.timeline?.length ?? 0) > 0 && (
+      {((ep.timeline?.length ?? 0) > 0 || failed) && (
         <Panel>
           <PanelTitle>Moments</PanelTitle>
-          <ol className="border-t border-line">
-            {(ep.timeline ?? []).map((m, i) => (
+          {failed && (
+            <button onClick={() => seek(start)} className="flex w-full gap-3 border-y border-line bg-bad/8 px-4 py-2 text-left text-[13px] hover:bg-bad/15">
+              <span className="w-12 shrink-0 text-right text-bad">{ep.at!.toFixed(1)} s</span>
+              <span className="font-medium text-bad">Verdict: {ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']}</span>
+            </button>
+          )}
+          <ol className={clsx(!failed && 'border-t border-line')}>
+            {[...(ep.timeline ?? [])].sort((a, b) => a.t - b.t).map((m, i) => (
               <li key={i}>
                 <button onClick={() => seek(Math.max(0, m.t - 0.5))} className="flex w-full gap-3 px-4 py-1.5 text-left text-[13px] hover:bg-raised/50">
                   <span className="w-12 shrink-0 text-right text-faint">{m.t.toFixed(1)} s</span>
@@ -201,12 +224,6 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
                 </button>
               </li>
             ))}
-            {failed && (
-              <li><button onClick={() => seek(start)} className="flex w-full gap-3 bg-bad/8 px-4 py-1.5 text-left text-[13px] hover:bg-bad/15">
-                <span className="w-12 shrink-0 text-right text-bad">{ep.at!.toFixed(1)} s</span>
-                <span className="font-medium text-bad">Verdict: {ep.message ?? ep.reason}</span>
-              </button></li>
-            )}
           </ol>
         </Panel>
       )}

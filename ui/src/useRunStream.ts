@@ -30,6 +30,7 @@ export interface RunStream {
   current: { episode: number; scene: number; attempt: number } | null
   status: 'idle' | 'connecting' | 'running' | 'finished' | 'stopped' | 'error' | 'aborted'
   plugins: string[]
+  task: string
   live: LiveStore
 }
 
@@ -37,15 +38,15 @@ const MAX_EVENTS = 300
 
 export function useRunStream(runId: string | null): RunStream {
   const live = useMemo(() => new LiveStore(), [runId]) // eslint-disable-line react-hooks/exhaustive-deps
-  const [state, setState] = useState<Omit<RunStream, 'live'>>({ events: [], episodes: [], current: null, status: 'idle', plugins: [] })
+  const [state, setState] = useState<Omit<RunStream, 'live'>>({ events: [], episodes: [], current: null, status: 'idle', plugins: [], task: '' })
 
   useEffect(() => {
     if (!runId) {
-      setState({ events: [], episodes: [], current: null, status: 'idle', plugins: [] })
+      setState({ events: [], episodes: [], current: null, status: 'idle', plugins: [], task: '' })
       return
     }
-    setState({ events: [], episodes: [], current: null, status: 'connecting', plugins: [] })
-    const socket = new WebSocket(wsUrl(`/ws/runs/${runId}`))
+    setState({ events: [], episodes: [], current: null, status: 'connecting', plugins: [], task: '' })
+    const socket = new WebSocket(wsUrl(`/ws/live/${runId}`))
     let scheduled = 0
     const schedule = () => {
       if (!scheduled) scheduled = requestAnimationFrame(() => { scheduled = 0; live.notify() })
@@ -54,7 +55,7 @@ export function useRunStream(runId: string | null): RunStream {
       const record = JSON.parse(message.data) as StreamRecord
       if (record.type === 'frame') {
         live.frames[record.cam] = `data:image/jpeg;base64,${record.jpeg}`
-        live.t = Math.max(live.t, record.t)
+        if (typeof record.t === 'number') live.t = Math.max(live.t, record.t)
         schedule()
         return
       }
@@ -65,19 +66,26 @@ export function useRunStream(runId: string | null): RunStream {
         schedule()
         return
       }
+      if (record.type === 'heartbeat') {
+        for (const point of record.points ?? []) live.points.push(point)
+        if (live.points.length > 1200) live.points.splice(0, live.points.length - 1200)
+        if (record.in_episode && typeof record.t === 'number') live.t = Math.max(live.t, record.t)
+        schedule()
+        return
+      }
       if (record.type === 'episode_start') live.resetEpisode()
       setState((s) => {
         switch (record.type) {
           case 'run_start':
             return { ...s, status: 'running', plugins: record.plugins }
           case 'episode_start':
-            return { ...s, status: 'running', current: { episode: record.episode, scene: record.scene, attempt: record.attempt } }
+            return { ...s, status: 'running', task: record.task, current: { episode: record.episode, scene: record.scene, attempt: record.attempt } }
           case 'event': {
             const events = s.events.length >= MAX_EVENTS ? [...s.events.slice(-MAX_EVENTS + 1), record] : [...s.events, record]
             return { ...s, events }
           }
           case 'episode_end':
-            return { ...s, episodes: [...s.episodes.filter((e) => e.episode !== record.episode), record.result] }
+            return { ...s, current: null, episodes: [...s.episodes.filter((e) => e.episode !== record.episode), record.result] }
           case 'run_end':
             return { ...s, status: (record.status as RunStream['status']) || 'finished', current: null }
           default:

@@ -5,34 +5,75 @@ import { Download, GitBranch, Loader2, Trash2 } from 'lucide-react'
 import { api, type PluginInfo } from '../api'
 import { Button, Input, Panel, PanelTitle, PluginIcon, Tag, Toggle } from '../ui'
 
+const MAIN: { name: string; step: string; what: string }[] = [
+  { name: 'failure-monitor', step: 'Detect', what: 'Why an attempt failed and at which second, with the video at that moment.' },
+  { name: 'recovery', step: 'Recover', what: 'Fixes a failed attempt from where the robot is, without resetting the scene.' },
+  { name: 'harvester', step: 'Learn', what: 'Saves every attempt as a LeRobot dataset; successful ones are ready for fine-tuning.' },
+]
+const GROUPS: { key: string; title: string; hint: string }[] = [
+  { key: 'diagnosis', title: 'Diagnosis', hint: 'Did it work, and what went wrong' },
+  { key: 'safety', title: 'Safety', hint: 'Stop or slow the robot before it hurts itself' },
+  { key: 'output', title: 'Output', hint: 'Recordings, retries, reports' },
+  { key: 'other', title: 'Other', hint: 'Plugins without a group' },
+]
+
 export default function PluginsPage() {
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   const [open, setOpen] = useState<string | null>(null)
-  const list = plugins.data?.plugins ?? []
+  const list = (plugins.data?.plugins ?? []).slice().sort((a, b) => a.order - b.order)
   if (plugins.isLoading) return <p className="text-[13px] text-faint">Loading plugins…</p>
   if (plugins.isError) return <p className="text-[13px] text-bad">Cannot reach the dreamkit server: {(plugins.error as Error).message}</p>
-  const on = list.filter((p) => p.enabled)
-  const off = list.filter((p) => !p.enabled)
+  const main = MAIN.map((m) => ({ ...m, plugin: list.find((p) => p.name === m.name) }))
+  const basic = list.filter((p) => !MAIN.some((m) => m.name === p.name))
+  const toggle = (name: string) => setOpen(open === name ? null : name)
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div className="space-y-4">
-        <Panel>
-          <PanelTitle right={<span className="text-[12px] text-faint">Runs in this order, top to bottom. Changes apply to the next run.</span>}>
-            Switched on
-          </PanelTitle>
-          <ul className="border-t border-line">
-            {on.map((p) => <PluginRow key={p.name} plugin={p} open={open === p.name} onOpen={() => setOpen(open === p.name ? null : p.name)} />)}
-            {!on.length && <li className="px-4 py-6 text-[13px] text-faint">Nothing is switched on. Without plugins a run only moves the arm.</li>}
-          </ul>
-        </Panel>
-        {off.length > 0 && (
-          <Panel>
-            <PanelTitle>Installed, switched off</PanelTitle>
-            <ul className="border-t border-line">
-              {off.map((p) => <PluginRow key={p.name} plugin={p} open={open === p.name} onOpen={() => setOpen(open === p.name ? null : p.name)} />)}
-            </ul>
-          </Panel>
-        )}
+        <section>
+          <div className="mb-2 flex items-baseline justify-between">
+            <h2 className="text-[15px] font-medium">Detect, recover, learn</h2>
+            <span className="text-[12px] text-faint">Changes apply the next time your loop calls dreamkit.wrap()</span>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-3">
+            {main.map((m, i) => (
+              <Panel key={m.name} className={clsx('flex flex-col', m.plugin?.enabled && 'border-signal/50')}>
+                <div className="flex items-start gap-3 px-4 pt-3.5">
+                  <span className="mt-0.5 text-[12px] text-faint">{i + 1}</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[12px] text-signal">{m.step}</p>
+                    <p className="text-[15px] font-medium">{m.name}</p>
+                  </div>
+                  {m.plugin && <MainToggle plugin={m.plugin} />}
+                </div>
+                <p className="px-4 pt-1.5 pb-3 text-[13px] leading-snug text-dim">{m.what}</p>
+                {m.plugin ? (
+                  <button onClick={() => toggle(m.name)} className="mt-auto border-t border-line px-4 py-2 text-left text-[12px] text-dim hover:text-ink">
+                    {open === m.name ? 'Close settings' : 'Settings'}
+                  </button>
+                ) : <p className="mt-auto border-t border-line px-4 py-2 text-[12px] text-faint">Not installed in this build</p>}
+              </Panel>
+            ))}
+          </div>
+          {main.map((m) => m.plugin && open === m.name && (
+            <Panel key={m.name} className="mt-3"><ul><PluginRow plugin={m.plugin} open onOpen={() => toggle(m.name)} /></ul></Panel>
+          ))}
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="text-[15px] font-medium">Basic</h2>
+          {GROUPS.map((g) => {
+            const items = basic.filter((p) => (GROUPS.some((x) => x.key === p.group) ? p.group : 'other') === g.key)
+            if (!items.length) return null
+            return (
+              <Panel key={g.key}>
+                <PanelTitle right={<span className="text-[12px] text-faint">{g.hint}</span>}>{g.title}</PanelTitle>
+                <ul className="border-t border-line">
+                  {items.map((p) => <PluginRow key={p.name} plugin={p} open={open === p.name} onOpen={() => toggle(p.name)} />)}
+                </ul>
+              </Panel>
+            )
+          })}
+        </section>
         {plugins.data?.problems.map((p) => <p key={p} className="text-[13px] text-bad">{p}</p>)}
       </div>
       <div className="space-y-4">
@@ -41,6 +82,15 @@ export default function PluginsPage() {
       </div>
     </div>
   )
+}
+
+function MainToggle({ plugin }: { plugin: PluginInfo }) {
+  const queryClient = useQueryClient()
+  const update = useMutation({
+    mutationFn: (enabled: boolean) => api.updatePlugin(plugin.name, { enabled }),
+    onSuccess: (d) => queryClient.setQueryData(['plugins'], (old: { problems: string[] } | undefined) => ({ problems: old?.problems ?? [], plugins: d.plugins })),
+  })
+  return <Toggle checked={plugin.enabled} disabled={update.isPending} onChange={(v) => update.mutate(v)} />
 }
 
 function PluginRow({ plugin, open, onOpen }: { plugin: PluginInfo; open: boolean; onOpen: () => void }) {
@@ -151,7 +201,7 @@ function Catalogue() {
   const entries = (registry.data?.plugins ?? []).filter((p) => p.repo !== 'builtin')
   return (
     <Panel>
-      <PanelTitle>Catalogue</PanelTitle>
+      <PanelTitle right={<span className="text-[12px] text-faint">{registry.data?.source}</span>}>Catalogue</PanelTitle>
       <ul className="border-t border-line">
         {entries.map((p) => (
           <li key={p.name} className="flex items-start gap-3 border-b border-line/60 px-4 py-3 last:border-0">
@@ -170,7 +220,6 @@ function Catalogue() {
         {!entries.length && <li className="px-4 py-4 text-[13px] text-faint">The catalogue is empty.</li>}
       </ul>
       {install.isError && <p className={clsx('px-4 pb-3 text-[12px] text-bad')}>{(install.error as Error).message.slice(0, 300)}</p>}
-      <p className="px-4 pb-3 text-[11px] text-faint">Source: {registry.data?.source}</p>
     </Panel>
   )
 }

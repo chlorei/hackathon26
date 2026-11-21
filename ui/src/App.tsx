@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
-import { History, Play, Plug } from 'lucide-react'
-import RunPage from './pages/RunPage'
+import { History, Plug, Radio } from 'lucide-react'
+import LivePage from './pages/LivePage'
 import PluginsPage from './pages/PluginsPage'
 import HistoryPage from './pages/HistoryPage'
 
-type Route = { page: 'run' | 'plugins' | 'history'; runId: string | null; episode: number | null }
+type Route = { page: 'live' | 'plugins' | 'history'; runId: string | null; episode: number | null }
 
-// Hash routes: #/run, #/plugins, #/history, #/history/<run>/<episode>
+// Hash routes: #/live, #/plugins, #/history, #/history/<run>/<episode>
 function parse(hash: string): Route {
   const [page, runId, episode] = hash.replace(/^#\/?/, '').split('/')
   if (page === 'plugins') return { page: 'plugins', runId: null, episode: null }
   if (page === 'history') return { page: 'history', runId: runId || null, episode: episode ? Number(episode) : null }
-  return { page: 'run', runId: null, episode: null }
+  return { page: 'live', runId: null, episode: null }
 }
 
 export default function App() {
@@ -28,7 +28,7 @@ export default function App() {
   const openRun = (id: string, episode?: number) => go(`/history/${id}${episode ? `/${episode}` : ''}`)
 
   const tabs = [
-    { page: 'run', label: 'Run', icon: Play, hash: '/run' },
+    { page: 'live', label: 'Live', icon: Radio, hash: '/live' },
     { page: 'plugins', label: 'Plugins', icon: Plug, hash: '/plugins' },
     { page: 'history', label: 'History', icon: History, hash: '/history' },
   ] as const
@@ -37,7 +37,7 @@ export default function App() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-20 border-b border-line bg-base/90 backdrop-blur">
         <div className="mx-auto flex h-[52px] max-w-[1640px] items-center gap-8 px-5">
-          <a href="#/run" className="flex items-baseline gap-2">
+          <a href="#/live" className="flex items-baseline gap-2">
             <span className="text-[17px] font-semibold tracking-tight">dreamkit</span>
             <span className="text-[12px] text-faint">for Dream-1</span>
           </a>
@@ -54,7 +54,7 @@ export default function App() {
         </div>
       </header>
       <main className="mx-auto w-full max-w-[1640px] flex-1 px-5 py-4">
-        {route.page === 'run' && <RunPage onOpenRun={openRun} />}
+        {route.page === 'live' && <LivePage onOpenRun={openRun} />}
         {route.page === 'plugins' && <PluginsPage />}
         {route.page === 'history' && (
           <HistoryPage runId={route.runId} episode={route.episode} onOpen={(id, ep) => openRun(id, ep)} onBack={() => go('/history')} />

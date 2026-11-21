@@ -1,115 +1,113 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { CameraOff, FolderOpen, Play, Square } from 'lucide-react'
+import { CameraOff, FolderOpen } from 'lucide-react'
 import { api, REASON_LABEL, type EpisodeResult, type EventRecord } from '../api'
 import { useLive, useRunStream, type LiveStore } from '../useRunStream'
-import { AttemptStrip, Button, Field, Input, LEVEL_TONE, Outcome, Panel, PanelTitle, PluginIcon, Sparkline, Toggle, type Mark } from '../ui'
+import { AttemptStrip, Button, LEVEL_TONE, Outcome, Panel, PanelTitle, PluginIcon, Sparkline, Tag, type Mark } from '../ui'
 
 const CAMS: Record<string, string> = { top: 'Overhead', left: 'Left wrist', right: 'Right wrist' }
-const TASKS = ['put apple into the bowl', 'put orange into the bowl', 'put banana on the plate']
 
-export default function RunPage({ onOpenRun }: { onOpenRun: (id: string, episode?: number) => void }) {
-  const queryClient = useQueryClient()
-  const config = useQuery({ queryKey: ['config'], queryFn: api.config })
-  const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 5000 })
+const SNIPPET = `import dream, dreamkit
+
+client = dreamkit.wrap(dream.DreamClient(), config="dreamkit.yaml")
+client.policy({"checkpoint": "dreamlabs/dream-1-beta"})
+
+with client.episode("put apple into the bowl", env=env):
+    while client.t < 60:
+        client.set_observation(frames, observation)
+        reply = client.get_action()
+        for left, right in rows(reply):
+            env.step(left, right)
+            client.step(env, images=env.images(), command=(left, right))`
+
+/** Watches whatever run the user's loop is writing. It never starts anything. */
+export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episode?: number) => void }) {
+  const live = useQuery({ queryKey: ['live'], queryFn: api.live, refetchInterval: 2000 })
   const [runId, setRunId] = useState<string | null>(null)
-  const [form, setForm] = useState({ task: '', model: '', episodes: 2, seconds: 40, mock: true, light: false })
-  const [error, setError] = useState<string | null>(null)
-
   useEffect(() => {
-    if (config.data && !form.task) setForm((f) => ({ ...f, task: config.data.task, model: config.data.model, light: config.data.light }))
-  }, [config.data, form.task])
-  useEffect(() => {
-    if (!runId && runs.data?.active) setRunId(runs.data.active)
-  }, [runs.data?.active, runId])
+    const id = live.data?.id
+    if (id && id !== runId) setRunId(id) // a newer run took over
+  }, [live.data?.id, runId])
 
   const stream = useRunStream(runId)
-  const running = stream.status === 'running' || stream.status === 'connecting'
-  const runPath = config.data && runId ? `${config.data.runs_path}/${runId}` : null
-
-  const start = useMutation({
-    mutationFn: () => api.startRun({
-      task: form.task, model: form.model, episodes: form.episodes, seconds: form.seconds, mock: form.mock,
-      overrides: { light: form.light },
-    }),
-    onSuccess: ({ id }) => { setError(null); setRunId(id); queryClient.invalidateQueries({ queryKey: ['runs'] }) },
-    onError: (e: Error) => setError(e.message),
-  })
-  const stop = useMutation({ mutationFn: () => api.stopRun(runId!) })
-
+  const running = Boolean(live.data?.id) && live.data?.id === runId
   const current = stream.current
   const marks = useMemo<Mark[]>(() => (current ? marksFrom(stream.events, current.episode) : []), [stream.events, current])
+
+  if (!runId) return <Waiting />
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0 space-y-4">
         <Cameras live={stream.live} running={running} />
-
         <Panel>
           <PanelTitle right={current && <LiveClock live={stream.live} />}>
-            {current ? `Attempt ${current.episode}, scene ${current.scene + 1}${current.attempt > 1 ? `, retry ${current.attempt - 1}` : ''}` : 'Attempt timeline'}
+            {current ? `Attempt ${current.episode}, scene ${current.scene + 1}${current.attempt > 1 ? `, retry ${current.attempt - 1}` : ''}` : running ? 'Between attempts' : 'This run has ended'}
           </PanelTitle>
           <div className="px-4 pb-3">
-            {current ? (
-              <LiveStrip live={stream.live} seconds={form.seconds} marks={marks} />
-            ) : (
-              <p className="pb-2 text-[13px] text-faint">Each attempt draws here as it runs: reach, grasp, lift, release, and where it went wrong.</p>
+            {current ? <LiveStrip live={stream.live} marks={marks} /> : (
+              <p className="pb-2 text-[13px] text-faint">{running ? 'The next attempt draws here as soon as your loop starts it.' : 'Open it in History to watch the attempts back.'}</p>
             )}
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-line px-4 py-3 md:grid-cols-4">
             <Sparkline live={stream.live} field="d" label="Hand to object" unit="cm" scale={100} color="#7fb2e5" />
             <Sparkline live={stream.live} field="z" label="Object lifted" unit="cm" scale={100} color="#4ade80" max={20} />
             <Sparkline live={stream.live} field="dt" label="Object to target" unit="cm" scale={100} color="#c4a7f5" />
-            <Sparkline live={stream.live} field="rtt" label="Model round trip" unit="ms" color="#f0b43c" warnAbove={700} />
+            {live.data?.mock ? (
+              <div className="text-[12px]"><span className="text-dim">Model round trip</span><p className="mt-2 text-faint">Mock: no model calls</p></div>
+            ) : <Sparkline live={stream.live} field="rtt" label="Model round trip" unit="ms" color="#f0b43c" warnAbove={700} />}
           </div>
         </Panel>
-
-        <Attempts episodes={stream.episodes} planned={form.episodes} current={current} onOpen={(ep) => runId && onOpenRun(runId, ep)} />
+        <Attempts episodes={stream.episodes} current={current} onOpen={(ep) => onOpenRun(runId, ep)} />
       </div>
 
       <div className="space-y-4 xl:sticky xl:top-[68px] xl:self-start">
         <Panel>
-          <PanelTitle>New run</PanelTitle>
-          <div className="space-y-3 px-4 pb-4">
-            <Field label="Task">
-              <Input value={form.task} list="tasks" disabled={running} onChange={(e) => setForm({ ...form, task: e.target.value })} />
-              <datalist id="tasks">{TASKS.map((t) => <option key={t} value={t} />)}</datalist>
-            </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Attempts"><Input type="number" min={1} max={100} value={form.episodes} disabled={running} onChange={(e) => setForm({ ...form, episodes: Number(e.target.value) })} /></Field>
-              <Field label="Seconds each"><Input type="number" min={5} max={600} value={form.seconds} disabled={running} onChange={(e) => setForm({ ...form, seconds: Number(e.target.value) })} /></Field>
+          <div className="flex items-start gap-3 px-4 py-3">
+            <span className={clsx('mt-1.5 h-2 w-2 shrink-0 rounded-full', running ? 'animate-pulse bg-signal' : 'bg-faint')} />
+            <div className="min-w-0 flex-1">
+              <p className="text-[14px]">{stream.task || live.data?.task || 'Run'}</p>
+              <p className="text-[12px] text-dim">
+                {running ? 'Your loop is running' : 'Finished'}{live.data?.mock ? ', mock policy' : live.data?.model ? `, ${live.data.model}` : ''}
+              </p>
             </div>
-            <Field label="Model" hint={form.mock ? 'Mock is on: a scripted arm, no API calls, no credits.' : 'Every model call uses credits.'}>
-              <Input value={form.mock ? 'scripted mock' : form.model} disabled={running || form.mock} onChange={(e) => setForm({ ...form, model: e.target.value })} />
-            </Field>
-            <div className="flex flex-col gap-2 pt-1">
-              <Toggle checked={form.mock} disabled={running} onChange={(v) => setForm({ ...form, mock: v })} label="Mock policy" />
-              <Toggle checked={form.light} disabled={running} onChange={(v) => setForm({ ...form, light: v })} label="Light mode: fewer camera frames, less CPU" />
-            </div>
-            {running ? (
-              <Button variant="stop" className="w-full !py-2" onClick={() => stop.mutate()} disabled={stop.isPending}>
-                <Square className="h-4 w-4" /> Stop after this step
-              </Button>
-            ) : (
-              <Button variant="go" className="w-full !py-2" onClick={() => start.mutate()} disabled={start.isPending || !form.task.trim()}>
-                <Play className="h-4 w-4" /> Start {form.episodes} attempt{form.episodes > 1 ? 's' : ''}
-              </Button>
-            )}
-            {error && <p className="text-[13px] text-bad">{error}</p>}
-            {config.data && !config.data.sim_found && (
-              <p className="text-[13px] text-signal">Simulator not found. Set sim_path in {config.data.config_path}.</p>
-            )}
-            {runPath && (
-              <button onClick={() => runId && api.reveal(runId)} className="flex w-full items-start gap-2 rounded-md bg-base px-2.5 py-2 text-left text-[12px] text-dim hover:text-ink" title="Open in Finder">
-                <FolderOpen className="mt-px h-4 w-4 shrink-0" />
-                <span className="min-w-0">Videos and results are saved to<br /><span className="break-all font-mono text-[11px] text-faint">{runPath}</span></span>
-              </button>
-            )}
+            {live.data?.mock && <Tag tone="steel">mock</Tag>}
+          </div>
+          <div className="flex gap-2 border-t border-line px-4 py-2.5">
+            <Button variant="quiet" onClick={() => api.reveal(runId)}><FolderOpen className="h-4 w-4" /> Open folder</Button>
+            <Button variant="quiet" onClick={() => onOpenRun(runId)}>Open in History</Button>
           </div>
         </Panel>
-        <Feed events={stream.events} onWatch={(ep) => runId && onOpenRun(runId, ep)} />
+        <Feed events={stream.events} onWatch={(ep) => onOpenRun(runId, ep)} />
       </div>
+    </div>
+  )
+}
+
+function Waiting() {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="mx-auto max-w-[760px] pt-10">
+      <div className="flex items-center gap-3">
+        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-signal" />
+        <h1 className="text-[22px] font-semibold">Waiting for a run</h1>
+      </div>
+      <p className="mt-2 max-w-[62ch] text-[15px] leading-relaxed text-dim">
+        Start your loop with <code className="rounded bg-raised px-1.5 py-0.5 text-ink">dreamkit.wrap(...)</code>. This page picks it up on its
+        own and shows the cameras, what every plugin says, and each attempt as it happens.
+      </p>
+      <Panel className="mt-6">
+        <PanelTitle right={
+          <button className="text-[12px] text-dim hover:text-ink" onClick={() => { void navigator.clipboard.writeText(SNIPPET); setCopied(true) }}>
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        }>your_loop.py</PanelTitle>
+        <pre className="overflow-x-auto border-t border-line px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink">{SNIPPET}</pre>
+      </Panel>
+      <p className="mt-4 text-[13px] text-dim">
+        Or try it on Dream Labs' simulator without credits: <code className="rounded bg-raised px-1.5 py-0.5 text-ink">python examples/sim_loop.py --mock</code>
+      </p>
     </div>
   )
 }
@@ -174,14 +172,14 @@ function LiveClock({ live }: { live: LiveStore }) {
   return <span className="text-[13px] text-signal">{live.t.toFixed(1)} s</span>
 }
 
-function LiveStrip({ live, seconds, marks }: { live: LiveStore; seconds: number; marks: Mark[] }) {
+function LiveStrip({ live, marks }: { live: LiveStore; marks: Mark[] }) {
   useLive(live)
-  return <AttemptStrip duration={seconds} marks={marks} playhead={live.t} live />
+  const span = Math.max(30, Math.ceil((live.t + 6) / 10) * 10) // the strip grows with the attempt
+  return <AttemptStrip duration={span} marks={marks} playhead={live.t} live />
 }
 
-function Attempts({ episodes, planned, current, onOpen }: {
+function Attempts({ episodes, current, onOpen }: {
   episodes: EpisodeResult[]
-  planned: number
   current: { episode: number; scene: number; attempt: number } | null
   onOpen: (episode: number) => void
 }) {
@@ -189,7 +187,7 @@ function Attempts({ episodes, planned, current, onOpen }: {
   const ok = episodes.filter((e) => e.success).length
   return (
     <Panel>
-      <PanelTitle right={<span className="text-[13px] text-dim">{ok} of {episodes.length} worked, {new Set(episodes.map((e) => e.scene)).size} of {planned} scenes done</span>}>
+      <PanelTitle right={<span className="text-[13px] text-dim">{ok} of {episodes.length} worked, {new Set(episodes.map((e) => e.scene)).size} scenes so far</span>}>
         Attempts
       </PanelTitle>
       <ul className="divide-y divide-line border-t border-line">
@@ -236,7 +234,7 @@ function Feed({ events, onWatch }: { events: EventRecord[]; onWatch: (episode: n
         </div>
       }>What the plugins say</PanelTitle>
       <div ref={box} className="flex-1 overflow-y-auto border-t border-line">
-        {shown.length === 0 && <p className="px-4 py-8 text-center text-[13px] text-faint">Start a run. Each plugin reports here as it sees things happen.</p>}
+        {shown.length === 0 && <p className="px-4 py-8 text-center text-[13px] text-faint">Plugins report here as they see things happen.</p>}
         {shown.map((e, i) => {
           const verdict = e.plugin === 'failure-monitor' && e.level === 'error' && Boolean(e.data.reason)
           return (

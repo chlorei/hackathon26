@@ -63,6 +63,8 @@ export interface PluginInfo {
   in_config: boolean
   description: string
   source: string | null
+  group: string
+  order: number
   params: Record<string, unknown>
   defaults: Record<string, unknown>
 }
@@ -76,23 +78,19 @@ export interface RegistryEntry {
 }
 
 export interface Config {
-  task: string
-  model: string
-  episodes: number
-  seconds: number
+  config_file: string
   sim_found: boolean
-  config_path: string
-  runs_path: string
   light: boolean
-  mock: { behaviors: string[]; latency_ms: number }
+  runs_dir: string
 }
 
 export type StreamRecord =
   | EventRecord
   | { type: 'frame'; cam: string; jpeg: string; episode: number; t: number }
   | { type: 'telemetry'; episode: number; t: number; v: Record<string, number> }
-  | { type: 'run_start'; run_id: string; task: string; model: string; mock: boolean; episodes: number; plugins: string[] }
-  | { type: 'episode_start'; episode: number; scene: number; attempt: number; seed: number; behavior?: string }
+  | { type: 'heartbeat'; episode: number; scene: number; attempt: number; task: string; t: number; in_episode: boolean; status: string; updated: number; points: { t: number; v: Record<string, number> }[] }
+  | { type: 'run_start'; run_id: string; mock: boolean; plugins: string[] }
+  | { type: 'episode_start'; episode: number; scene: number; attempt: number; task: string; seed?: number; positions?: Record<string, number[]> }
   | { type: 'episode_end'; episode: number; scene: number; attempt: number; duration_s: number; result: EpisodeResult }
   | { type: 'run_end'; run_id: string; status: string; attempts?: number; successes?: number }
 
@@ -120,8 +118,8 @@ export const api = {
   updatePlugin: (name: string, body: { enabled?: boolean; params?: Record<string, unknown> }) =>
     call<{ plugins: PluginInfo[] }>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'POST', body: JSON.stringify(body) }),
   registry: () => call<{ source: string; plugins: RegistryEntry[] }>('/api/registry'),
-  install: (name: string) => call<{ ok: boolean; output: string }>('/api/install', { method: 'POST', body: JSON.stringify({ name }) }),
-  runs: () => call<{ runs: RunInfo[]; active: string | null }>('/api/runs'),
+  install: (name: string) => call<{ ok: boolean; output?: string }>('/api/install', { method: 'POST', body: JSON.stringify({ name }) }),
+  runs: () => call<{ runs: RunInfo[] }>('/api/runs'),
   run: (id: string) => call<RunInfo>(`/api/runs/${id}`),
   trace: (id: string, episode: number) =>
     call<{ object: string; target: string; rows: TraceRow[]; milestones: { t: number; kind: string; message: string }[] }>(
@@ -130,9 +128,8 @@ export const api = {
   removePlugin: (name: string) => call<{ ok: boolean; output: string }>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   reveal: (id: string, episode?: number) =>
     call<{ path: string }>(`/api/runs/${id}/reveal${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
-  startRun: (body: { task: string; model: string; episodes: number; seconds: number; mock: boolean; overrides?: Record<string, unknown> }) =>
-    call<{ id: string }>('/api/runs', { method: 'POST', body: JSON.stringify(body) }),
-  stopRun: (id: string) => call<{ ok: boolean }>(`/api/runs/${id}/stop`, { method: 'POST' }),
+  live: () => call<{ id: string | null; task?: string; model?: string; mock?: boolean }>('/api/live'),
+  deleteRun: (id: string) => call<{ ok: boolean }>(`/api/runs/${id}`, { method: 'DELETE' }),
 }
 
 export interface TraceRow {
@@ -153,6 +150,7 @@ export const REASON_LABEL: Record<string, string> = {
   fell_off_table: 'fell off table',
   dropped: 'dropped',
   missed_target: 'missed target',
+  released_off_target: 'released off target',
   grasped_air: 'grasped air',
   collision: 'collision',
   stalled: 'stalled',

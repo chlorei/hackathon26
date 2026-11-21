@@ -9,6 +9,7 @@ class GripperCheck(Plugin):
     """Catches a gripper that closes on nothing (fingers shut all the way) and a grip that loosens mid-carry."""
 
     name = "gripper-check"
+    group = "diagnosis"
     description = "Catches a gripper closed on nothing and a grip that loosens mid-carry"
     defaults = {
         "closed_cmd": 0.3,  # commanded opening below this = the policy wants the gripper shut

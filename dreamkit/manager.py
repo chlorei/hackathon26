@@ -84,6 +84,7 @@ def describe(found: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
             "name": name,
             "description": entry["cls"].description or (entry["cls"].__doc__ or "").strip().split("\n")[0],
             "defaults": entry["cls"].defaults,
+            "group": getattr(entry["cls"], "group", "other"),
             "source": entry["source"],
             "origin": entry["origin"],
         }
