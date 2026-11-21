@@ -3,7 +3,7 @@
 A [dreamkit](https://github.com/chlorei/hackathon26) plugin that **judges every attempt from what the camera saw**
 and keeps the statistics across runs: how often the robot really succeeds, at which task, and why it fails.
 
-- **A vision judge.** At the end of each attempt, 6 frames taken evenly from one camera and the task go to Gemini
+- **A vision judge.** At the end of each attempt, 10 frames taken evenly from one camera and the task go to Gemini
   (or Claude). It answers: success or not, a 0–100 score, the reason in words and as a code from `dreamkit/reasons.py`,
   and a status with a comment for every frame. success-check decides from the simulator's object positions; the judge
   needs only frames, so it works on a real robot too.
@@ -24,12 +24,17 @@ export GEMINI_API_KEY=...          # or GEMINI_API_KEY=... in a .env next to you
 ```yaml
 plugins:
   - success-check                  # optional: lets the plugin measure how often the judge agrees
-  - monitor-stats                  # or: - monitor-stats: {camera: top, frames: 6}
+  - monitor-stats                  # or: - monitor-stats: {camera: top, frames: 10}
 ```
 
 Gemini Flash-Lite answers first (`gemini-3.5-flash-lite`, fast and cheap); on a 503 ("high demand") or a timeout,
-Flash (`gemini-3.8-flash`) takes over. On Google's free tier Flash allows only 20 requests a day; when they are
-used up it answers 429 and the attempt is `not judged` if Flash-Lite failed too. A reply that is not valid JSON of the schema is asked again, twice at most.
+Flash (`gemini-3.8-flash`) takes over, then Claude Haiku (`claude-haiku-5-5`) if `ANTHROPIC_API_KEY` is set. A 429
+(quota) is never waited on: without a Claude key, all-429 means `not judged: quota` right away. On Google's free tier
+Flash allows only 20 requests a day.
+
+**Recoveries.** When recovery sends the robot back to try again, the try before it is judged on its own
+(`judging try 1`, then `camera verdict: … (try 1, score …)` with timeline marks), so a drop between two frames of a
+long attempt is not lost. The attempt's verdict is its last try's; earlier ones are under `"tries"`. A reply that is not valid JSON of the schema is asked again, twice at most.
 
 ## What it shows
 
@@ -38,12 +43,12 @@ used up it answers 429 and the attempt is `not judged` if Flash-Lite failed too.
   marks (`ctx.ui.mark`) at the frames the judge flagged, metrics `judged success` and `judge score`.
 - **Its own page** (`ui/index.html`, PLUGIN_STANDARD §7a): click a monitor-stats line in Live or History. A summary
   (attempts, successes, agreement with success-check), three charts (score of each attempt, why attempts fail, in
-  which frame a failed attempt first goes wrong), every attempt with its 6 frames and the judge's comment on each, and
+  which frame a failed attempt first goes wrong), every try with its 10 frames and the judge's comment on each, and
   *Download JSON / CSV*.
 - At the end of a run, in the feed: overall rate with its interval, agreement with success-check, the recommendation.
 - `run.json`, each attempt: `"monitor-stats": {"success", "score", "reason", "reason_code", "frames": [{"index",
-  "status", "comment", "t_s"}], "model_s"}` (or `{"error": ...}` when not judged).
-- `runs/<id>/monitor-stats/`: the judged frames `ep003_f0.jpg … ep003_f5.jpg` (512 px wide) and `attempts.json`
+  "status", "comment", "t_s"}], "model_s", "tries": [...]}` (or `{"error": ...}` when not judged).
+- `runs/<id>/monitor-stats/`: the judged frames `ep003_t1_f0.jpg …` (per try) (512 px wide) and `attempts.json`
   (this run's verdicts, what the page reads).
 - `runs/<id>/monitor-stats/summary.json`: `overall`, `by_task`, `reasons` (code, label, count, share, examples),
   `agreement`, `recommendation`.
@@ -72,7 +77,7 @@ dreamkit bench .        # ms/step on every bundled fixture
 | param | default | unit | what |
 |---|---|---|---|
 | `camera` | `top` | top / left / right | Camera the judge looks at (the first one if it is missing) |
-| `frames` | `6` |  | Frames per attempt sent to the judge |
+| `frames` | `10` |  | Frames per try sent to the judge (each recovery starts a new try) |
 | `image_width` | `512` |  | Frames are scaled down to at most this many pixels wide |
 | `buffer` | `64` |  | Frames kept per attempt; above this every other one is dropped |
 | `provider` | `gemini` | gemini / claude | Vision model that judges (GEMINI_API_KEY or ANTHROPIC_API_KEY) |

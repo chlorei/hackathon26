@@ -1,6 +1,7 @@
 """The judge: frames of one attempt + its task -> a checked verdict from a vision model (Gemini or Claude).
 
-Runs on the ctx.defer worker only (network). Gemini: Flash-Lite first (fast, cheap); on 503 "high demand" or a timeout, Flash.
+Runs on the ctx.defer worker only (network). Gemini: Flash-Lite first (fast, cheap); on 429/503 or a timeout, Flash; when
+no Gemini model answers, Claude Haiku if ANTHROPIC_API_KEY is set. A 429 (quota) is never waited on.
 """
 
 from __future__ import annotations
@@ -16,11 +17,20 @@ from typing import Any
 from dreamkit import reasons
 
 GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
-GEMINI_RETRIES = 1  # per model, for 429/500; 503 and 504 (time already spent) move on to the next model
+GEMINI_RETRIES = 1  # per model, for 500 only; 429 (quota) and 503/504 move straight on to the next model
 MIN_CALL_S = 3.0  # less time than this left before the deadline: do not start another call
-CLAUDE_MODEL = "claude-sonnet-5-5"
+CLAUDE_MODEL = "claude-sonnet-5-5"  # provider: claude
+CLAUDE_FALLBACK = "claude-haiku-5-5"  # provider: gemini, when no Gemini model answers
 MAX_REASKS = 2  # a reply that is not valid JSON of the schema is asked again this many times
 PROMPT = (Path(__file__).parent / "judge_prompt.txt").read_text(encoding="utf-8")
+
+
+class Unavailable(RuntimeError):
+    """No model answered; `quota` when every one of them said 429."""
+
+    def __init__(self, message: str, quota: bool = False):
+        super().__init__(message)
+        self.quota = quota
 
 
 def _ask_gemini(images: list[bytes], prompt: str, timeout_s: float, deadline: float) -> str:
@@ -39,7 +49,7 @@ def _ask_gemini(images: list[bytes], prompt: str, timeout_s: float, deadline: fl
             break
         client = genai.Client(api_key=os.environ["GEMINI_API_KEY"], http_options=types.HttpOptions(
             timeout=int(min(timeout_s, left) * 1000),
-            retry_options=types.HttpRetryOptions(attempts=1 + GEMINI_RETRIES, http_status_codes=[429, 500]),
+            retry_options=types.HttpRetryOptions(attempts=1 + GEMINI_RETRIES, http_status_codes=[500]),
         ))
         try:
             resp = client.models.generate_content(
@@ -55,10 +65,11 @@ def _ask_gemini(images: list[bytes], prompt: str, timeout_s: float, deadline: fl
             if failures:
                 print(f"[monitor-stats] answered by {model} after {', '.join(failures)}", file=sys.stderr)
             return str(resp.text)
-    raise RuntimeError(f"no Gemini model available ({'; '.join(failures)})")
+    quota = bool(failures) and all(f.endswith(": 429") for f in failures)
+    raise Unavailable(f"no Gemini model available ({'; '.join(failures)})", quota=quota)
 
 
-def _ask_claude(images: list[bytes], prompt: str, timeout_s: float, deadline: float) -> str:
+def _ask_claude(images: list[bytes], prompt: str, timeout_s: float, deadline: float, model: str = CLAUDE_MODEL) -> str:
     timeout_s = min(timeout_s, deadline - time.monotonic())
     if timeout_s < MIN_CALL_S:
         raise RuntimeError("out of time")
@@ -68,12 +79,17 @@ def _ask_claude(images: list[bytes], prompt: str, timeout_s: float, deadline: fl
         {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                      "data": base64.standard_b64encode(b).decode()}} for b in images]
     content.append({"type": "text", "text": prompt})
-    resp = anthropic.Anthropic(timeout=timeout_s).beta.messages.create(
-        model=CLAUDE_MODEL, max_tokens=16000,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",  # on a refusal the API reruns the request on a fallback model
-        messages=[{"role": "user", "content": content}],
-    )
+    client = anthropic.Anthropic(timeout=timeout_s, max_retries=0)  # a 429 is not waited on: the attempt goes on
+    messages = [{"role": "user", "content": content}]
+    if model == CLAUDE_FALLBACK:  # Haiku has no server-side refusal fallback; a quick, low-effort verdict
+        resp = client.messages.create(model=model, max_tokens=16000, output_config={"effort": "low"},
+                                      messages=messages)
+    else:
+        resp = client.beta.messages.create(
+            model=model, max_tokens=16000, messages=messages,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",  # on a refusal the API reruns the request on a fallback model
+        )
     if resp.stop_reason == "refusal":
         raise RuntimeError("claude declined to judge this attempt")
     return "".join(b.text for b in resp.content if b.type == "text")
@@ -95,7 +111,15 @@ def ask(images: list[bytes], prompt: str, provider: str, timeout_s: float, deadl
     """One model call (with Gemini's fallback chain), finished before `deadline` (time.monotonic). Tests replace it."""
     load_env()
     if provider == "gemini":
-        return _ask_gemini(images, prompt, timeout_s, deadline)
+        try:
+            return _ask_gemini(images, prompt, timeout_s, deadline)
+        except Unavailable as error:
+            if not os.getenv("ANTHROPIC_API_KEY"):
+                if error.quota:
+                    raise Unavailable("quota", quota=True) from error
+                raise
+            print(f"[monitor-stats] {error}; asking {CLAUDE_FALLBACK}", file=sys.stderr)
+            return _ask_claude(images, prompt, timeout_s, deadline, CLAUDE_FALLBACK)
     if provider == "claude":
         return _ask_claude(images, prompt, timeout_s, deadline)
     raise ValueError(f"provider must be gemini or claude, not {provider!r}")
@@ -140,12 +164,14 @@ def validate(d: Any, n: int) -> dict[str, Any]:
 
 
 def judge(images: list[bytes], task: str, provider: str = "gemini", timeout_s: float = 10.0,
-          max_wait_s: float = 20.0) -> dict[str, Any]:
+          max_wait_s: float = 20.0, note: str = "") -> dict[str, Any]:
     """JPEG frames of one attempt + its task -> {success, score, reason, reason_code, frames}, within max_wait_s."""
     start = time.monotonic()
     deadline = start + max_wait_s
     prompt = (PROMPT.replace("{n}", str(len(images))).replace("{last}", str(len(images) - 1))
               .replace("{task}", task).replace("{codes}", ", ".join(reasons.FAILURES)))
+    if note:
+        prompt = prompt.replace("Decide whether", f"{note}\n\nDecide whether", 1)
     error = None
     for _ in range(1 + MAX_REASKS):
         p = prompt if error is None else f"{prompt}\n\nYour last reply was rejected: {error}. Return valid JSON only."

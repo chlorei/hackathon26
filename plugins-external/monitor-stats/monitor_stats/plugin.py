@@ -35,7 +35,7 @@ KEY = "monitor-stats"
 class Params(BaseModel):
     camera: str = Field("top", description="Camera the judge looks at (the first one if it is missing)",
                         json_schema_extra={"choices": ["top", "left", "right"]})
-    frames: int = Field(6, ge=2, le=16, description="Frames per attempt sent to the judge",
+    frames: int = Field(10, ge=2, le=16, description="Frames per try sent to the judge (each recovery starts a new try)",
                         json_schema_extra={"unit": ""})
     image_width: int = Field(512, ge=64, le=1280, description="Frames are scaled down to at most this many pixels "
                              "wide", json_schema_extra={"unit": ""})
@@ -148,8 +148,15 @@ class MonitorStats(Plugin):
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.buf: list[tuple[float, np.ndarray]] = []
         self.stride, self.seen = 1, 0
+        self.segment = 0  # recovery bumps ctx.store["segment"] when it sends the robot to try again
+        self.tries: list[dict[str, Any]] = []  # verdicts of the tries before the last one
 
     def on_step(self, ctx: PluginContext) -> None:
+        segment = ctx.store.get("segment", 0)
+        if segment != self.segment:  # the try before this one ended in a recovery: judge it on its own
+            self._send(ctx, final=False)
+            self.segment = segment
+            self.buf, self.stride, self.seen = [], 1, 0
         if not ctx.frames_new or not ctx.frames:
             return
         self.seen += 1
@@ -165,67 +172,88 @@ class MonitorStats(Plugin):
             self.buf, self.stride = self.buf[::2], self.stride * 2
 
     def on_episode_end(self, ctx: PluginContext) -> None:
+        self._send(ctx, final=True)
+
+    def _send(self, ctx: PluginContext, final: bool) -> None:
+        """Evenly picked frames of the current try to the judge, on the defer worker."""
         if not self.buf:
             return
         n = min(self.params.frames, len(self.buf))
         picked = [self.buf[round(i * (len(self.buf) - 1) / max(1, n - 1))] for i in range(n)]
         self.buf = []
-        ctx.emit("info", "judging attempt", frames=n)
-        ctx.defer(self._judge, ctx, picked, str(ctx.task or ""), ctx.episode)
+        try_no = self.segment + 1
+        ctx.emit("info", "judging attempt" if final else f"judging try {try_no}", frames=n, try_no=try_no)
+        ctx.defer(self._judge, ctx, picked, str(ctx.task or ""), ctx.episode, try_no, final)
 
-    def _judge(self, ctx: PluginContext, picked: list[tuple[float, np.ndarray]], task: str, episode: int) -> None:
+    def _judge(self, ctx: PluginContext, picked: list[tuple[float, np.ndarray]], task: str, episode: int,
+               try_no: int = 1, final: bool = True) -> None:
         p = self.params
         times = [round(t, 2) for t, _ in picked]
         images = [_jpeg(rgb, p.image_width) for _, rgb in picked]
-        files = self._save_frames(ctx, images, episode)
-        row: dict[str, Any] = {"episode": episode, "task": task, "check": ctx.result.get("success")}
+        files = self._save_frames(ctx, images, episode, try_no)
+        # success-check speaks for the whole attempt, i.e. its last try; an earlier try ended in a recovery
+        row: dict[str, Any] = {"episode": episode, "try": try_no, "final": final, "task": task,
+                               "check": ctx.result.get("success") if final else None}
+        tag = "" if final and try_no == 1 else f"try {try_no}, "
+        note = "" if final else ("After the last frame the robot was stopped and sent back to try again; "
+                                 "judge what the frames show up to that point.")
         try:
-            v = judge_mod.judge(images, task, p.provider, p.timeout_s, p.max_wait_s)
+            v = judge_mod.judge(images, task, p.provider, p.timeout_s, p.max_wait_s, note=note)
         except Exception as error:  # the robot goes on; the attempt is just not judged
             msg = " ".join(str(error).split())[:160].rstrip(".")
-            ctx.result[KEY] = {"error": msg}
             self._save_attempt(ctx, {**row, "error": msg, "frames": [{"t_s": t, "file": f} for t, f in
                                                                      zip(times, files, strict=True)]})
-            ctx.ui.badge("not judged", "warn")
-            ctx.emit("warn", f"not judged: {msg if msg[:2].isupper() else msg[:1].lower() + msg[1:]}")
+            msg = msg if msg[:2].isupper() else msg[:1].lower() + msg[1:]
+            if final:
+                ctx.result[KEY] = {"error": msg, **({"tries": self.tries} if self.tries else {})}
+                ctx.ui.badge("not judged", "warn")
+            else:
+                self.tries.append({"try": try_no, "error": msg})
+            ctx.emit("warn", f"not judged{f' (try {try_no})' if tag else ''}: {msg}")
             return
         for f, t in zip(v["frames"], times, strict=True):
             f["t_s"] = t
             if f["status"] == "error":
                 ctx.ui.mark(t, f["comment"] or "camera: error", "error")
-        ctx.result[KEY] = v
-        self.judged.append(v)
         if v["reason_code"]:
             row["reason_label"] = reasons.label(v["reason_code"])
         self._save_attempt(ctx, {**row, **v, "frames": [{**f, "file": name} for f, name in
                                                          zip(v["frames"], files, strict=True)]})
         bad = sum(f["status"] == "error" for f in v["frames"])
+        data: dict[str, Any] = {"score": v["score"], "frames_off": bad, "model_s": v["model_s"], "try_no": try_no}
         if v["success"]:
-            ctx.ui.badge(f"camera: success · {v['score']}", "success")
-            ctx.emit("success", f"camera verdict: success, score {v['score']}, {bad} of {len(times)} frames off",
-                     score=v["score"], frames_off=bad, model_s=v["model_s"])
+            ctx.emit("success", f"camera verdict: success ({tag}score {v['score']}, {bad} of {len(times)} frames off)",
+                     **data)
         else:
-            ctx.ui.badge(f"camera: failed · {v['score']}", "error")
-            data: dict[str, Any] = {"score": v["score"], "frames_off": bad, "model_s": v["model_s"]}
+            first = next((f["t_s"] for f in v["frames"] if f["status"] == "error"), None)
             if v["reason_code"]:
                 data["reason"] = v["reason_code"]
-            ctx.emit("error", f"camera verdict: {v['reason']} (score {v['score']})", **data)
+            if first is not None:
+                data["at_s"] = first  # the panel offers "watch from" on it
+            ctx.emit("error", f"camera verdict: {v['reason']} ({tag}score {v['score']})", **data)
+        if not final:
+            self.tries.append({"try": try_no, **v})
+            return
+        ctx.result[KEY] = {**v, **({"tries": self.tries} if self.tries else {})}
+        self.judged.append(v)
+        ctx.ui.badge(f"camera: {'success' if v['success'] else 'failed'} · {v['score']}",
+                     "success" if v["success"] else "error")
         ctx.ui.metric("judged success", 100 * _rate(self.judged, self.z)["rate"], unit="%")
         ctx.ui.metric("judge score", float(v["score"]), unit="")
 
-    def _save_frames(self, ctx: PluginContext, images: list[bytes], episode: int) -> list[str | None]:
-        """The judged frames as JPEGs for the page: ep003_f0.jpg… (None without a run folder)."""
+    def _save_frames(self, ctx: PluginContext, images: list[bytes], episode: int, try_no: int) -> list[str | None]:
+        """The judged frames as JPEGs for the page: ep003_t1_f0.jpg… (None without a run folder)."""
         if ctx.run_dir is None:
             return [None] * len(images)
         out: list[str | None] = []
         for i, img in enumerate(images):
-            name = f"ep{episode:03d}_f{i}.jpg"
+            name = f"ep{episode:03d}_t{try_no}_f{i}.jpg"
             ctx.files.path(name).write_bytes(img)
             out.append(name)
         return out
 
     def _save_attempt(self, ctx: PluginContext, row: dict[str, Any]) -> None:
-        """attempts.json, rewritten after each attempt (the defer worker runs one job at a time)."""
+        """attempts.json (one row per judged try), rewritten each time (the defer worker runs one job at a time)."""
         self.attempts.append(row)
         if ctx.run_dir is not None:
             ctx.files.path("attempts.json").write_text(json.dumps(self.attempts, indent=1, ensure_ascii=False))

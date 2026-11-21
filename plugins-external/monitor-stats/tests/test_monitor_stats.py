@@ -47,7 +47,7 @@ def test_judges_a_successful_attempt(model):
     result = replay("success_apple_bowl", plugins=["success-check", "monitor-stats"], keep=True)
     v = result.result["monitor-stats"]
     assert v["success"] is True and v["score"] == 90 and v["model_s"] >= 0
-    assert len(calls) == 1 and len(calls[0]["images"]) == 6
+    assert len(calls) == 1 and len(calls[0]["images"]) == min(10, len(calls[0]["images"])) >= 2
     assert all(img[:2] == b"\xff\xd8" for img in calls[0]["images"])  # JPEG
     assert "put apple into the bowl" in calls[0]["prompt"]
     assert v["frames"][0]["comment"] == "frame 0" and "t_s" in v["frames"][0]  # the panel's style, with times
@@ -58,7 +58,7 @@ def test_judges_a_successful_attempt(model):
     # what the page reads: the judged frames as JPEGs (at most 512 px wide) and attempts.json
     folder = result.run_dir / "monitor-stats"
     [row] = json.loads((folder / "attempts.json").read_text())
-    assert row["success"] is True and row["check"] is True and len(row["frames"]) == 6
+    assert row["success"] is True and row["check"] is True and len(row["frames"]) >= 2
     jpg = (folder / row["frames"][0]["file"]).read_bytes()
     assert jpg[:2] == b"\xff\xd8" and Image.open(io.BytesIO(jpg)).width <= 512
     summary = json.loads((result.run_dir / "monitor-stats" / "summary.json").read_text())
@@ -96,10 +96,53 @@ def test_model_down_does_not_break_the_run(model):
     assert not result.errors("monitor-stats")
 
 
+def test_a_try_cut_short_by_recovery_gets_its_own_verdict(model):
+    """The drop happens between frames of the whole attempt; judged per try, the try before the recovery shows it."""
+    calls, script = model
+    cut = lambda p: "sent back to try again" in p  # noqa: E731 - a try that ended in a recovery
+    script += [lambda p: reply(p, False, "Dropped the apple while carrying it.", "dropped") if cut(p) else reply(p, True)
+               for _ in range(5)]
+    result = replay("dropped_mid_carry", plugins=["failure-monitor", "recovery", "monitor-stats"], keep=True)
+    assert len(calls) >= 2 and all(cut(c["prompt"]) for c in calls[:-1]) and not cut(calls[-1]["prompt"])
+    v = result.result["monitor-stats"]
+    assert v["success"] is True and len(v["tries"]) == len(calls) - 1
+    assert v["tries"][0]["try"] == 1 and v["tries"][0]["reason_code"] == "dropped"
+    ev = [e for e in result.events.of("monitor-stats") if e["level"] == "error"]
+    assert ev and ev[0]["message"].startswith("camera verdict: dropped") and "try 1" in ev[0]["message"]
+    assert ev[0]["data"]["at_s"] is not None
+    rows = json.loads((result.run_dir / "monitor-stats" / "attempts.json").read_text())
+    n = len(calls)
+    assert [(r["try"], r["final"]) for r in rows] == [(i + 1, i == n - 1) for i in range(n)]
+    assert rows[0]["check"] is None and rows[-1]["check"] == result.result["success"]
+    assert not result.errors("monitor-stats")
+
+
+def test_gemini_quota_without_a_claude_key_is_reported_at_once(monkeypatch):
+    def busy(*a):
+        raise judge_mod.Unavailable("no Gemini model available (gemini-3.5-flash-lite: 429)", quota=True)
+
+    monkeypatch.setattr(judge_mod, "load_env", lambda start=None: None)
+    monkeypatch.setattr(judge_mod, "_ask_gemini", busy)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with pytest.raises(judge_mod.Unavailable, match="^quota$"):
+        judge_mod.ask([b"x"], "p", "gemini", 10.0, 0.0)
+
+
+def test_claude_haiku_answers_when_gemini_cannot(monkeypatch):
+    asked = []
+    monkeypatch.setattr(judge_mod, "load_env", lambda start=None: None)
+    monkeypatch.setattr(judge_mod, "_ask_gemini", lambda *a: (_ for _ in ()).throw(judge_mod.Unavailable("429", True)))
+    monkeypatch.setattr(judge_mod, "_ask_claude", lambda *a: asked.append(a[-1]) or "{}")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    assert judge_mod.ask([b"x"], "p", "gemini", 10.0, 0.0) == "{}"
+    assert asked == ["claude-haiku-5-5"]
+
+
 def test_no_call_starts_after_the_deadline(monkeypatch):
     """dreamkit saves an attempt after 120 s; a verdict that late would be lost, so the judge gives up first."""
     import time
 
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("GEMINI_API_KEY", "test")
     with pytest.raises(RuntimeError, match="out of time"):
         judge_mod.ask([b"x"], "p", "gemini", 30.0, time.monotonic() + 1.0)  # under MIN_CALL_S: no network

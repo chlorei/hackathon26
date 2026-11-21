@@ -26,7 +26,7 @@
   .att-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; }
   .att-head b { font-weight: 600; }
   .att p { margin: 4px 0 0; font-size: 13px; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
   figure { margin: 0; }
   figure img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px;
                border: 2px solid var(--dk-line); background: var(--dk-raised); }
@@ -73,13 +73,15 @@ function h(tag, attrs = {}, ...kids) {
 }
 const s = (tag, attrs = {}, ...kids) => h(tag, { ...attrs, svg: 1 }, ...kids)
 const judged = (r) => typeof r.success === 'boolean'
+const isFinal = (r) => r.final !== false  // an attempt's last try; earlier tries ended in a recovery
+const tries = (ep) => rows.filter((r) => r.episode === ep).length
 const pct = (k, n) => (n ? Math.round((100 * k) / n) + '%' : '–')
 const empty = (box, text) => box.replaceChildren(h('p', { class: 'empty' }, text))
 
 function summary() {
-  const j = rows.filter(judged), ok = j.filter((r) => r.success).length
+  const finals = rows.filter(isFinal), j = finals.filter(judged), ok = j.filter((r) => r.success).length
   const both = j.filter((r) => typeof r.check === 'boolean'), agree = both.filter((r) => r.check === r.success).length
-  $('s-n').textContent = j.length + (rows.length > j.length ? ` / ${rows.length}` : '')
+  $('s-n').textContent = j.length + (finals.length > j.length ? ` / ${finals.length}` : '')
   $('s-ok').textContent = j.length ? String(ok) : '–'
   $('s-rate').textContent = j.length ? `${pct(ok, j.length)} of judged` : ''
   $('s-agree').textContent = pct(agree, both.length)
@@ -88,7 +90,7 @@ function summary() {
 
 // 1. one bar per attempt: height = score, colour = the verdict
 function chartAttempts() {
-  const box = $('c-attempts'), j = rows.filter(judged)
+  const box = $('c-attempts'), j = rows.filter((r) => isFinal(r) && judged(r))
   if (!j.length) return empty(box, 'No judged attempts yet.')
   const W = 560, H = 120, gap = 4, bw = Math.max(4, Math.min(28, (W - 30) / j.length - gap))
   const svg = s('svg', { viewBox: `0 0 ${W} ${H + 18}`, role: 'img', 'aria-label': 'score of each attempt' },
@@ -153,6 +155,7 @@ function list() {
   const box = $('list')
   if (!rows.length) return empty(box, 'No attempts judged in this run yet.')
   box.replaceChildren(...rows.slice().reverse().map((r) => {
+    const name = tries(r.episode) > 1 ? `Attempt ${r.episode} · try ${r.try}` : `Attempt ${r.episode}`
     const pill = !judged(r) ? h('span', { class: 'dk-pill warn' }, 'not judged')
       : h('span', { class: `dk-pill ${r.success ? 'ok' : 'bad'}` }, r.success ? 'success' : 'failed')
     const check = judged(r) && typeof r.check === 'boolean'
@@ -162,8 +165,8 @@ function list() {
     const grid = h('div', { class: 'grid' }, (r.frames || []).map((f, i) => h('figure', { class: f.status || '' },
       f.file ? h('img', { src: DIR + encodeURIComponent(f.file), alt: `frame ${i + 1}`, loading: 'lazy' }) : null,
       h('figcaption', {}, `${f.t_s != null ? f.t_s.toFixed(1) + ' s' : ''}${f.comment ? ' · ' + f.comment : ''}`))))
-    return h('div', { class: `att${r.episode === HERE ? ' here' : ''}`, id: `ep${r.episode}` },
-      h('div', { class: 'att-head' }, h('b', {}, `Attempt ${r.episode}`), pill,
+    return h('div', { class: `att${r.episode === HERE ? ' here' : ''}`, id: `ep${r.episode}${isFinal(r) ? '' : '-' + r.try}` },
+      h('div', { class: 'att-head' }, h('b', {}, name), pill,
         judged(r) ? h('span', { class: 'dk-muted' }, `score ${r.score}`) : null,
         r.model_s != null ? h('span', { class: 'dk-faint' }, `answered in ${r.model_s.toFixed(1)} s`) : null, check),
       r.reason || r.error ? h('p', { class: 'dk-muted' }, r.reason || r.error) : null,
@@ -175,10 +178,10 @@ function list() {
 
 function csvCell(v) { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
 function toCsv() {
-  const cols = ['episode', 'task', 'judge_success', 'score', 'reason_code', 'reason', 'success_check', 'first_error_s', 'model_s', 'error']
+  const cols = ['episode', 'try', 'task', 'judge_success', 'score', 'reason_code', 'reason', 'success_check', 'first_error_s', 'model_s', 'error']
   const lines = rows.map((r) => {
     const bad = (r.frames || []).find((f) => f.status === 'error')
-    return [r.episode, r.task, judged(r) ? r.success : '', r.score, r.reason_code, r.reason, r.check, bad ? bad.t_s : '', r.model_s, r.error]
+    return [r.episode, r.try ?? 1, r.task, judged(r) ? r.success : '', r.score, r.reason_code, r.reason, r.check, bad ? bad.t_s : '', r.model_s, r.error]
       .map(csvCell).join(',')
   })
   return [cols.join(','), ...lines].join('\n') + '\n'
