@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>fine-tune</title>
+<!-- PLUGIN_STANDARD §7a: the server links the theme; this page reads only /media/<run>/fine-tune/ and changes nothing -->
+<style>
+  body { padding: 16px; }
+  main { display: grid; gap: 14px; }
+  .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .head h1 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .stat { padding: 12px 16px; }
+  .stat .dk-big { font-size: 26px; }
+  .stat small { display: block; font-size: 12px; color: var(--dk-dim); }
+  .rows { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; font-size: 13px; }
+  .rows dt { color: var(--dk-dim); }
+  .rows dd { margin: 0; word-break: break-all; }
+  .next { margin: 10px 0 0; font-size: 13px; }
+  code { font-family: var(--dk-font-mono); font-size: 12px; background: var(--dk-raised); padding: 2px 6px;
+         border-radius: 4px; word-break: break-all; }
+  .bar { height: 8px; border-radius: 4px; background: var(--dk-raised); overflow: hidden; margin-top: 8px; }
+  .bar i { display: block; height: 100%; background: var(--dk-ok); }
+  .empty { margin: 0; color: var(--dk-faint); font-size: 13px; }
+  ul { margin: 0; padding-left: 18px; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="head">
+    <h1>Fine-tune <span class="dk-faint" id="run"></span></h1>
+    <a class="dk-btn" id="dl-status" download>status.json</a>
+    <a class="dk-btn" id="dl-job" download hidden>job.json</a>
+  </div>
+  <div class="stats">
+    <div class="dk-card stat"><small>successful attempts</small><div class="dk-big" id="s-eps">–</div>
+      <div class="bar"><i id="s-bar" style="width:0%"></i></div><small id="s-need"></small></div>
+    <div class="dk-card stat"><small>of demonstrations</small><div class="dk-big" id="s-min">–</div><small id="s-frames"></small></div>
+    <div class="dk-card stat"><small>validate_dataset</small><div class="dk-big" id="s-valid">–</div><small id="s-valid-why"></small></div>
+    <div class="dk-card stat"><small>training</small><div class="dk-big" id="s-stage">–</div><small id="s-auto"></small></div>
+  </div>
+  <section class="dk-card"><h2 class="dk-title">Training job</h2><div class="dk-body" id="job"></div></section>
+  <section class="dk-card"><h2 class="dk-title">Runs the data comes from</h2><div class="dk-body" id="sources"></div></section>
+</main>
+<script>
+const q = new URLSearchParams(location.search)
+const RUN = q.get('run_id') || ''
+const DIR = `/media/${encodeURIComponent(RUN)}/fine-tune/`
+const $ = (id) => document.getElementById(id)
+const h = (tag, attrs = {}, ...kids) => {
+  const el = document.createElement(tag)
+  for (const [k, v] of Object.entries(attrs)) if (v != null) el.setAttribute(k, v)
+  for (const k of kids.flat()) if (k != null) el.append(k)
+  return el
+}
+const get = (name) => fetch(DIR + name, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+const STAGES = { uploading: 'uploading', processing: 'processing', processed: 'processed', training: 'training', done: 'ready', failed: 'failed' }
+
+function render(status, job) {
+  $('run').textContent = RUN
+  $('dl-status').href = DIR + 'status.json'
+  if (job) { $('dl-job').href = DIR + 'job.json'; $('dl-job').hidden = false }
+  if (!status) {
+    $('job').replaceChildren(h('p', { class: 'empty' }, 'Nothing yet: the dataset is built when the run ends.'))
+    return
+  }
+  const need = status.min_episodes || 1
+  $('s-eps').textContent = status.episodes
+  $('s-bar').style.width = Math.min(100, (100 * status.episodes) / need) + '%'
+  $('s-need').textContent = status.episodes >= need ? `enough to train (${need} needed)` : `${need - status.episodes} more to train`
+  $('s-min').textContent = (status.duration_s / 60).toFixed(1) + ' min'
+  $('s-frames').textContent = `${status.frames} frames`
+  const v = status.validate || {}
+  $('s-valid').textContent = v.ok ? 'ok' : (status.episodes ? 'fails' : '–')
+  $('s-valid').className = 'dk-big ' + (v.ok ? 'dk-ok' : status.episodes ? 'dk-bad' : '')
+  $('s-valid-why').textContent = v.ok ? 'Dream Labs’ own dataset checks' : (v.error || '')
+  const stage = job && job.stage
+  $('s-stage').textContent = stage ? STAGES[stage] || stage : 'not started'
+  $('s-stage').className = 'dk-big ' + (stage === 'done' ? 'dk-ok' : stage === 'failed' ? 'dk-bad' : '')
+  $('s-auto').textContent = status.auto_train ? 'auto_train on' : 'auto_train off'
+
+  const rows = []
+  const row = (k, v) => v != null && v !== '' && rows.push(h('dt', {}, k), h('dd', {}, v))
+  if (job) {
+    row('dataset', job.dataset_name)
+    row('dataset id', job.dataset_id)
+    row('attempts uploaded', job.episodes)
+    row('job', job.job_id)
+    row('model', job.model ? h('code', {}, job.model) : null)
+    row('error', job.error)
+  }
+  const next = h('p', { class: 'next' })
+  if (job && job.model) {
+    next.append('Compare it with the base model on the same scenes: ',
+      h('code', {}, `python examples/ab_test.py --models dreamlabs/dream-1-beta,${job.model} --episodes 20`))
+  } else if (stage === 'training' || stage === 'processing') {
+    next.append('Training takes hours. Each new run asks Dream Labs about it; the model id appears here when ready.')
+  } else if (v.ok && status.episodes >= need && !status.auto_train) {
+    next.append('Ready. Switch on ', h('code', {}, 'auto_train'), ' in the fine-tune settings (Plugins page) and run once more: it uploads and starts training (fine-tuning credits).')
+  } else if (!v.ok && status.episodes) {
+    next.append('Fix what validate_dataset says before training.')
+  } else {
+    next.append('Collecting: switch on harvester and success-check and run more attempts.')
+  }
+  $('job').replaceChildren(rows.length ? h('dl', { class: 'rows' }, rows) : h('p', { class: 'empty' }, 'No job yet.'), next)
+  $('sources').replaceChildren((status.sources || []).length
+    ? h('ul', {}, status.sources.map((r) => h('li', {}, r, r === RUN ? ' (this run)' : '')))
+    : h('p', { class: 'empty' }, 'No successful attempts found.'))
+}
+
+Promise.all([get('status.json'), get('job.json')]).then(([s, j]) => render(s, j))
+</script>
+</body>
+</html>
