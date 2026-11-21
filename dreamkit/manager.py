@@ -23,6 +23,7 @@ from .standard import HOOKS, PluginStandardError, Problem
 
 BUILTIN_MODULES = ("success_check", "failure_monitor", "camera_check", "recovery", "recorder", "harvester")
 LOCAL_DIRS = (Path("~/.dreamkit/plugins").expanduser(), Path("plugins"))
+GENERATED_DIR = "plugins-generated"  # the Create tab's checked packages, beside the config's plugins/ folder
 ## Hooks that run inside a control step and count against the budget (§5).
 STEP_HOOKS = ("before_model", "after_model", "on_step")
 STEP_BUDGET_MS = 5.0
@@ -69,15 +70,22 @@ def discover(extra_dirs: list[Path] | None = None) -> tuple[dict[str, dict[str, 
             continue
         dist = ep.dist.name if ep.dist else "?"
         take(lambda ep=ep: [ep.load()], "pip", f"{dist}:{ep.value}")
-    # plugin packages not installed yet (dreamkit check / test / bench / install run on a source folder)
-    for src in filter(None, os.environ.get("DREAMKIT_PLUGIN_PATH", "").split(os.pathsep)):
-        root = Path(src).resolve()
+    # plugin packages not installed yet (dreamkit check / test / bench / install run on a source folder), and the
+    # panel's Create tab's packages: plugins-generated/<name>/ next to the local plugins/ folder
+    roots = [(Path(src), "source") for src in filter(None, os.environ.get("DREAMKIT_PLUGIN_PATH", "").split(os.pathsep))]
+    roots += [(p, "generated") for d in extra_dirs or [] for p in sorted((d.parent / GENERATED_DIR).glob("*"))
+              if p.is_dir()]
+    for src, source in roots:
+        root = src.resolve()
         if str(root) not in sys.path:
             sys.path.insert(0, str(root))
         for pkg in sorted(p.parent for p in root.glob("*/__init__.py")):
             if pkg.name in ("tests",) or pkg.name.startswith("."):
                 continue
-            take(lambda pkg=pkg: _classes_in(importlib.import_module(pkg.name)), "source", str(pkg))
+            if source == "generated":  # may have been regenerated since: import it afresh
+                for mod in [m for m in sys.modules if m == pkg.name or m.startswith(pkg.name + ".")]:
+                    del sys.modules[mod]
+            take(lambda pkg=pkg: _classes_in(importlib.import_module(pkg.name)), source, str(pkg))
     for folder in [*LOCAL_DIRS, *(extra_dirs or [])]:
         if not folder.is_dir():
             continue

@@ -14,3 +14,4 @@ labels.csv
 MUJOCO_LOG.TXT
 /gym/
 .env
+plugins-generated/

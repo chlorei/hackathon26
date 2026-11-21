@@ -40,6 +40,15 @@ class InstallRequest(BaseModel):
     name: str
 
 
+class CreateRequest(BaseModel):
+    messages: list[dict[str, str]]  # the chat so far: [{"role": "user" | "assistant", "text": ...}]
+    files: dict[str, str] | None = None  # the current package, when the chat refines it
+
+
+class CatalogRequest(BaseModel):
+    enable: bool = False  # also switch it on in dreamkit.yaml
+
+
 class Label(BaseModel):
     success: bool
 
@@ -260,6 +269,54 @@ def create_app(config_path: str | Path) -> FastAPI:
         host.refresh()
         return {"ok": ok, "log": log, "app": next((a.title for a in host.apps.values()
                                                   if body.name in (a.name, *a.aliases)), None)}
+
+    # -- Create: a plugin described in words, written by a model, checked like dreamkit install ---------------------
+    def create_job(job_id: str):
+        from . import create
+
+        job = create.JOBS.get(job_id)
+        if job is None:
+            raise HTTPException(404, "no such plugin draft")
+        return job
+
+    @app.post("/api/create")
+    def create_start(body: CreateRequest):
+        from . import create
+
+        if not any(m.get("role") == "user" and str(m.get("text", "")).strip() for m in body.messages):
+            raise HTTPException(400, "describe the plugin first")
+        _, base = load_cfg()
+        found, _ = discover([base / "plugins"])
+        taken = {n for n, e in found.items() if e["source"] != "generated"} | set(host.apps)
+        return create.start(body.messages, body.files, taken).public()
+
+    @app.get("/api/create/{job_id}")
+    def create_get(job_id: str):
+        return create_job(job_id).public()
+
+    @app.post("/api/create/{job_id}/catalog")
+    def create_catalog(job_id: str, body: CatalogRequest):
+        from . import create
+
+        job = create_job(job_id)
+        _, base = load_cfg()
+        try:
+            create.add_to_catalog(job, base)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return update_plugin(job.name, PluginUpdate(enabled=body.enable)) if body.enable else plugin_list()
+
+    @app.get("/api/create/{job_id}/zip")
+    def create_zip(job_id: str):
+        from . import create
+
+        job = create_job(job_id)
+        try:
+            data = create.zip_bytes(job)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+        return Response(data, media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{job.name}.zip"'})
 
     # -- runs (the monitor) ------------------------------------------------------------------------------------
     @app.get("/api/live")

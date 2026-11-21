@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react'
 import clsx from 'clsx'
 import { useQuery } from '@tanstack/react-query'
-import { History, Plug, Radio } from 'lucide-react'
+import { History, Plug, Radio, Sparkles } from 'lucide-react'
 import LivePage from './pages/LivePage'
 import PluginsPage from './pages/PluginsPage'
+import CreatePage from './pages/CreatePage'
 import HistoryPage from './pages/HistoryPage'
 import AppPage from './pages/AppPage'
 import { api } from './api'
 import { PluginIcon, Tag } from './ui'
 
-type Route = { page: 'live' | 'plugins' | 'history' | 'app'; runId: string | null; episode: number | null }
+type Route = { page: 'live' | 'plugins' | 'create' | 'history' | 'app'; runId: string | null; episode: number | null }
 
-// Hash routes: #/live, #/plugins, #/history, #/history/<run>/<episode>, #/app/<app plugin>
+// Hash routes: #/live, #/plugins, #/create, #/history, #/history/<run>/<episode>, #/app/<app plugin>
 function parse(hash: string): Route {
   const [page, runId, episode] = hash.replace(/^#\/?/, '').split('/')
   if (page === 'app' && runId) return { page: 'app', runId, episode: null }
   if (page === 'plugins') return { page: 'plugins', runId: null, episode: null }
+  if (page === 'create') return { page: 'create', runId: null, episode: null }
   if (page === 'history') return { page: 'history', runId: runId || null, episode: episode ? Number(episode) : null }
   return { page: 'live', runId: null, episode: null }
 }
@@ -36,6 +38,7 @@ export default function App() {
   const tabs = [
     { page: 'live', label: 'Live', icon: Radio, hash: '/live' },
     { page: 'plugins', label: 'Plugins', icon: Plug, hash: '/plugins' },
+    { page: 'create', label: 'Create', icon: Sparkles, hash: '/create' },
     { page: 'history', label: 'History', icon: History, hash: '/history' },
   ] as const
 
@@ -72,6 +75,7 @@ export default function App() {
       <main className="mx-auto w-full max-w-[1680px] flex-1 px-7 py-6">
         {route.page === 'live' && <LivePage onOpenRun={openRun} />}
         {route.page === 'plugins' && <PluginsPage />}
+        {route.page === 'create' && <CreatePage onOpenPlugins={() => go('/plugins')} />}
         {route.page === 'app' && route.runId && <AppPage app={(apps.data?.apps ?? []).find((a) => a.name === route.runId)} name={route.runId} />}
         {route.page === 'history' && (
           <HistoryPage runId={route.runId} episode={route.episode} onOpen={(id, ep) => openRun(id, ep)} onBack={() => go('/history')} />

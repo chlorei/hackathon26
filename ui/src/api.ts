@@ -196,6 +196,33 @@ export const api = {
   harvest: (id: string) => call<{ success: number; failed: number; validation: Validation | null }>(`/api/runs/${id}/harvest`),
   validateHarvest: (id: string) => call<Validation>(`/api/runs/${id}/harvest/validate`, { method: 'POST' }),
   deleteRun: (id: string) => call<{ ok: boolean }>(`/api/runs/${id}`, { method: 'DELETE' }),
+  // Create: a plugin described in words (dreamkit/create.py)
+  create: (messages: ChatMessage[], files?: Record<string, string> | null) =>
+    call<CreateJob>('/api/create', { method: 'POST', body: JSON.stringify({ messages, files: files ?? null }) }),
+  createJob: (id: string) => call<CreateJob>(`/api/create/${id}`),
+  addToCatalog: (id: string, enable: boolean) =>
+    call<{ plugins: PluginInfo[] }>(`/api/create/${id}/catalog`, { method: 'POST', body: JSON.stringify({ enable }) }),
+}
+
+export const createZipUrl = (id: string) => `/api/create/${id}/zip`
+
+export interface ChatMessage { role: 'user' | 'assistant'; text: string }
+
+export interface CreateJob {
+  id: string
+  status: 'running' | 'ready' | 'failed'
+  steps: { t: number; text: string }[]
+  name: string | null
+  summary: string
+  files: Record<string, string>
+  checks: Record<string, { ok: boolean; out: string }>
+  info: {
+    name?: string; description?: string; hooks?: string[]; group?: string; icon?: string; needs?: string[]
+    step_rate_hz?: number; params?: { properties?: Record<string, SchemaProp> }; defaults?: Record<string, unknown>
+  }
+  model: string | null
+  tries: number
+  error: string | null
 }
 
 export interface Validation {

@@ -172,7 +172,7 @@ function PluginRow({ plugin, open, onOpen, lead, lastRun, onPage }: {
           )}
           <div className="flex items-center gap-2 pt-1">
             <span className="flex-1 text-[12.5px] text-bad">{error}</span>
-            {external && <Button variant="stop" onClick={() => remove.mutate()} disabled={remove.isPending}><Trash2 className="h-3.5 w-3.5" /> Uninstall</Button>}
+            {external && <Button variant="stop" onClick={() => remove.mutate()} disabled={remove.isPending}><Trash2 className="h-3.5 w-3.5" /> {plugin.source === 'generated' ? 'Delete' : 'Uninstall'}</Button>}
             {props.length > 0 && <Button variant="quiet" onClick={() => setValues(plugin.defaults)}>Defaults</Button>}
             {props.length > 0 && <Button variant="go" disabled={!dirty || update.isPending} onClick={() => update.mutate({ params: values })}>Save settings</Button>}
           </div>

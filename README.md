@@ -208,6 +208,21 @@ machine: install what you trust.
 To publish yours: `dreamkit new my-check`, edit `my_check.py`, push it to GitHub, and add an entry to `registry.yaml`
 here with a pull request. `plugins-external/gripper-check/` is a complete example.
 
+## Create a plugin by describing it
+
+The panel's **Create** tab: say what to watch ("warn when a hand moves faster than 1.5 rad/s near the bowl"), a model
+writes the plugin, and dreamkit runs it through the same filter as `dreamkit install` (the standard, its replay
+tests, the 1 ms budget) before you see it; refused packages go back to the model with the problems, three tries at
+most. Keep chatting to change it ("make the threshold 0.5"). **Add to catalog** puts it in `plugins-generated/<name>/`
+next to `dreamkit.yaml` (listed as *generated* on the Plugins page, where Delete removes it); **Download .zip** gives
+you the package. Keys come from `.env`: `GEMINI_API_KEY` (and `ANTHROPIC_API_KEY` for Claude when Gemini is out of
+quota).
+
+Generated plugins only watch: observe capability, diagnosis or safety group, no network, files or subprocesses. The
+code is scanned before it runs and checked in a separate process without your API keys; it is still code a model
+wrote, so read it (the Code panel) before you keep it. The checks prove it follows the standard, not that its idea
+is right: a plugin can pass and still measure the wrong thing.
+
 ## The whole config
 
 `dreamkit.yaml` says which plugins run and how — nothing else. What to run (task, attempts, model, mock, seed) is

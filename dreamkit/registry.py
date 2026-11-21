@@ -117,6 +117,12 @@ def uninstall(name: str, found: dict[str, dict[str, Any]]) -> subprocess.Complet
     if entry["source"] == "local":
         Path(entry["origin"]).unlink(missing_ok=True)
         return subprocess.CompletedProcess([name], 0, f"removed {entry['origin']}\n", "")
+    if entry["source"] == "generated":  # plugins-generated/<name>/<module>: the whole package folder goes
+        package = Path(entry["origin"]).resolve().parent
+        if package.parent.name != "plugins-generated":
+            return subprocess.CompletedProcess([name], 1, "", f"{package} is not a generated plugin's folder\n")
+        shutil.rmtree(package)
+        return subprocess.CompletedProcess([name], 0, f"removed {package}\n", "")
     dist = entry["origin"].split(":")[0]
     return subprocess.run(pip_command("uninstall", "-y", dist) if "uv" not in pip_command()[0]
                           else pip_command("uninstall", dist), capture_output=True, text=True)
