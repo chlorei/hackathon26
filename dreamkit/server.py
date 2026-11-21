@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
 import shutil
 import sys
@@ -13,9 +14,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -24,6 +25,8 @@ from . import registry, storage
 from .manager import describe, discover
 
 UI_DIST = Path(__file__).resolve().parent / "ui_dist"
+THEME = Path(__file__).resolve().parent / "theme" / "dreamkit-theme.css"  # shared with plugin pages (§7a)
+THEME_LINK = '<link rel="stylesheet" href="/theme/dreamkit-theme.css">'
 LIVE_FRESH_S = 10.0  # a run whose heartbeat is older than this is not live
 POLL_S = 0.12
 
@@ -399,12 +402,51 @@ def create_app(config_path: str | Path) -> FastAPI:
                 pass
 
     @app.get("/media/{run_id}/{path:path}")
-    def media(run_id: str, path: str):
+    def media(run_id: str, path: str, request: Request):
         root = run_folder(run_id)
         target = (root / path).resolve()
         if root not in target.parents or not target.is_file():
             raise HTTPException(404, "not found")
-        return FileResponse(target)
+        response = FileResponse(target)
+        # §7a: a plugin page runs sandboxed (origin "null"); it may read its own plugin's files, nothing else.
+        if request.headers.get("origin") == "null" and len(Path(path).parts) > 1:
+            if Path(path).parts[0] in plugin_pages():
+                response.headers["Access-Control-Allow-Origin"] = "null"
+        return response
+
+    def plugin_pages() -> dict[str, Path]:
+        """§7a: plugin name -> its page (manifest ui), for the plugins that ship one."""
+        _, base = load_cfg()
+        found, _ = discover([base / "plugins"])
+        out = {}
+        for name, entry in found.items():
+            ui = getattr(entry["cls"].manifest, "ui", None)
+            if ui:
+                out[name] = (Path(inspect.getfile(entry["cls"])).resolve().parent / ui).resolve()
+        return out
+
+    @app.get("/theme/dreamkit-theme.css")
+    def theme():
+        return FileResponse(THEME, media_type="text/css")
+
+    @app.get("/plugin-ui/{name}/{path:path}")
+    def plugin_ui(name: str, path: str = ""):
+        """A plugin's own page with the theme linked in; files next to it are served from the same folder."""
+        page = plugin_pages().get(name)
+        if page is None or not page.is_file():
+            raise HTTPException(404, "this plugin has no page")
+        folder = page.parent
+        target = page if not path else (folder / path).resolve()
+        if target != page and (folder not in target.parents or not target.is_file()):
+            raise HTTPException(404, "not found")
+        if target.suffix.lower() not in (".html", ".htm"):
+            return FileResponse(target)
+        html = target.read_text(errors="replace")
+        head = f'<base href="/plugin-ui/{name}/">{THEME_LINK}'
+        lower = html.lower()
+        at = lower.find("<head>")
+        html = html[: at + 6] + head + html[at + 6 :] if at >= 0 else head + html
+        return Response(html, media_type="text/html")
 
     if (UI_DIST / "index.html").is_file():
         app.mount("/", StaticFiles(directory=UI_DIST, html=True), name="ui")

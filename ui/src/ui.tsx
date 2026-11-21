@@ -238,3 +238,38 @@ export function Sparkline({ live, field, label, unit, color, scale = 1, max, war
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// A plugin's own page (PLUGIN_STANDARD.md §7a): a side panel with a sandboxed iframe. The server links the theme in.
+export type PluginPage = { plugin: string; runId: string; episode: number | null }
+
+export function PluginPageDrawer({ page, onClose }: { page: PluginPage | null; onClose: () => void }) {
+  useEffect(() => {
+    if (!page) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [page, onClose])
+  if (!page) return null
+  const q = new URLSearchParams({ run_id: page.runId, ...(page.episode != null ? { attempt: String(page.episode) } : {}) })
+  return (
+    <aside className="fixed inset-y-0 right-0 z-40 flex w-[min(620px,100vw)] flex-col border-l border-line bg-base shadow-[0_0_40px_rgba(0,0,0,.12)]"
+      role="dialog" aria-label={`${page.plugin} page`}>
+      <div className="flex items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
+        <PluginIcon name={page.plugin} />
+        <span className="text-[14px] font-medium">{page.plugin}</span>
+        {page.episode != null && <span className="text-[12px] text-faint">attempt {page.episode}</span>}
+        <button onClick={onClose} className="ml-auto rounded-md px-2 py-0.5 text-[13px] text-dim hover:bg-raised hover:text-ink" aria-label="Close">
+          Close <kbd>Esc</kbd>
+        </button>
+      </div>
+      <iframe key={`${page.plugin}-${q}`} title={`${page.plugin} page`} src={`/plugin-ui/${encodeURIComponent(page.plugin)}/?${q}`}
+        sandbox="allow-scripts allow-downloads" className="w-full flex-1 border-0 bg-base" />
+    </aside>
+  )
+}
+
+/** The plugins that ship a page (manifest ui), from /api/plugins. */
+export function pagesOf(plugins: { name: string; manifest?: { ui?: string | null } }[] | undefined): Set<string> {
+  return new Set((plugins ?? []).filter((p) => p.manifest?.ui).map((p) => p.name))
+}

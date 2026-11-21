@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CameraOff, FolderOpen } from 'lucide-react'
 import { api, atOf, REASON_LABEL, tOf, type EpisodeResult, type EventRecord } from '../api'
 import { useLive, useRunStream, type LiveStore } from '../useRunStream'
-import { AttemptStrip, Button, ICON_BY_PLUGIN, LEVEL_TONE, Outcome, Panel, PanelTitle, PluginIcon, Sparkline, Tag, type Mark } from '../ui'
+import { AttemptStrip, Button, ICON_BY_PLUGIN, LEVEL_TONE, Outcome, pagesOf, Panel, PanelTitle, PluginIcon, PluginPageDrawer, Sparkline, Tag, type Mark, type PluginPage } from '../ui'
 
 const CAMS: Record<string, string> = { top: 'Overhead', left: 'Left wrist', right: 'Right wrist' }
 
@@ -26,6 +26,8 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
   const live = useQuery({ queryKey: ['live'], queryFn: api.live, refetchInterval: 2000 })
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   for (const p of plugins.data?.plugins ?? []) ICON_BY_PLUGIN[p.name] = p.icon
+  const pages = useMemo(() => pagesOf(plugins.data?.plugins), [plugins.data])
+  const [page, setPage] = useState<PluginPage | null>(null)
   const [runId, setRunId] = useState<string | null>(null)
   useEffect(() => {
     const id = live.data?.id
@@ -92,7 +94,9 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
             <Button variant="quiet" onClick={() => onOpenRun(runId)}>Open in History</Button>
           </div>
         </Panel>
-        <Feed events={stream.events} onWatch={(ep) => onOpenRun(runId, ep)} />
+        <Feed events={stream.events} onWatch={(ep) => onOpenRun(runId, ep)} pages={pages}
+          onPage={(plugin, episode) => setPage({ plugin, runId, episode })} />
+        <PluginPageDrawer page={page} onClose={() => setPage(null)} />
       </div>
     </div>
   )
@@ -227,7 +231,12 @@ function Attempts({ episodes, current, onOpen }: {
   )
 }
 
-function Feed({ events, onWatch }: { events: EventRecord[]; onWatch: (episode: number) => void }) {
+function Feed({ events, onWatch, pages, onPage }: {
+  events: EventRecord[]
+  onWatch: (episode: number) => void
+  pages: Set<string>  // plugins with a page of their own (§7a): their lines open it
+  onPage: (plugin: string, episode: number | null) => void
+}) {
   const [only, setOnly] = useState<'all' | 'problems'>('all')
   const box = useRef<HTMLDivElement>(null)
   const shown = useMemo(() => (only === 'problems' ? events.filter((e) => e.level === 'warn' || e.level === 'error') : events).slice(-150), [events, only])
@@ -251,7 +260,13 @@ function Feed({ events, onWatch }: { events: EventRecord[]; onWatch: (episode: n
         {shown.map((e, i) => {
           const verdict = e.plugin === 'failure-monitor' && e.level === 'error' && Boolean(e.data.reason)
           return (
-            <div key={`${e.ts}-${i}`} className={clsx('flex gap-2.5 border-b border-line/60 px-4 py-2', verdict && 'bg-bad-soft')}>
+            <div key={`${e.ts}-${i}`} className={clsx('flex gap-2.5 border-b border-line/60 px-4 py-2', verdict && 'bg-bad-soft',
+              pages.has(e.plugin) && 'cursor-pointer hover:bg-raised/50')}
+              {...(pages.has(e.plugin) ? {
+                role: 'button', tabIndex: 0, title: `Open ${e.plugin}'s page`,
+                onClick: () => onPage(e.plugin, e.episode ?? null),
+                onKeyDown: (k: KeyboardEvent) => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); onPage(e.plugin, e.episode ?? null) } },
+              } : {})}>
               <PluginIcon name={e.plugin} className={clsx('mt-0.5', LEVEL_TONE[e.level])} />
               <div className="min-w-0 flex-1">
                 <p className={clsx('text-[13px]', verdict ? 'font-medium text-bad' : e.level === 'info' ? 'text-ink' : LEVEL_TONE[e.level])}>{e.message}</p>
@@ -260,6 +275,7 @@ function Feed({ events, onWatch }: { events: EventRecord[]; onWatch: (episode: n
                   <button onClick={() => onWatch(e.episode!)} className="mt-1 text-[12px] text-signal hover:underline">Watch from {Math.max(0, Number(e.data.at_s ?? e.data.at) - 1).toFixed(1)} s</button>
                 )}
               </div>
+              {pages.has(e.plugin) && <span className="self-center text-[16px] text-faint" aria-hidden>›</span>}
             </div>
           )
         })}

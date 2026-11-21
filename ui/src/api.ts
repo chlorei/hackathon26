@@ -95,7 +95,7 @@ export interface PluginInfo {
   icon: string
   capability: 'observe' | 'modify_actions' | 'control'
   needs: ('robot' | 'world')[]
-  manifest: { hooks?: string[]; step_rate_hz?: number; needs_frames?: boolean; requires?: string[]; conflicts?: string[] }
+  manifest: { hooks?: string[]; step_rate_hz?: number; needs_frames?: boolean; requires?: string[]; conflicts?: string[]; ui?: string | null }
   schema: { properties?: Record<string, SchemaProp>; required?: string[] }
   params: Record<string, unknown>
   defaults: Record<string, unknown>

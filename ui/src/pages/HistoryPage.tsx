@@ -4,7 +4,7 @@ import clsx from 'clsx'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ArrowLeft, Clapperboard, Database, FileText, FolderOpen, Trash2 } from 'lucide-react'
 import { api, atOf, recoveriesOf, REASON_LABEL, type EpisodeResult, type RunInfo } from '../api'
-import { AttemptStrip, Button, Outcome, Panel, PanelTitle, Tag, when, type Mark } from '../ui'
+import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginIcon, PluginPageDrawer, Tag, when, type Mark, type PluginPage } from '../ui'
 
 const TIP = { contentStyle: { background: '#ffffff', border: '1px solid #e4e2dc', borderRadius: 8, fontSize: 12, color: '#17181a' } }
 const BAD_KINDS = new Set(['separated', 'fell', 'collision', 'stalled'])
@@ -79,6 +79,10 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
 
 function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: number | null; onBack: () => void; onOpen: (id: string, ep?: number) => void }) {
   const run = useQuery({ queryKey: ['run', id], queryFn: () => api.run(id), refetchInterval: (q) => (q.state.data?.live ? 3000 : false) })
+  const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
+  for (const p of plugins.data?.plugins ?? []) ICON_BY_PLUGIN[p.name] = p.icon
+  const pages = useMemo(() => pagesOf(plugins.data?.plugins), [plugins.data])
+  const [page, setPage] = useState<PluginPage | null>(null)
   const episodes = run.data?.episodes ?? []
   const selected = initial ?? (episodes.find((e) => e.success === false) ?? episodes[0])?.episode ?? null
   const ep = episodes.find((e) => e.episode === selected) ?? null
@@ -127,7 +131,9 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
             ))}
           </ul>
         </Panel>
-        {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} /> : <p className="text-faint">This run has no finished attempts.</p>}
+        {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} pages={pages}
+          onPage={(plugin) => setPage({ plugin, runId: id, episode: ep.episode })} /> : <p className="text-faint">This run has no finished attempts.</p>}
+        <PluginPageDrawer page={page} onClose={() => setPage(null)} />
       </div>
     </div>
   )
@@ -202,7 +208,14 @@ function DeleteRun({ id, live, onDone }: { id: string; live: boolean; onDone: ()
   )
 }
 
-function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult; seconds: number }) {
+function EpisodeView({ runId, ep, seconds, pages, onPage }: {
+  runId: string; ep: EpisodeResult; seconds: number
+  pages: Set<string>  // plugins with a page of their own (§7a)
+  onPage: (plugin: string) => void
+}) {
+  // this attempt's lines from plugins that ship a page: their badges, or their name; a click opens the page
+  const pageRows = [...pages].filter((p) => ep.ui?.[p] || (ep as unknown as Record<string, unknown>)[p])
+    .map((p) => ({ plugin: p, text: (ep.ui?.[p]?.badges ?? []).map((b) => b.text).join(' · ') || `${p}: open the page` }))
   // recorder/ep003_top.mp4 (standard) or ep3/top.mp4 (older runs): camera name -> path in the run folder
   const videoOf: Record<string, string> = Object.fromEntries(ep.videos.map((v) => {
     const stem = v.split('/').pop()!.replace('.mp4', '')
@@ -274,9 +287,18 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
         {ep.recap?.headline && <p className="border-t border-line px-4 py-3 text-[13px] text-dim">{ep.recap.headline}</p>}
       </Panel>
 
-      {((ep.timeline?.length ?? 0) > 0 || failed) && (
+      {((ep.timeline?.length ?? 0) > 0 || failed || pageRows.length > 0) && (
         <Panel>
           <PanelTitle>Moments</PanelTitle>
+          {pageRows.map((row) => (
+            <button key={row.plugin} onClick={() => onPage(row.plugin)} title={`Open ${row.plugin}'s page`}
+              className="flex w-full items-center gap-3 border-t border-line px-4 py-2 text-left text-[13px] hover:bg-raised/50">
+              <PluginIcon name={row.plugin} className="text-dim" />
+              <span className="min-w-0 flex-1 truncate">{row.text}</span>
+              <span className="text-[11px] text-faint">{row.plugin}</span>
+              <span className="text-[16px] text-faint" aria-hidden>›</span>
+            </button>
+          ))}
           {failed && (
             <button onClick={() => seek(start)} className="flex w-full gap-3 border-y border-line bg-bad-soft px-4 py-2 text-left text-[13px] hover:brightness-95">
               <span className="w-12 shrink-0 text-right text-bad">{at!.toFixed(1)} s</span>

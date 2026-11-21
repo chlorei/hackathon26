@@ -1,0 +1,108 @@
+/* dreamkit-theme.css — the panel's look, shared (PLUGIN_STANDARD.md §7a).
+   The panel imports these variables; a plugin's own page gets this file from the server (/theme/dreamkit-theme.css)
+   and may use nothing else for colours and fonts. DreamGym design spec: light, calm, instrument-like (reads well on
+   a projector). Warm light-grey page, white cards, thin borders, almost no shadows. Colour only with meaning:
+   green = success, red = failure, blue = in progress. */
+
+:root {
+  --dk-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --dk-font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --dk-base: #f6f5f2;         /* page */
+  --dk-panel: #ffffff;        /* cards, header, inputs */
+  --dk-raised: #efede8;       /* under-layers, empty bars, active tab */
+  --dk-line: #e4e2dc;         /* borders */
+  --dk-ink: #17181a;          /* text, primary buttons */
+  --dk-dim: #5c6067;          /* secondary text, captions */
+  --dk-faint: #82868c;
+  --dk-signal: #2f5bd3;       /* in progress */
+  --dk-signal-soft: #e6ecfb;
+  --dk-ok: #1f8a5b;
+  --dk-ok-soft: #e3f2ea;
+  --dk-bad: #c8402f;
+  --dk-bad-soft: #fbe9e6;
+  --dk-warn: #b7791f;
+  --dk-steel: #2f8fb3;
+  --dk-violet: #8a5cc2;
+  --dk-log: #16181c;
+  --dk-scrollbar: #d8d5ce;
+
+  /* categories (failure reasons, chart series), in this order */
+  --dk-cat-1: #c8402f;
+  --dk-cat-2: #d9822b;
+  --dk-cat-3: #8a5cc2;
+  --dk-cat-4: #2f8fb3;
+  --dk-cat-5: #7a7f87;
+  --dk-cat-6: #b34b8a;
+  --dk-cat-7: #5d8a2f;
+  --dk-cat-8: #3c4a5c;
+}
+
+/* ---- base: the same body as the panel -------------------------------------------------------------------------- */
+html, body { margin: 0; }
+body {
+  background: var(--dk-base);
+  color: var(--dk-ink);
+  font-family: var(--dk-font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+:focus-visible { outline: 2px solid var(--dk-signal); outline-offset: 2px; border-radius: 6px; }
+kbd { background: var(--dk-panel); border: 1px solid var(--dk-line); border-bottom-width: 2px; border-radius: 5px;
+      padding: 0 5px; font-family: var(--dk-font-mono); font-size: 12px; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--dk-scrollbar); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+@keyframes dk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+.dk-pulse { animation: dk-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---- components (the panel's Panel, PanelTitle, Tag, Button, …) ------------------------------------------------ */
+.dk-card { background: var(--dk-panel); border: 1px solid var(--dk-line); border-radius: 12px; }
+.dk-card > .dk-body { padding: 0 20px 16px; }
+.dk-title { margin: 0; padding: 16px 20px 10px; font-size: 13px; font-weight: 600; text-transform: uppercase;
+            letter-spacing: .06em; color: var(--dk-dim); }
+.dk-muted { color: var(--dk-dim); }
+.dk-faint { color: var(--dk-faint); }
+.dk-ok { color: var(--dk-ok); }
+.dk-bad { color: var(--dk-bad); }
+.dk-warn { color: var(--dk-warn); }
+.dk-mono { font-family: var(--dk-font-mono); }
+.dk-big { font-size: 34px; font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+
+.dk-pill { display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 12px; font-weight: 600;
+           background: var(--dk-raised); color: var(--dk-dim); }
+.dk-pill.ok { background: var(--dk-ok-soft); color: var(--dk-ok); }
+.dk-pill.bad { background: var(--dk-bad-soft); color: var(--dk-bad); }
+.dk-pill.run { background: var(--dk-signal-soft); color: var(--dk-signal); }
+.dk-pill.warn { background: var(--dk-raised); color: var(--dk-warn); }
+
+.dk-chip { display: inline-flex; gap: 5px; padding: 1px 9px; border: 1px solid var(--dk-line); border-radius: 20px;
+           background: var(--dk-panel); font-size: 12.5px; }
+.dk-chip > span { color: var(--dk-dim); }
+
+.dk-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--dk-faint); flex: none; }
+.dk-dot.ok { background: var(--dk-ok); } .dk-dot.bad { background: var(--dk-bad); }
+.dk-dot.run { background: var(--dk-signal); animation: dk-pulse 1.4s ease-in-out infinite; }
+
+.dk-bar { height: 8px; border-radius: 4px; background: var(--dk-raised); overflow: hidden; }
+.dk-bar > i { display: block; height: 100%; border-radius: 4px; background: var(--dk-ok); }
+
+.dk-btn { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border: 1px solid var(--dk-line);
+          border-radius: 8px; background: var(--dk-panel); color: var(--dk-ink); font: inherit; font-size: 13px;
+          font-weight: 500; text-decoration: none; cursor: pointer; }
+.dk-btn:hover { background: var(--dk-raised); }
+.dk-btn.go { background: var(--dk-ink); border-color: var(--dk-ink); color: var(--dk-panel); }
+
+.dk-cells { display: flex; flex-wrap: wrap; gap: 5px; }
+.dk-cell { width: 16px; height: 16px; border: 0; padding: 0; border-radius: 4px; background: var(--dk-raised); }
+.dk-cell.ok { background: var(--dk-ok); } .dk-cell.bad { background: var(--dk-bad); }
+.dk-cell.warn { background: var(--dk-warn); }
+
+.dk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.dk-table th { text-align: left; font-weight: 600; font-size: 12px; color: var(--dk-dim);
+               padding: 6px 10px 6px 0; border-bottom: 1px solid var(--dk-line); }
+.dk-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--dk-line); vertical-align: top; }
+.dk-table tr:last-child td { border-bottom: 0; }
