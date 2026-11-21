@@ -129,6 +129,9 @@ python examples/sim_loop.py --episodes 10   # the same with Dream-1 (uses credit
 python examples/sim_loop.py --mock --behaviors dropped,grasped_air,released_off_target,success \
        --fault-camera top --fault-episode 4 # the demo: every plugin gets something to do
 python examples/recovery_ab.py --episodes 10  # Dream-1, same seeds with and without recovery (uses credits)
+python examples/ab_test.py --tune --episodes 10   # prompt tuner: paraphrases of the task, same seeds, ranked with proof
+python examples/ab_test.py --models dreamlabs/dream-1-beta,<fine-tune id> --episodes 20   # base vs fine-tune
+python examples/finetune.py --runs <run-id...>    # harvested successes -> validated -> upload -> fine-tune (--status)
 dreamkit ui                                 # the panel: Live / Plugins / History
 dreamkit harvest export <run-id...>         # successful episodes -> ./harvest, checked with validate_dataset
 dreamkit list | search | install | new      # plugins
@@ -154,6 +157,14 @@ path and an *Open folder* button):
 **Less CPU.** Switch on *Light mode* in the panel (or `light: true` in `dreamkit.yaml`): cameras are rendered at
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
 cameras and graphs outside React and pauses when its tab is hidden.
+
+## DreamGym (in this repo)
+
+`dreamgym serve` opens a second app on http://127.0.0.1:8765 that drives the simulator itself: **Arena** (success rate
+with a 95% interval over seeded, randomised scenes, failure GIFs), **Compare** and **Prompt Tuner** (same seeds,
+McNemar's test), **Data & fine-tune** (scripted demos, Harvester, `validate_dataset`, upload + train, job status) and
+**Teleop** (keyboard control in the browser, recorded as LeRobot v2.1). See [dreamgym/README.md](dreamgym/README.md).
+Its numbers per run also come to dreamkit runs through the `reliability` plugin.
 
 ## Add plugins from GitHub
 
