@@ -182,7 +182,7 @@ class FailureMonitor(Plugin):
                 self.flags["grasping"][s] = False
                 g = next(g for g in reversed(self.grasps) if g["side"] == s)
                 g["open"] = round(ctx.t, 2)
-                self._milestone(ctx, "release", "info", f"{s} gripper opened", side=s)
+                self._milestone(ctx, "release", "info", f"{s} gripper opening ({row[f'cmd_{s}']:.2f})", side=s)
             if self.flags["grasping"][s]:
                 g = next(g for g in reversed(self.grasps) if g["side"] == s)
                 g["rise"] = max(g["rise"], float(row["obj"][2]) - g["z_start"])
@@ -197,13 +197,13 @@ class FailureMonitor(Plugin):
             self.flags["holder"] = "left" if row["d_left"] < row["d_right"] else "right"
         if self.flags["lifted"] and self.flags.get("separated") is None and row["d"] > p["slip_m"]:
             side = self.flags.get("holder") or ("left" if row["d_left"] < row["d_right"] else "right")
-            open_cmd = row[f"cmd_{side}"] > p["open_cmd"]
+            open_cmd = row[f"cmd_{side}"] >= p["release_cmd"]
             height = self.flags.get("peak", z) - self.z0
             self.flags["separated"] = {
                 "t": round(ctx.t, 2), "height_m": round(height, 3), "released": bool(open_cmd), "side": side,
                 "tcp": [round(float(v), 3) for v in row[f"tcp_{side}"]],
             }
-            how = "left the hand while the gripper opened" if open_cmd else "slipped out of the hand"
+            how = "was let go" if open_cmd else f"slipped out of the hand (gripper at {row[f'cmd_{side}']:.2f}, not opened)"
             self._milestone(ctx, "separated", "warn" if not self._near_target(row) else "info",
                             f"{self.obj} {how} at {height * 100:.0f} cm")
         if self.flags["lifted"] and self.flags.get("separated") and row["d"] < p["reach_m"] and z - self.z0 > p["lift_m"]:

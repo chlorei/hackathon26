@@ -1,0 +1,16 @@
+# Demo: every plugin gets something to do. Run with:
+#   python examples/sim_loop.py --mock --config dreamkit.demo.yaml --episodes 4 --behaviors dropped,grasped_air,released_off_target,success
+sim_path: ../dreamlabs/dream_library/examples/yam_mujoco
+runs_dir: runs
+plugins:
+  - camera-check: {simulate_failure: top, simulate_at_s: 5, simulate_episode: 4}   # attempt 4: the overhead camera dies
+  - latency-monitor
+  - success-check
+  - failure-monitor
+  - gripper-check
+  - recovery: {max_recoveries: 2}
+  - retry: {attempts: 1, on: [dropped, released_off_target, grasped_air, not_reached, stalled]}
+  - recorder
+  - harvester
+  - recap
+  - report

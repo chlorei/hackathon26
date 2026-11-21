@@ -131,8 +131,8 @@ class Emitter:
         c = self._console
         if type_ == "run_start":
             c.rule(f"[bold]dreamkit run {payload.get('run_id')}[/bold]")
-            c.print(f"task: [bold]{payload.get('task')}[/bold]   model: {payload.get('model')}"
-                    f"{'  [magenta](mock)[/magenta]' if payload.get('mock') else ''}")
+            if payload.get("mock"):
+                c.print("[magenta]mock policy: no model calls[/magenta]")
             c.print(f"plugins: {', '.join(payload.get('plugins', []))}")
         elif type_ == "episode_start":
             c.rule(f"attempt {payload.get('episode')} · scene {payload.get('scene')} · try {payload.get('attempt')}",
