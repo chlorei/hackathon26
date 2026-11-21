@@ -4,19 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DreamGym</title>
-<link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="/theme/dreamkit-theme.css">
 <style>
 :root{
   /* dreamkit's theme (/theme.css): DreamGym's names mapped onto the panel's variables, no colours of its own */
-  --bg:var(--dk-bg); --panel:var(--dk-panel); --ink:var(--dk-ink); --muted:var(--dk-dim); --line:var(--dk-line);
+  --bg:var(--dk-base); --panel:var(--dk-panel); --ink:var(--dk-ink); --muted:var(--dk-dim); --line:var(--dk-line);
   --soft:var(--dk-raised); --ok:var(--dk-ok); --ok-soft:var(--dk-ok-soft); --bad:var(--dk-bad); --bad-soft:var(--dk-bad-soft);
-  --run:var(--dk-signal); --run-soft:var(--dk-signal-soft); --warn:var(--dk-warn); --radius:var(--dk-radius);
+  --run:var(--dk-signal); --run-soft:var(--dk-signal-soft); --warn:var(--dk-warn); --radius:12px;
   --c1:var(--dk-cat-1); --c2:var(--dk-cat-2); --c3:var(--dk-cat-3); --c4:var(--dk-cat-4); --c5:var(--dk-cat-5);
   --c6:var(--dk-cat-6); --c7:var(--dk-cat-7); --c8:var(--dk-cat-8);
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
-body{font:15px/1.5 var(--dk-font);background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
+body{font:15px/1.5 var(--dk-font-sans);background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
 button,input,select,textarea{font:inherit;color:inherit}
 header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
 .brand{font-weight:700;font-size:18px;letter-spacing:-.01em}
