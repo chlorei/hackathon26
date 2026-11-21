@@ -237,6 +237,10 @@ export const REASON_LABEL: Record<string, string> = {
   still_held: 'still held at the end',
   untouched: 'not reached',  // DreamGym runs before the shared codes
   misplaced: 'released off target',
+  not_settled: 'timeout',
+  api_error: 'model error',
+  ik_error: 'error',
+  invalid_action: 'error',
   not_reached: 'not reached',
   slow_model: 'slow model',
   timeout: 'timeout',

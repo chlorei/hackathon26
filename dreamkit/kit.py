@@ -143,6 +143,7 @@ class Kit:
         self._episode_started = 0.0
         self._requests = 0
         self._frozen: dict[str, np.ndarray] = {}
+        self._watch_checked, self._watch_seen = 0.0, False
         self.info: dict[str, Any] = {
             "mode": None,
             "id": self.run_id, "task": "", "model": "", "mock": bool(getattr(client, "mock", False)),
@@ -188,9 +189,19 @@ class Kit:
     @property
     def wants_frames(self) -> bool:
         """Render cameras this step? Only if a plugin needs frames, or someone watches the Live page."""
-        watcher = self.run_dir / "live" / ".watching"
-        watched = watcher.is_file() and time.time() - watcher.stat().st_mtime < 3.0
-        return self.manager.needs_frames or watched or self.recorder is not None
+        return self.manager.needs_frames or self._watched() or self.recorder is not None
+
+    def _watched(self) -> bool:
+        """Someone has the cameras open in Live (the panel touches live/.watching); looked up twice a second."""
+        now = time.monotonic()
+        if now - self._watch_checked > 0.5:
+            self._watch_checked = now
+            watcher = self.run_dir / "live" / ".watching"
+            try:
+                self._watch_seen = time.time() - watcher.stat().st_mtime < 3.0
+            except OSError:
+                self._watch_seen = False
+        return self._watch_seen
 
     def policy(self, config: dict[str, Any]) -> Any:
         self.ctx.model = str(config.get("checkpoint", ""))
@@ -282,7 +293,7 @@ class Kit:
         if self.recorder is not None:
             self.recorder.step(ctx)
         self.manager.call("on_step", ctx)
-        if ctx.frames_new:
+        if ctx.frames_new and self._watched():  # JPEGs for Live only while its cameras are open
             self.live.frames(ctx.frames)
         self._beat()
         if ctx.result.get("success") is True:  # success-check said so: the attempt is done
@@ -392,7 +403,7 @@ class Kit:
         except (StopEpisode, EndEpisode) as early:
             if isinstance(early, StopEpisode):
                 self._stopped(early)
-        if ctx.frames:
+        if ctx.frames and self._watched():
             self.live.frames(ctx.frames, force=True)
         self._beat(force=True)
 

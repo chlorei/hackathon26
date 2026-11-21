@@ -23,9 +23,13 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
   const list = runs.data?.runs ?? []
   const all = list.flatMap((r) => r.episodes ?? [])
   const reasons = useMemo(() => {
+    // one bar per meaning: an old code and its new name (stopped_by_plugin / camera_failure) are the same reason
     const m: Record<string, number> = {}
-    for (const e of all) if (e.success === false) m[e.reason ?? 'unknown'] = (m[e.reason ?? 'unknown'] ?? 0) + 1
-    return Object.entries(m).map(([r, n]) => ({ reason: REASON_LABEL[r] ?? r, n })).sort((a, b) => b.n - a.n)
+    for (const e of all) if (e.success === false) {
+      const label = REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason ?? 'unknown'
+      m[label] = (m[label] ?? 0) + 1
+    }
+    return Object.entries(m).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
   }, [all])
   const ok = all.filter((e) => e.success).length
   return (
@@ -38,12 +42,12 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
         </Panel>
         <Panel>
           <PanelTitle>Why attempts failed</PanelTitle>
-          <div className="h-36 px-2 pb-2">
+          <div className="px-2 pb-2" style={{ height: Math.max(96, reasons.length * 24 + 36) }}>
             {reasons.length ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={reasons} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <XAxis type="number" allowDecimals={false} tick={{ fill: '#6b6f76', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="reason" tick={{ fill: '#6b6f76', fontSize: 12 }} width={110} axisLine={false} tickLine={false} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="reason" tick={{ fill: 'var(--dk-dim)', fontSize: 12 }} width={150} interval={0} axisLine={false} tickLine={false} />
                   <Tooltip {...TIP} cursor={{ fill: '#efede8' }} />
                   <Bar dataKey="n" name="attempts" fill="#c8402f" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={14} />
                 </BarChart>
@@ -65,7 +69,11 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
                 <td className="whitespace-nowrap px-4 py-2.5 text-dim">{when(r.started)}{r.status === 'running' && <Tag tone="signal">running</Tag>}</td>
                 <td className="px-4 py-2.5">{r.source === 'gym' && <span className="mr-1.5"><Tag tone="steel" title="Run by the Gym app (Arena, Compare, Record or Teleop)">Gym</Tag></span>}{r.task}</td>
                 <td className="px-4 py-2.5"><span className="tracking-[2px]">{(r.episodes ?? []).map((e) => <Outcome key={e.episode} success={e.success} />)}</span></td>
-                <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{Object.entries(r.summary?.reasons ?? {}).map(([k, n]) => <Tag key={k} tone="bad">{REASON_LABEL[k] ?? k}{n > 1 ? ` ×${n}` : ''}</Tag>)}</div></td>
+                <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{Object.entries(Object.entries(r.summary?.reasons ?? {}).reduce<Record<string, number>>((acc, [k, n]) => {
+                  const label = REASON_LABEL[k] ?? k
+                  acc[label] = (acc[label] ?? 0) + n
+                  return acc
+                }, {})).map(([label, n]) => <Tag key={label} tone="bad">{label}{n > 1 ? ` ×${n}` : ''}</Tag>)}</div></td>
                 <td className="px-4 py-2.5 text-dim">{r.mock ? <Tag tone="warn">mock: scripted failures</Tag> : r.model}</td>
               </tr>
             ))}

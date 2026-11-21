@@ -693,12 +693,20 @@ $("#screen").onclick = () => document.activeElement?.blur();
   const opts = tasks.map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.prompt)}</option>`).join("");
   document.querySelectorAll(".taskSel").forEach(sel => sel.innerHTML = opts);
   hEst(); renderTeleop();
-  setInterval(() => { if (view === "data") refreshData(); }, 3000);
-  setInterval(() => { if (view === "teleop") pollTeleop(); }, 300);
+  // Poll only what is on screen, and only while the tab is visible; fast while something runs, slow otherwise.
+  const visible = () => !document.hidden;
+  const busy = () => runs.some(r => r.running || r.status === "running");
+  setInterval(() => { if (visible() && view === "data") refreshData(); }, 3000);
+  setInterval(() => { if (visible() && view === "teleop") pollTeleop(); }, 300);
   $("#fTask").innerHTML = opts;
   await refresh();
   if (runs.length) select(runs[0].id);
-  setInterval(refresh, 2000);
+  let lastRefresh = Date.now();
+  setInterval(() => {
+    if (!visible() || view !== "runs") return;
+    if (busy() || Date.now() - lastRefresh > 15000) { lastRefresh = Date.now(); refresh(); }
+  }, 2000);
+  document.addEventListener("visibilitychange", () => { if (visible() && view === "runs") { lastRefresh = Date.now(); refresh(); } });
 })();
 </script>
 </body>

@@ -67,14 +67,22 @@ class _Session:
     def begin(self, raw: Any, config: dict[str, Any]) -> None:
         with self.lock:
             kit = self.kit_for(raw)
-            if self.active:
-                self.end()
+            if self.active and not self.fresh():
+                self.end(final=True)
             kit.policy(config)  # model name for the run; opens the real (or mock) session
-            # the attempt starts with the first observation: that is where the task (the prompt) arrives
-            self.pending, self.ended = True, None
+            self.ended = None
+            if not self.active:  # the attempt starts with the first observation: where the task (prompt) arrives
+                self.pending = True
+
+    def fresh(self) -> bool:
+        """The attempt has not asked the model yet (a session reopened now is the same attempt)."""
+        return self.kit is not None and self.kit._requests == 0
 
     def start(self, task: str = "") -> None:
         with self.lock:
+            if self.active and self.fresh() and task and task != self.kit.ctx.task:
+                self.kit.ctx.task = task  # reopened before any step, now with this task
+                return
             if not self.pending or self.kit is None:
                 return
             self.pending = False
@@ -83,10 +91,14 @@ class _Session:
             self.kit._begin(task, self.env, None)
             self.active, self.attempts = True, self.attempts + 1
 
-    def end(self, why: str = "loop") -> None:
+    def end(self, why: str = "loop", final: bool = False) -> None:
+        """Ends the attempt. A close() before the first model call is not an end: the program is reopening its session (Dream
+        Labs' sim does that for a model that reads hand poses), and the attempt goes on in the new one."""
         with self.lock:
-            self.pending = False
             kit = self.kit
+            if why == "loop" and not final and self.active and self.fresh():
+                return
+            self.pending = False
             if kit is None or not self.active:
                 return
             self.active = False
@@ -206,8 +218,8 @@ def _wrap_client(cls: type) -> type:
                 if SESSION.env is None:
                     raise RuntimeError("dreamkit --mock needs Dream Labs' simulator (YamEnv) in this program")
                 SESSION.mock = MockClient(SESSION.env, behaviors=self._dk_mock.split(","))
-            elif SESSION.attempts:
-                SESSION.mock.reset_episode()  # the next scripted behaviour
+            elif SESSION.attempts and not (SESSION.active and SESSION.fresh()):
+                SESSION.mock.reset_episode()  # the next scripted behaviour (not for a session merely reopened)
             return SESSION.mock
 
         def policy(self, config: dict[str, Any]) -> Any:
@@ -333,7 +345,7 @@ def install() -> None:
         sys.meta_path.insert(0, _Finder())
     import atexit
 
-    atexit.register(lambda: SESSION.kit and (SESSION.end(), SESSION.kit.close()))
+    atexit.register(lambda: SESSION.kit and (SESSION.end(final=True), SESSION.kit.close()))
 
 
 def boot_dir() -> Path:

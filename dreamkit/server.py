@@ -410,6 +410,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         frame_mtimes: dict[str, float] = {}
         beat_mtime = 0.0
         idle_since = time.time()
+        status_checked = 0.0
         watching = folder / "live" / ".watching"
         last_touch = 0.0
         try:
@@ -447,9 +448,11 @@ def create_app(config_path: str | Path) -> FastAPI:
                         sent = True
                 if sent:
                     idle_since = time.time()
-                info = storage.read_run(folder)
-                if info and info.get("status") != "running" and time.time() - idle_since > 1.0:
-                    break  # the run ended and everything has been sent
+                if time.time() - status_checked > 1.0:  # run.json: once a second is enough to notice the end
+                    status_checked = time.time()
+                    info = storage.read_run(folder)
+                    if info and info.get("status") != "running" and time.time() - idle_since > 1.0:
+                        break  # the run ended and everything has been sent
                 if time.time() - idle_since > LIVE_FRESH_S * 3:
                     break  # the loop went quiet for good
                 await asyncio.sleep(POLL_S)
