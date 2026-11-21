@@ -15,7 +15,8 @@ from ..task import parse
 ## Milestones worth a highlight, and how they read in a sentence.
 KEY = {"grasp", "lifted", "separated", "fell", "collision", "stalled"}
 REASON_TEXT = {
-    "dropped": "dropped the {obj}",
+    "dropped": "dropped the {obj} (it slipped out of the closed gripper)",
+    "released_off_target": "let go of the {obj} away from the {target}",
     "missed_target": "missed the {target}",
     "grasped_air": "closed the gripper next to the {obj}, not on it",
     "not_reached": "never got to the {obj}",
@@ -54,6 +55,7 @@ class Recap(Plugin):
     Per run: one paragraph and the numbers. Reads the recorder's video, so put it after `recorder`."""
 
     name = "recap"
+    group = "output"
     description = "Highlights clip of each attempt + a plain-language recap of the run"
     defaults = {"before_s": 1.5, "after_s": 1.2, "max_s": 14.0, "camera": "top", "video": True}
 
@@ -164,9 +166,13 @@ class Recap(Plugin):
             lines.append(f"Retries saved {len(retried)} scene{'s' if len(retried) > 1 else ''}.")
         times = [e["duration_s"] for e in ok]
         if times:
-            lines.append(f"Successful attempts took {min(times):.1f}–{max(times):.1f} s.")
+            lo, hi = min(times), max(times)
+            span = f"{lo:.1f} s" if round(lo, 1) == round(hi, 1) else f"{lo:.1f}–{hi:.1f} s"
+            lines.append(f"Successful attempt{'s' if len(times) > 1 else ''} took {span}.")
         lat = ctx.store.get("latency")
-        if lat:
+        if ctx.store.get("latency_mock") and not lat:
+            lines.append("Mock: no model calls.")
+        elif lat:
             lines.append(f"Model latency: {lat['mean_ms']:.0f} ms on average, {lat['p95_ms']:.0f} ms p95.")
         summary = {"text": " ".join(lines), "attempts": [e.get("recap", {}).get("headline") for e in eps]}
         if ctx.run_dir is not None:

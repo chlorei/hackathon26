@@ -79,13 +79,14 @@ class Report(Plugin):
     """Writes a self-contained HTML report at the end of the run."""
 
     name = "report"
+    group = "output"
     description = "Writes runs/<id>/report.html: success rate, reasons, latency, video links"
     defaults = {"filename": "report.html"}
 
     def on_run_end(self, ctx: Context) -> None:
         if ctx.run_dir is None:
             return
-        info = {"id": ctx.run_id, "task": ctx.task, "model": ctx.model}
+        info = {"id": ctx.run_id, "task": ctx.task, "model": ctx.model or "mock"}
         path = ctx.run_dir / self.params["filename"]
         path.write_text(render(info, ctx.episodes, ctx.store.get("latency")))
         ctx.emit("info", f"report written: {path}", path=str(path))

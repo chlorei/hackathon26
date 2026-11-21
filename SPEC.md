@@ -12,9 +12,13 @@
 защиту от резких движений, повторы при неудаче, логи, проверку «выполнена ли задача». Каждый раз заново, без
 стандарта. А когда попытка провалилась, непонятно почему: в лучшем случае смотрят видео глазами.
 
-**Решение.** `dreamkit` — прослойка вокруг цикла управления Dream-1, в которую втыкаются плагины. Каждый плагин
-делает одну вещь. Плагины включаются строчкой в конфиге, пишутся за 10 минут и ставятся из GitHub одной командой.
-Сверху — веб-панель: живые камеры, лента событий плагинов, история запусков с видео провалов.
+**Решение.** `dreamkit` — **библиотека** плагинов для Dream-1 с монитором. Это не приложение, которое запускает
+задачи: пользователь встраивает её в **свой** цикл управления одной строкой —
+`client = dreamkit.wrap(dream.DreamClient(), config="dreamkit.yaml")` — и дальше пишет обычный код
+(`client.policy(...)`, `set_observation(...)`, `get_action()`). Плагины срабатывают внутри этих вызовов. Каждый плагин
+делает одну вещь, включается строчкой в конфиге, пишется за 10 минут и ставится из GitHub одной командой.
+Веб-панель **только управляет плагинами и показывает монитор**: живой запуск (камеры, лента событий, таймлайн
+попытки) и историю с видео провалов. Промпты и запуск задач через панель — нет: задачи ставит код пользователя.
 
 **Главная фишка (на неё 80% времени демо):** плагин `failure-monitor` — говорит не просто ❌, а **почему** попытка
 провалилась и **в какой момент** («уронил яблоко на 12.4 с»), с видео, перемотанным на этот момент.
@@ -82,122 +86,107 @@
 ## 3. Архитектура
 
 ```
-┌─────────────────────────── компьютер робота / ноутбук ───────────────────────────┐
-│                                                                                  │
-│  dreamkit ui  ─►  FastAPI (:8800)  ── раздаёт собранный React из dreamkit/ui_dist │
-│                      │  REST + WebSocket                                         │
-│                      ▼                                                           │
-│              Runner (отдельный процесс)                                          │
-│                      │  JSON-события построчно в stdout                          │
-│                      ▼                                                           │
-│   YamEnv (headless) ◄─► цикл управления ◄─► dream.DreamClient ◄─► Dream API       │
-│                      │                                                           │
-│                 PluginManager: хуки → плагины                                    │
-└──────────────────────────────────────────────────────────────────────────────────┘
-GitHub: код, плагины в отдельных репо, registry.yaml (каталог), GitHub Pages (опционально)
+┌──────────────── процесс пользователя (его цикл управления) ────────────────┐
+│  env (сим или робот) ⇄ ЦИКЛ ПОЛЬЗОВАТЕЛЯ ⇄ dreamkit.wrap(DreamClient) ⇄ Dream API │
+│                                   │  хуки before/after_model в get_action()   │
+│                                   │  kit.step(env, ...) → on_step             │
+│                                   ▼                                          │
+│                     PluginManager → плагины → runs/<id>/                      │
+│                     (run.json, events.jsonl, live/*.jpg, live.json, ep<N>/*.mp4)│
+└──────────────────────────────────────────────────────────────────────────────┘
+                 ▲ читает файлы (никаких сокетов в процесс пользователя)
+     dreamkit ui → FastAPI (:8800) → React: Live / Plugins / History
 ```
 
-**Почему Runner — отдельный процесс:** MuJoCo/OpenGL и веб-сервер в одном процессе конфликтуют (особенно на macOS).
-Сервер запускает `python -m dreamkit.runner --config ... --json-events` и читает события из stdout. Стоп = SIGINT.
-
----
-
+**Связь панели и цикла — через папку `runs/<id>/`.** Обёртка пишет события в `events.jsonl`, живые кадры в
+`live/<cam>.jpg`, пульс и телеметрию в `live.json`. Сервер следит за этими файлами и раздаёт их по WebSocket.
+Плюсы: цикл пользователя не зависит от панели (панель можно открыть/закрыть в любой момент, упавшая панель не роняет
+робота), MuJoCo/OpenGL и веб-сервер в разных процессах, работает и по SSH (папка общая).
 ## 4. Структура репозитория
 
 ```
-dreamkit/
-├── SPEC.md                      ← этот файл
-├── pyproject.toml               ← пакет dreamkit, entry point CLI `dreamkit`
+dreamkit/                        (репозиторий github.com/chlorei/hackathon26)
+├── SPEC.md
+├── pyproject.toml               ← пакет dreamkit, CLI `dreamkit`
 ├── registry.yaml                ← каталог плагинов
-├── dreamkit.example.yaml        ← пример конфига
+├── dreamkit.example.yaml
 ├── dreamkit/
-│   ├── __init__.py              ← экспорт Plugin, Context
-│   ├── plugin.py                ← базовый класс Plugin, Context, исключения StopRun
-│   ├── manager.py               ← загрузка плагинов (entry points + локальная папка), вызов хуков
-│   ├── config.py                ← чтение dreamkit.yaml (pydantic)
-│   ├── runner.py                ← цикл управления с хуками (адаптация dream_control.main)
-│   ├── scene.py                 ← рандомизация сцены по seed
-│   ├── events.py                ← эмиттер событий (stdout JSON lines + в память)
-│   ├── storage.py               ← папка запуска: runs/<id>/{run.json, events.jsonl, <cam>.mp4}
-│   ├── cli.py                   ← dreamkit run | ui | list | search | install | new
-│   ├── server.py                ← FastAPI: REST + WS, раздача ui_dist и media
-│   ├── registry.py              ← чтение registry.yaml с GitHub, установка через pip
-│   ├── templates/plugin/        ← шаблон для `dreamkit new`
+│   ├── __init__.py              ← wrap, Kit, Plugin, Context
+│   ├── kit.py                   ← обёртка: Kit (wrap), episode(), step(), close()
+│   ├── live.py                  ← запись живых кадров/пульса в runs/<id>/live
+│   ├── plugin.py, manager.py, config.py, events.py, storage.py
+│   ├── sim.py, scene.py, task.py ← помощники для симулятора Dream Labs
+│   ├── mock.py                  ← MockClient: скриптовая «модель» с интерфейсом DreamClient (без кредитов)
+│   ├── cli.py, server.py, registry.py
 │   └── plugins/                 ← встроенные плагины
-│       ├── success_check.py
-│       ├── failure_monitor.py
-│       ├── camera_check.py
-│       ├── retry.py
-│       ├── latency_monitor.py
-│       ├── recorder.py
-│       ├── safety.py
-│       └── report.py
-├── ui/                          ← React (Vite + TS + Tailwind + shadcn/ui)
+├── examples/sim_loop.py         ← цикл на симуляторе Dream Labs с dreamkit.wrap (то, что запускаем на демо)
+├── plugins-external/gripper-check/  ← пример внешнего плагина (ставится из GitHub)
+├── ui/                          ← React (Vite + TS + Tailwind)
 └── tests/
 ```
+## 5. API
 
-Симулятор Dream Labs подключаем как зависимость: склонировать их репо рядом и добавить
-`dream_library/examples/yam_mujoco` в `sys.path` (путь задаётся в конфиге `sim_path`).
-
----
-
-## 5. API плагинов
-
-### Базовый класс
+### Встраивание (главное)
 
 ```python
-class Plugin:
-    name: str = "base"
-    def __init__(self, **params): self.params = params
+import dream, dreamkit
 
-    # все хуки необязательны
-    def on_run_start(self, ctx): ...        # начало запуска (серия попыток)
-    def on_episode_start(self, ctx): ...    # начало попытки, сцена уже расставлена
-    def before_model(self, ctx): ...        # перед get_action(); можно ctx.stop() / править ctx.task
-    def after_model(self, ctx): ...         # ответ модели в ctx.actions; можно модифицировать
-    def on_step(self, ctx): ...             # после каждого env.step (20 Гц)
-    def on_episode_end(self, ctx): ...      # конец попытки; ctx.result заполняется плагинами
-    def on_run_end(self, ctx): ...          # конец запуска
+client = dreamkit.wrap(dream.DreamClient(), config="dreamkit.yaml")   # то же API, что у DreamClient
+client.policy({"checkpoint": "dreamlabs/dream-1-beta", ...})
+
+with client.episode("put apple into the bowl", env=env):   # одна попытка: on_episode_start / on_episode_end
+    while client.t < 60:
+        client.set_observation(frames, observation)         # как обычно
+        reply = client.get_action()                         # before_model → модель → after_model
+        for left, right in rows(reply):
+            env.step(left, right)
+            client.step(env, images=env.images(), command=(left, right))   # on_step (20 Гц)
+    # плагин сказал «стоп» (camera-check) или «готово» (success-check) → выход из with, без исключения наружу
+
+if client.retry_requested: ...                              # retry попросил повтор той же сцены
+client.close()                                              # on_run_end (или with dreamkit.wrap(...) as client)
 ```
+
+- `wrap()` возвращает `Kit`: все атрибуты `DreamClient` проходят насквозь (`__getattr__`), перехвачены только
+  `policy`, `set_observation`, `get_action`, `reset_episode`, `close`.
+- `get_action()`: `before_model` → `client.get_action()` → `ctx.timing = last_timing` → `ctx.actions` (из
+  `q_l_chunk`/`q_r_chunk`) → `after_model` → изменённые плагинами строки записываются обратно в ответ. Код
+  пользователя всё равно прогоняет ответ через свою проверку (`validate_chunk`) — плагины только ужесточают.
+- `step(env, images=None, command=None)` — данные симулятора/робота для `on_step`: `ctx.env`, `ctx.state`
+  (`env.state()`), кадры, исполняемая строка. Время попытки `ctx.t = step × 0.05 с`.
+- `episode(task, env=None, images=None)` — контекст попытки. Без него `get_action()` открывает попытку сам
+  (неявно), но тогда стоп плагина прилетает исключением `dreamkit.StopEpisode`.
+- Без симулятора (`env` без MuJoCo) плагины физики (failure-monitor, success-check) молча пропускают свою часть;
+  camera-check, latency-monitor, recorder, retry, report работают на любом роботе.
+
+### Плагин
+
+Базовый класс и хуки — без изменений (`on_run_start`, `on_episode_start`, `before_model`, `after_model`, `on_step`,
+`on_episode_end`, `on_run_end`). Новое: `ctx.telemetry(name=value)` — живой график в панели; атрибут `group`
+(`diagnosis` / `safety` / `output`) — блок на странице Plugins.
 
 ### Context (`ctx`)
 
 | Поле | Тип | Что это |
 |---|---|---|
-| `env` | `YamEnv` | симулятор (доступ к `env.data`, `env.state()`) |
-| `task` | `str` | текущий промпт (плагины могут менять) |
-| `model` | `str` | id модели |
-| `run_id`, `episode`, `step` | `str`, `int`, `int` | номер запуска / попытки / шага |
-| `t` | `float` | симулированное время попытки, с (`step * 0.05`) |
-| `frames` | `dict[str, np.ndarray]` | последние RGB-кадры камер `top/left/right` |
-| `state` | `dict` | `env.state()` на этом шаге |
-| `actions` | `tuple[np.ndarray, np.ndarray] \| None` | (left_rows, right_rows) последнего ответа |
-| `timing` | `dict \| None` | `client.last_timing` |
-| `result` | `dict` | итог попытки: `{"success": bool, "reason": str, "at": float, ...}` |
-| `store` | `dict` | общее хранилище, плагины делятся данными |
-| `emit(level, message, **data)` | метод | событие в ленту (`info` / `warn` / `error` / `success`) |
-| `stop(reason)` | метод | остановить попытку (бросает `StopEpisode`) |
-| `request_retry()` | метод | попросить повтор попытки |
+| `env` | объект | то, что передали в `episode()`/`step()` (для сима — `YamEnv`) |
+| `task` | `str` | промпт попытки |
+| `model` | `str` | `checkpoint` из `policy()` |
+| `run_id`, `episode`, `scene`, `attempt`, `step`, `t` | | запуск / попытка / сцена / номер попытки на сцене / шаг / секунды |
+| `frames` | `dict[str, np.ndarray]` | последние RGB-кадры (из `step(images=...)`) |
+| `state` | `dict` | `env.state()` |
+| `reply` | `dict` | ответ модели целиком |
+| `actions` | `(left_rows, right_rows) \| None` | строки ответа для YAM; можно менять в `after_model` |
+| `command` | `(left, right) \| None` | строка, исполняемая на этом шаге |
+| `timing` | `dict \| None` | `client.last_timing` (`{"mock": True}` у MockClient) |
+| `result`, `store` | `dict` | итог попытки / общее хранилище |
+| `emit`, `stop`, `end_episode`, `request_retry`, `telemetry` | методы | |
 
-Порядок вызова = порядок плагинов в конфиге. Исключение в плагине не валит запуск: ловим, пишем событие `error`
-от имени плагина, продолжаем.
+Порядок вызова = порядок в конфиге. Исключение в плагине не валит цикл пользователя: ловим, пишем событие `error`.
 
-### Загрузка
+### Загрузка плагинов
 
-```python
-from importlib.metadata import entry_points
-eps = entry_points(group="dreamkit.plugins")   # плагины из pip-пакетов
-```
-+ все `*.py` из `~/.dreamkit/plugins/` и `./plugins/` (подклассы `Plugin`) + встроенные из `dreamkit/plugins/`.
-
-Внешний плагин регистрируется в своём `pyproject.toml`:
-```toml
-[project.entry-points."dreamkit.plugins"]
-gripper-check = "gripper_check:GripperCheck"
-```
-
----
-
+Встроенные + entry points `dreamkit.plugins` (pip/GitHub) + `*.py` из `~/.dreamkit/plugins/` и `./plugins/`.
 ## 6. Конфиг `dreamkit.yaml`
 
 ```yaml
@@ -241,8 +230,9 @@ plugins:
 | `fell_off_table` | объект.z < стол − 0.05 |
 | `not_reached` | min расстояние tcp→объект > 0.03 за всю попытку |
 | `grasped_air` | захват закрылся (opening < 0.2) у объекта, но объект не поднялся > 0.02 |
-| `dropped` | объект поднимали > 0.03, потом он лёг на стол вне цели |
-| `missed_target` | объект отпущен, лежит в 0.05–0.15 от цели |
+| `dropped` | объект поднимали > 0.03, и он выпал **при закрытом захвате** (выскользнул сам) |
+| `released_off_target` | захват **открылся** и отпустил объект **не над целью** (дальше 0.15 от неё) |
+| `missed_target` | захват открылся над целью / рядом (≤ 0.15), но объект не в ней |
 | `collision` | контакт руки со столом / миской / другой рукой (кроме пальцев с объектом) |
 | `stalled` | суставы почти не двигаются > 3 с |
 | `slow_model` | средний `rtt_ms` > 700 |
@@ -274,128 +264,93 @@ plugins:
 
 ---
 
-## 8. Runner (цикл управления)
+## 8. Пример цикла: `examples/sim_loop.py` (то, что запускаем на демо)
 
-Адаптировать `dream_control.main` (не переписывать логику модели, импортировать их функции):
+Цикл `dream_control.main`, переписанный как **код пользователя** с `dreamkit.wrap`: функции Dream Labs
+(`policy_config`, `feed`, `capture`, `validate_chunk`) импортируются, файлы симулятора не меняются.
 
 ```
-load config → PluginManager(plugins) → hooks.on_run_start
-for episode in range(episodes):
-    env.reset(); scene.randomize(env, seed + episode)
-    hooks.on_episode_start
-    заполнить окна кадров (как в main) → open_policy → feed(every=0)
-    while t < seconds and not stopped:
-        hooks.before_model
-        reply = client.get_action()      # физика стоит, пока ждём
-        ctx.timing = client.last_timing
-        left, right = validate_chunk(env, reply, actions_per_chunk, verbose=False)
-        ctx.actions = (left, right); hooks.after_model
-        for l, r in zip(*ctx.actions):
-            env.step(l, r); capture/feed как в main; hooks.on_step
-    hooks.on_episode_end   → при request_retry() повторить эпизод
-    client.reset_episode()
-hooks.on_run_end
+kit = dreamkit.wrap(DreamClient | MockClient, config)
+kit.policy(dc.policy_config(model, gateway, poses))
+for scene in range(episodes):                      # повтор той же сцены, пока retry просит
+    env.reset(); positions = dreamkit.scene.randomize(env, objects, jitter, seed + scene); print(positions)
+    заполнить окна кадров (как в main)
+    with kit.episode(task, env=env, images=...):
+        dc.feed(kit, ...every=0)
+        while kit.t < seconds:
+            reply = kit.get_action()               # физика стоит, пока ждём
+            left, right = dc.validate_chunk(env, reply, actions)
+            for l, r: env.step(l, r); capture/feed; kit.step(env, images, command=(l, r))
+kit.close()
 ```
 
-- Режим `--headless` всегда в Runner; кадры для панели — `ctx.frames`, отправка ~5 fps.
-- Режим `--mock`: вместо модели скриптовая политика из `mock_pickups.py` (или `check_loop`) — для разработки без кредитов.
-- Рандомизация сцены: двигать `qpos` свободных суставов фруктов (`model.joint("apple_free").qposadr`), потом
-  `mj_forward` и 20 шагов «успокоения» физики.
-- Событие = одна JSON-строка в stdout: `{"type":"event","ts":...,"plugin":"failure-monitor","level":"error","message":"dropped apple","data":{...}}`.
-  Также `{"type":"frame","cam":"top","jpeg":"<base64>"}`, `{"type":"episode_end",...}`, `{"type":"run_end",...}`.
-
----
-
+- `python examples/sim_loop.py --mock` — MockClient вместо модели (бесплатно). Поведения по попыткам:
+  `success`, `dropped` (выбит рывком при закрытом захвате), `released_off_target`, `missed_target`, `not_reached`,
+  `grasped_air`, `stalled`, `collision`, `fell_off_table`. Длительности фаз случайны по seed — попытки не одинаковые.
+- Позиции предметов печатаются в начале каждой попытки и пишутся в событие `episode_start`.
+- По умолчанию в реальном времени (50 мс на шаг), `--fast` — без пауз (тесты).
 ## 9. CLI
 
 ```bash
-dreamkit run [-c dreamkit.yaml] [--mock] [--episodes N]   # запуск в терминале, цветная лента событий (rich)
-dreamkit ui [--port 8800]                                  # панель
-dreamkit list                                              # установленные плагины
-dreamkit search <слово>                                    # поиск в registry.yaml
-dreamkit install <name|github-url>                         # pip install git+...
-dreamkit new <name>                                        # шаблон плагина
+python examples/sim_loop.py [--mock] [--episodes N] [--task ...]  # цикл на симуляторе (демо)
+dreamkit ui [--port 8800]                                  # панель: Live / Plugins / History
+dreamkit list | search <слово> | install <name|owner/repo|url|path> | new <name>
+dreamkit review | accuracy labels.csv                      # точность failure-monitor
 ```
 
-`registry.yaml` в корне нашего репо, читается по raw-URL GitHub:
-```yaml
-- name: gripper-check
-  repo: https://github.com/<team>/dreamkit-gripper-check
-  description: Ловит захват, закрытый на пустоте
-```
-
----
-
+Команды `dreamkit run` больше нет: задачи запускает код пользователя.
 ## 10. Бэкенд (FastAPI)
 
 ```
-GET  /api/plugins                 установленные + params + enabled
-POST /api/plugins/{name}          {enabled, params}
-GET  /api/registry                каталог
-POST /api/install                 {name}
-POST /api/runs                    {task, model, episodes, mock} → {id}; стартует Runner-процесс
-POST /api/runs/{id}/stop
-GET  /api/runs                    история
-GET  /api/runs/{id}               детали, эпизоды, причины, ссылки на видео
-WS   /ws/runs/{id}                события + кадры из stdout Runner'а
-GET  /media/{run}/{ep}/{cam}.mp4  видео
-GET  /                            React из dreamkit/ui_dist
+GET    /api/plugins               установленные + params + enabled + group
+POST   /api/plugins/{name}        {enabled, params} → пишет dreamkit.yaml (подхватится при следующем wrap())
+DELETE /api/plugins/{name}        удалить внешний плагин
+GET    /api/registry, POST /api/install
+GET    /api/live                  идёт ли запуск сейчас (run.json running + live.json свежее 10 с) → {id} | null
+WS     /ws/live/{id}              хвост events.jsonl + кадры live/*.jpg + телеметрия live.json
+GET    /api/runs, GET /api/runs/{id}, DELETE /api/runs/{id}
+POST   /api/runs/{id}/reveal      открыть папку в Finder (путь в интерфейсе не показываем)
+GET    /media/{run}/...           видео, отчёт
 ```
 
-Слушать `127.0.0.1` по умолчанию; `--host 0.0.0.0` только явно.
-
----
-
+Сервер никогда не запускает робота и не пишет промпты. Слушать `127.0.0.1`; `--host 0.0.0.0` только явно.
 ## 11. Фронт (React)
 
-Стек: Vite + React + TypeScript, Tailwind + shadcn/ui, lucide-react, Recharts, TanStack Query, framer-motion.
-Тёмная тема по умолчанию. Цвета только со смыслом: зелёный ✓, жёлтый ⚠, красный ✗.
+Vite + React + TS + Tailwind, IBM Plex, тёмная графитовая тема; цвет только со смыслом (янтарный = «сейчас»,
+зелёный ✓, красный ✗). Кадры и графики рисуются мимо React (дёшево по CPU).
 
-Разработка: `npm run dev` с прокси на `:8800`. Сборка: `npm run build` → `dreamkit/ui_dist/`, пакуется в wheel.
-С самого начала фронт работает на **моках** по API из раздела 10, потом переключается на реальный бэкенд.
+1. **Live** — только смотрит. Идёт запуск → большая камера + две маленькие, таймлайн попытки (растёт), живые графики,
+   лента событий плагинов, список попыток. Нет запуска → «Waiting for a run. Start your loop with
+   dreamkit.wrap(...)» и пример кода.
+2. **Plugins** — три блока: **Diagnosis** (success-check, failure-monitor — выделен как главный, gripper-check),
+   **Safety** (camera-check, safety, latency-monitor), **Output** (recorder, recap, report, retry); плюс «Add from
+   GitHub» и каталог.
+3. **History** — монитор: запуски, попытка с видео на моменте провала, таймлайн, моменты (вердикт сверху,
+   остальное по времени), recap, графики измерений; удаление запуска. Полный локальный путь не показываем.
+## 12. План (новая концепция) — статус
 
-Экраны:
-1. **Run** (главный на демо): 3 живые камеры, форма (задача, модель, число попыток, mock), Старт/Стоп,
-   **лента событий плагинов** (иконка плагина, время, уровень, текст, анимация появления), прогресс по попыткам.
-2. **Plugins**: карточки установленных (Switch + форма параметров), вкладка «Каталог» с кнопкой «Установить».
-3. **History**: таблица запусков (✓/✗, причина, длительность), страница запуска: видео, **перемотанное на `at`**,
-   графики (успех по задачам, разбивка причин, задержки).
-
----
-
-## 12. План по времени и правила отсечения
-
-| Когда | Что | Готово, если |
+| # | Что | Проверка |
 |---|---|---|
-| Сб до 17:00 | `plugin.py`, `manager.py`, `config.py`, `runner.py` (+ `--mock`), `success-check` | `dreamkit run --mock` идёт по попыткам и печатает ✓/✗ |
-| Сб до 20:00 | `failure-monitor`, `recorder`, `scene.py` | провал → причина + секунда + mp4 |
-| Сб до 23:00 | `camera-check`, `retry`, `latency-monitor`, `report`; прогон на реальной модели | HTML-отчёт по 10+ попыткам |
-| Параллельно с 15:00 | фронт на моках: Run → History → Plugins | экраны работают на фейковых данных |
-| Сб ночь | `server.py`, связка фронт ↔ Runner | живая лента и камеры в браузере |
-| Вс до 12:00 | `registry`, `install`, отдельный репо с 1 плагином, `safety` если успеваем | `dreamkit install gripper-check` работает |
-| **Вс 12:00** | **заморозка фич** | дальше только баги, демо, репетиции |
-| Вс днём | точность failure-monitor на 20 провалах, запасное видео, 3–4 репетиции | |
+| 1 | `dreamkit.wrap` / `Kit` | `pytest tests/test_kit.py` |
+| 2 | `examples/sim_loop.py --mock` | `python examples/sim_loop.py --mock --episodes 2` |
+| 3–4 | Live вместо Run | `dreamkit ui` + sim_loop в другом терминале |
+| 5 | Plugins по группам | страница Plugins |
+| 6 | History + удаление | кнопка Delete |
+| 7–12 | исправления (mock latency, рандомизация, dropped vs released_off_target, путь, Moments, «13.2 s») | см. ответ |
 
-Правила: если к сб 20:00 ядро + success-check + failure-monitor не работают в терминале — фронт замораживается и все
-помогают с ядром. Панель без работающих плагинов проигрывает.
-
----
-
+Правило: плагины и обёртка важнее панели. Панель без работающей обёртки проигрывает.
 ## 13. Демо (3:00)
 
 1. 0:00–0:20 — проблема: «каждый пишет проверки и защиту вокруг Dream-1 руками и не знает, почему робот ошибся».
-2. 0:20–0:40 — `dreamkit.yaml`: «вот весь конфиг».
-3. 0:40–1:30 — панель, Старт: камеры, лента событий; провал → `failure-monitor: dropped apple at 12.4s` → видео на этом моменте.
+2. 0:20–0:45 — код: `client = dreamkit.wrap(dream.DreamClient(), config="dreamkit.yaml")` — одна строка в их цикле;
+   `dreamkit.yaml` — весь конфиг.
+3. 0:45–1:30 — терминал: `python examples/sim_loop.py`; панель Live подхватывает запуск сама: камеры, лента;
+   провал → `failure-monitor: dropped apple at 12.4s` → History, видео на этом моменте, recap.
 4. 1:30–1:50 — `retry` → вторая попытка успешна.
-5. 1:50–2:10 — `camera-check`: «ломаем» камеру → робот остановлен.
+5. 1:50–2:10 — `camera-check`: включаем `simulate_failure` в Plugins → следующий запуск остановлен.
 6. 2:10–2:30 — `dreamkit install gripper-check` из GitHub, плагин появился в панели.
-7. 2:30–2:45 — отчёт: % успеха, причины, точность монитора «17/20».
-8. 2:45–3:00 — что не сработало, что дальше (реальный робот: причины по камере, а не по физике).
-
-Перед демо: всё открыто заранее, модель «прогрета» (вызвать за 10–15 мин), запасное видео записано, интернет с телефона.
-
----
-
+7. 2:30–2:45 — отчёт: % успеха, причины, точность монитора «N/20».
+8. 2:45–3:00 — что не сработало, что дальше.
 ## 14. Правила для Claude Code
 
 - **Никогда не меняй модель руки и файлы симулятора Dream Labs** (см. раздел 2, «Модель руки менять НЕЛЬЗЯ»).

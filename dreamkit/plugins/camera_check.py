@@ -11,6 +11,7 @@ class CameraCheck(Plugin):
     """A model fed a dead camera acts blind; better stop than guess."""
 
     name = "camera-check"
+    group = "safety"
     description = "Stops the attempt when a camera is black, uniform or frozen"
     defaults = {
         "min_mean": 10.0,

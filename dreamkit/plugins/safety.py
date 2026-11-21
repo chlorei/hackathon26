@@ -15,6 +15,7 @@ class Safety(Plugin):
     the chunk there (the arm holds until the next model call)."""
 
     name = "safety"
+    group = "safety"
     description = "Caps joint speed and keeps the tool points inside a workspace box"
     defaults = {
         "max_speed_rad_s": 3.0,

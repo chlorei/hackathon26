@@ -14,13 +14,6 @@ def _config_path(arg: str | None) -> str | None:
     return "dreamkit.yaml" if Path("dreamkit.yaml").is_file() else None
 
 
-def cmd_run(args) -> int:
-    from .runner import run
-
-    return run(_config_path(args.config), mock=args.mock, json_events=args.json_events, episodes=args.episodes,
-               task=args.task, model=args.model, seconds=args.seconds)
-
-
 def cmd_ui(args) -> int:
     from .server import serve
 
@@ -216,19 +209,9 @@ def cmd_accuracy(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="dreamkit", description="Plugins around the Dream-1 control loop")
+    parser = argparse.ArgumentParser(prog="dreamkit", description="Plugins and a monitor for Dream-1. In your loop: client = dreamkit.wrap(dream.DreamClient()); demo loop: python examples/sim_loop.py --mock")
     parser.add_argument("-c", "--config", help="dreamkit.yaml (default: ./dreamkit.yaml)")
     sub = parser.add_subparsers(dest="cmd", required=True)
-
-    p = sub.add_parser("run", help="run attempts in the terminal")
-    p.add_argument("-c", "--config", dest="config", default=argparse.SUPPRESS)
-    p.add_argument("--mock", action="store_true", help="scripted policy, no API calls (no credits)")
-    p.add_argument("--episodes", type=int)
-    p.add_argument("--task")
-    p.add_argument("--model")
-    p.add_argument("--seconds", type=float)
-    p.add_argument("--json-events", action="store_true")
-    p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("ui", help="web panel")
     p.add_argument("-c", "--config", dest="config", default=argparse.SUPPRESS)

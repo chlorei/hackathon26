@@ -19,6 +19,7 @@ class LatencyMonitor(Plugin):
     """Above ~700 ms of round trip the arm waits long enough to hurt control."""
 
     name = "latency-monitor"
+    group = "safety"
     description = "Warns on slow model round trips; reports mean and p95 latency"
     defaults = {"warn_ms": 700.0}
 
@@ -26,11 +27,16 @@ class LatencyMonitor(Plugin):
         ctx.store["latency_all"] = []
 
     def on_episode_start(self, ctx: Context) -> None:
+        self.mock = False
         self.rtts: list[float] = []
         self.parts: dict[str, list[float]] = {}
 
     def after_model(self, ctx: Context) -> None:
         timing = ctx.timing or {}
+        if timing.get("mock"):
+            self.mock = True
+            ctx.store["latency_mock"] = True
+            return
         rtt = timing.get("rtt_ms")
         if rtt is None:
             return
@@ -47,6 +53,9 @@ class LatencyMonitor(Plugin):
             ctx.emit("warn", f"slow model reply: {rtt:.0f} ms" + (f" ({detail})" if detail else ""), rtt_ms=rtt)
 
     def on_episode_end(self, ctx: Context) -> None:
+        if self.mock and not self.rtts:
+            ctx.result["latency"] = {"mock": True}
+            return
         stats = _stats(self.rtts)
         if stats:
             stats.update({k.removesuffix("_ms") + "_mean_ms": round(float(np.mean(v)), 1)
@@ -54,6 +63,9 @@ class LatencyMonitor(Plugin):
             ctx.result["latency"] = stats
 
     def on_run_end(self, ctx: Context) -> None:
+        if ctx.store.get("latency_mock") and not ctx.store.get("latency_all"):
+            ctx.emit("info", "mock: no model calls, no latency to report")
+            return
         stats = _stats(ctx.store.get("latency_all", []))
         if stats:
             ctx.store["latency"] = stats

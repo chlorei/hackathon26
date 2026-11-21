@@ -46,6 +46,8 @@ class Plugin:
 
     name: str = "base"
     description: str = ""
+    ## Block on the Plugins page: "diagnosis", "safety" or "output".
+    group: str = "other"
     ## Default parameters, shown and editable in the panel; config values override them.
     defaults: dict[str, Any] = {}
 
@@ -80,6 +82,7 @@ class Context:
     frames: dict[str, np.ndarray] = field(default_factory=dict)
     frames_new: bool = False  # True on steps where the cameras were rendered
     state: dict[str, np.ndarray] = field(default_factory=dict)
+    reply: dict[str, Any] | None = None  # the model's whole reply
     actions: tuple[np.ndarray, np.ndarray] | None = None
     command: tuple[np.ndarray, np.ndarray] | None = None  # the row being executed this step (left, right)
     timing: dict[str, Any] | None = None

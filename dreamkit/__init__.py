@@ -1,6 +1,11 @@
-"""dreamkit: a plugin layer around the Dream-1 control loop."""
+"""dreamkit: plugins and a monitor for Dream-1, inside your own control loop.
 
+    import dream, dreamkit
+    client = dreamkit.wrap(dream.DreamClient(), config="dreamkit.yaml")
+"""
+
+from .kit import Kit, wrap
 from .plugin import Context, EndEpisode, Plugin, StopEpisode
 
-__all__ = ["Plugin", "Context", "StopEpisode", "EndEpisode"]
-__version__ = "0.1.0"
+__all__ = ["wrap", "Kit", "Plugin", "Context", "StopEpisode", "EndEpisode"]
+__version__ = "0.2.0"

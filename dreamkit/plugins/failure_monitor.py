@@ -14,11 +14,12 @@ from ..task import parse
 
 SIDES = ("left", "right")
 ## Tie-break when two causes happen within tie_s of each other: the more specific one wins.
-PRIORITY = ("fell_off_table", "dropped", "missed_target", "grasped_air", "collision", "stalled", "not_reached",
-            "slow_model", "timeout")
+PRIORITY = ("fell_off_table", "dropped", "released_off_target", "missed_target", "grasped_air", "collision",
+            "stalled", "not_reached", "slow_model", "timeout")
 LABEL = {
     "fell_off_table": "{obj} fell off the table",
-    "dropped": "dropped {obj}",
+    "dropped": "dropped {obj} (the gripper never opened)",
+    "released_off_target": "let go of {obj} away from the {target}",
     "missed_target": "missed the {target} with {obj}",
     "grasped_air": "grasped air next to {obj}",
     "collision": "collision: {what}",
@@ -41,12 +42,15 @@ class FailureMonitor(Plugin):
     """Traces distances, heights, grips, contacts and joint motion; on failure picks the first cause in time."""
 
     name = "failure-monitor"
+    group = "diagnosis"
     description = "Explains failures: why the attempt failed and at which second (dropped, grasped air, ...)"
     defaults = {
         "reach_m": 0.045,  # a tool point this close to the object counts as reaching it
         "near_m": 0.08,  # a gripper closing within this distance is a grasp attempt on the object
         "close_cmd": 0.3,  # commanded opening below this = gripper closing
         "open_cmd": 0.6,  # commanded opening above this = gripper releasing
+        "release_cmd": 0.85,  # the policy opened the gripper (released) only if the command reaches this...
+        "release_window_s": 1.0,  # ...within this long after the object left the hand; otherwise it was dropped
         "lift_m": 0.03,  # object raised this much above its start = lifted
         "grasp_lift_m": 0.02,  # a grasp that never raises the object this much grasped air
         "slip_m": 0.07,  # lifted object farther than this from every tool point = separated from the hand
@@ -64,6 +68,10 @@ class FailureMonitor(Plugin):
 
     # -- recording ---------------------------------------------------------------------------------------------
     def on_episode_start(self, ctx: Context) -> None:
+        self.active = hasattr(ctx.env, "data") and hasattr(ctx.env, "model")
+        if not self.active:
+            ctx.emit("info", "no simulator env passed to episode()/step(): physics diagnosis is off")
+            return
         self.obj, self.target = parse(ctx.task)
         m = ctx.env.model
         self.body_names = [m.body(i).name for i in range(m.nbody)]
@@ -106,10 +114,14 @@ class FailureMonitor(Plugin):
         self.rows.append(row)
 
     def after_model(self, ctx: Context) -> None:
+        if not getattr(self, "active", False):
+            return
         if ctx.timing and ctx.timing.get("rtt_ms") is not None:
             self.rtts.append((ctx.t, float(ctx.timing["rtt_ms"])))
 
     def on_step(self, ctx: Context) -> None:
+        if not getattr(self, "active", False):
+            return
         self._record(ctx)
         row = self.rows[-1]
         p = self.params
@@ -170,15 +182,16 @@ class FailureMonitor(Plugin):
             self._milestone(ctx, "lifted", "info", f"lifted {self.obj} {(z - self.z0) * 100:.0f} cm")
         if self.flags["lifted"] and self.flags.get("separated") is None and row["d"] <= p["slip_m"]:
             self.flags["peak"] = max(self.flags.get("peak", z), z)
+            self.flags["holder"] = "left" if row["d_left"] < row["d_right"] else "right"
         if self.flags["lifted"] and self.flags.get("separated") is None and row["d"] > p["slip_m"]:
-            open_cmd = max(row["cmd_left"], row["cmd_right"]) > p["open_cmd"]
+            side = self.flags.get("holder") or ("left" if row["d_left"] < row["d_right"] else "right")
+            open_cmd = row[f"cmd_{side}"] > p["open_cmd"]
             height = self.flags.get("peak", z) - self.z0
             self.flags["separated"] = {
-                "t": round(ctx.t, 2), "height_m": round(height, 3), "released": bool(open_cmd),
-                "tcp": [round(float(v), 3) for v in (row["tcp_left"] if row["d_left"] < row["d_right"]
-                                                     else row["tcp_right"])],
+                "t": round(ctx.t, 2), "height_m": round(height, 3), "released": bool(open_cmd), "side": side,
+                "tcp": [round(float(v), 3) for v in row[f"tcp_{side}"]],
             }
-            how = "released" if open_cmd else "slipped out of the hand"
+            how = "left the hand while the gripper opened" if open_cmd else "slipped out of the hand"
             self._milestone(ctx, "separated", "warn" if not self._near_target(row) else "info",
                             f"{self.obj} {how} at {height * 100:.0f} cm")
         if self.flags["lifted"] and self.flags.get("separated") and row["d"] < p["reach_m"] and z - self.z0 > p["lift_m"]:
@@ -255,15 +268,20 @@ class FailureMonitor(Plugin):
                 release_dist = (float(np.linalg.norm(np.asarray(sep["tcp"][:2]) - target[:2]))
                                 if target is not None else None)
                 sep["release_distance_m"] = release_dist and round(release_dist, 3)
-                near = [d for d in (final_dist, release_dist) if d is not None and d <= p["miss_max_m"]]
-                if near and not self.flags.get("fell"):
-                    cands.append({"reason": "missed_target", "at": sep["t"],
-                                  "details": {"distance_to_target_m": round(final_dist, 3), **sep}})
-                elif not self.flags.get("fell"):
-                    cands.append({"reason": "dropped", "at": sep["t"],
-                                  "details": {**sep, "distance_to_target_m": final_dist and round(final_dist, 3)}})
-                else:
+                sep["final_distance_m"] = final_dist and round(final_dist, 3)
+                # released = the policy opened the gripper around the moment the object left it
+                window = [r for r in rows if sep["t"] - 0.3 <= r["t"] <= sep["t"] + p["release_window_s"]]
+                side = sep.get("side", "left")
+                peak = max((r[f"cmd_{side}"] for r in window), default=0.0)
+                sep["released"] = bool(peak >= p["release_cmd"])
+                sep["gripper_cmd_peak"] = round(peak, 2)
+                if not sep["released"]:
+                    # the gripper was still closed when the object left it: it slipped / was knocked out
                     cands.append({"reason": "dropped", "at": sep["t"], "details": sep})
+                elif release_dist is not None and release_dist <= p["miss_max_m"]:
+                    cands.append({"reason": "missed_target", "at": sep["t"], "details": sep})
+                else:
+                    cands.append({"reason": "released_off_target", "at": sep["t"], "details": sep})
             near_grasps = [g for g in self.grasps if g["dist"] < p["near_m"]]
             air = [g for g in near_grasps if g["rise"] < p["grasp_lift_m"]]
             if air and not self.flags["lifted"]:
@@ -298,6 +316,8 @@ class FailureMonitor(Plugin):
         return best
 
     def on_episode_end(self, ctx: Context) -> None:
+        if not getattr(self, "active", False):
+            return
         self._save_trace(ctx)
         if ctx.result.get("success") is True:
             return

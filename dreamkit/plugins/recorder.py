@@ -14,6 +14,7 @@ class Recorder(Plugin):
     """runs/<id>/ep<N>/<cam>.mp4 (H.264, browser-playable). Video time = the attempt's simulated time."""
 
     name = "recorder"
+    group = "output"
     description = "Records every camera to MP4 per attempt (video time = sim time)"
     defaults = {"fps": 10, "cameras": ["top", "left", "right"], "crf": 28, "preset": "ultrafast"}
 

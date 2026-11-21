@@ -17,6 +17,7 @@ class SuccessCheck(Plugin):
     """Object in the bowl / on the plate, gripper open: success. Ends the attempt early once it holds for hold_s."""
 
     name = "success-check"
+    group = "diagnosis"
     description = "Detects task success: object inside the target zone with the gripper released"
     defaults = {
         "radius": {"bowl": 0.07, "plate": 0.09},
@@ -30,6 +31,9 @@ class SuccessCheck(Plugin):
     def on_episode_start(self, ctx: Context) -> None:
         self.obj, self.target = parse(ctx.task)
         self.since = None
+        if not (hasattr(ctx.env, "data") and hasattr(ctx.env, "model")):
+            self.obj = self.target = None  # no simulator: success is the user's to report
+            return
         if self.obj is None or self.target is None:
             ctx.emit("warn", f"cannot read object/target from task '{ctx.task}'; success unknown")
 

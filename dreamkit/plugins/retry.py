@@ -9,8 +9,9 @@ class Retry(Plugin):
     """Same scene (same seed) again, up to `attempts` more times, only for the listed reasons."""
 
     name = "retry"
+    group = "output"
     description = "Retries a failed attempt on the same scene for chosen failure reasons"
-    defaults = {"attempts": 2, "on": ["not_reached", "grasped_air", "dropped", "missed_target"]}
+    defaults = {"attempts": 2, "on": ["not_reached", "grasped_air", "dropped", "released_off_target", "missed_target"]}
 
     def on_episode_end(self, ctx: Context) -> None:
         if ctx.result.get("success") is not False:
