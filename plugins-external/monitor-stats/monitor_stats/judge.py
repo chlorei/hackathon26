@@ -1,6 +1,6 @@
 """The judge: frames of one attempt + its task -> a checked verdict from a vision model (Gemini or Claude).
 
-Runs on the ctx.defer worker only (network). Gemini: on 503 "high demand" the next model in GEMINI_MODELS is tried.
+Runs on the ctx.defer worker only (network). Gemini: Flash-Lite first (fast, cheap); on 503 "high demand" or a timeout, Flash.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 
 from dreamkit import reasons
 
-GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
 GEMINI_RETRIES = 1  # per model, for 429/500; 503 and 504 (time already spent) move on to the next model
 MIN_CALL_S = 3.0  # less time than this left before the deadline: do not start another call
 CLAUDE_MODEL = "claude-sonnet-5-5"
@@ -126,8 +126,8 @@ def validate(d: Any, n: int) -> dict[str, Any]:
     }
 
 
-def judge(images: list[bytes], task: str, provider: str = "gemini", timeout_s: float = 30.0,
-          max_wait_s: float = 90.0) -> dict[str, Any]:
+def judge(images: list[bytes], task: str, provider: str = "gemini", timeout_s: float = 10.0,
+          max_wait_s: float = 20.0) -> dict[str, Any]:
     """JPEG frames of one attempt + its task -> {success, score, reason, reason_code, frames}, within max_wait_s."""
     deadline = time.monotonic() + max_wait_s
     prompt = (PROMPT.replace("{n}", str(len(images))).replace("{last}", str(len(images) - 1))

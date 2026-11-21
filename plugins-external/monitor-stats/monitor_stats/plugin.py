@@ -3,7 +3,8 @@
 success-check decides from the simulator's object positions; this plugin decides from what the camera saw, so it also
 works on a real robot, says why in words, and tells how often it agrees with success-check. Per attempt it keeps a
 thinned buffer of one camera's frames (cheap, on_step), and on_episode_end sends evenly picked frames + the task to
-Gemini (or Claude) on the ctx.defer worker. At the end of a run it aggregates every judged attempt in runs/: success
+Gemini (or Claude) on the ctx.defer worker. The frames it saw and its verdicts go to run_dir/monitor-stats/
+(ep003_f0.jpg…, attempts.json) for the plugin's page (ui/index.html). At the end of a run it aggregates every judged attempt in runs/: success
 rate with a Wilson interval, by task, top failure reasons, agreement with success-check, and which task needs more
 demonstrations.
 """
@@ -34,7 +35,7 @@ KEY = "monitor-stats"
 class Params(BaseModel):
     camera: str = Field("top", description="Camera the judge looks at (the first one if it is missing)",
                         json_schema_extra={"choices": ["top", "left", "right"]})
-    frames: int = Field(8, ge=2, le=16, description="Frames per attempt sent to the judge",
+    frames: int = Field(6, ge=2, le=16, description="Frames per attempt sent to the judge",
                         json_schema_extra={"unit": ""})
     image_width: int = Field(512, ge=64, le=1280, description="Frames are scaled down to at most this many pixels "
                              "wide", json_schema_extra={"unit": ""})
@@ -42,9 +43,9 @@ class Params(BaseModel):
                         "dropped", json_schema_extra={"unit": ""})
     provider: str = Field("gemini", description="Vision model that judges (GEMINI_API_KEY or ANTHROPIC_API_KEY)",
                           json_schema_extra={"choices": ["gemini", "claude"]})
-    timeout_s: float = Field(30.0, gt=0, le=300, description="Longest wait for one model call",
+    timeout_s: float = Field(10.0, gt=0, le=300, description="Longest wait for one model call",
                              json_schema_extra={"unit": "s"})
-    max_wait_s: float = Field(90.0, gt=5, le=115, description="Longest wait for a verdict, fallbacks included; "
+    max_wait_s: float = Field(20.0, gt=5, le=115, description="Longest wait for a verdict, fallbacks included; "
                               "dreamkit waits at most 120 s before saving the attempt",
                               json_schema_extra={"unit": "s"})
     confidence: float = Field(0.95, ge=0.5, le=0.999, description="Confidence level of the success-rate interval",
@@ -137,10 +138,11 @@ class MonitorStats(Plugin):
     Params = Params
     manifest = Manifest(group="diagnosis", icon="ScanEye", capability="observe", needs_frames=True,
                         hooks=["on_run_start", "on_episode_start", "on_step", "on_episode_end", "on_run_end"],
-                        step_rate_hz=2)
+                        step_rate_hz=2, ui="ui/index.html")
 
     def on_run_start(self, ctx: PluginContext) -> None:
         self.judged: list[dict[str, Any]] = []
+        self.attempts: list[dict[str, Any]] = []  # what the page shows: attempts.json
         self.z = NormalDist().inv_cdf(0.5 + self.params.confidence / 2)  # 0.95 -> 1.96
 
     def on_episode_start(self, ctx: PluginContext) -> None:
@@ -168,39 +170,65 @@ class MonitorStats(Plugin):
         n = min(self.params.frames, len(self.buf))
         picked = [self.buf[round(i * (len(self.buf) - 1) / max(1, n - 1))] for i in range(n)]
         self.buf = []
-        ctx.defer(self._judge, ctx, picked, str(ctx.task or ""))
+        ctx.emit("info", "judging attempt", frames=n)
+        ctx.defer(self._judge, ctx, picked, str(ctx.task or ""), ctx.episode)
 
-    def _judge(self, ctx: PluginContext, picked: list[tuple[float, np.ndarray]], task: str) -> None:
+    def _judge(self, ctx: PluginContext, picked: list[tuple[float, np.ndarray]], task: str, episode: int) -> None:
         p = self.params
         times = [round(t, 2) for t, _ in picked]
+        images = [_jpeg(rgb, p.image_width) for _, rgb in picked]
+        files = self._save_frames(ctx, images, episode)
+        row: dict[str, Any] = {"episode": episode, "task": task, "check": ctx.result.get("success")}
         try:
-            v = judge_mod.judge([_jpeg(rgb, p.image_width) for _, rgb in picked], task, p.provider, p.timeout_s,
-                                p.max_wait_s)
+            v = judge_mod.judge(images, task, p.provider, p.timeout_s, p.max_wait_s)
         except Exception as error:  # the robot goes on; the attempt is just not judged
             msg = " ".join(str(error).split())[:160].rstrip(".")
             ctx.result[KEY] = {"error": msg}
+            self._save_attempt(ctx, {**row, "error": msg, "frames": [{"t_s": t, "file": f} for t, f in
+                                                                     zip(times, files, strict=True)]})
             ctx.ui.badge("not judged", "warn")
-            ctx.emit("warn", f"not judged: {msg[:1].lower() + msg[1:]}")
+            ctx.emit("warn", f"not judged: {msg if msg[:2].isupper() else msg[:1].lower() + msg[1:]}")
             return
         for f, t in zip(v["frames"], times, strict=True):
             f["t_s"] = t
             if f["status"] == "error":
-                ctx.ui.mark(t, f["comment"] or "judge: error", "warn")
+                ctx.ui.mark(t, f["comment"] or "camera: error", "error")
         ctx.result[KEY] = v
         self.judged.append(v)
+        if v["reason_code"]:
+            row["reason_label"] = reasons.label(v["reason_code"])
+        self._save_attempt(ctx, {**row, **v, "frames": [{**f, "file": name} for f, name in
+                                                         zip(v["frames"], files, strict=True)]})
         bad = sum(f["status"] == "error" for f in v["frames"])
         if v["success"]:
-            ctx.ui.badge(f"judge: success · {v['score']}", "success")
-            ctx.emit("success", f"judge: success, score {v['score']}, {bad} of {len(times)} frames off",
+            ctx.ui.badge(f"camera: success · {v['score']}", "success")
+            ctx.emit("success", f"camera verdict: success, score {v['score']}, {bad} of {len(times)} frames off",
                      score=v["score"], frames_off=bad)
         else:
-            ctx.ui.badge(f"judge: failed · {v['score']}", "error")
+            ctx.ui.badge(f"camera: failed · {v['score']}", "error")
             data: dict[str, Any] = {"score": v["score"], "frames_off": bad}
             if v["reason_code"]:
                 data["reason"] = v["reason_code"]
-            ctx.emit("warn", f"judge: failed, {v['reason']} (score {v['score']})", **data)
+            ctx.emit("error", f"camera verdict: {v['reason']} (score {v['score']})", **data)
         ctx.ui.metric("judged success", 100 * _rate(self.judged, self.z)["rate"], unit="%")
         ctx.ui.metric("judge score", float(v["score"]), unit="")
+
+    def _save_frames(self, ctx: PluginContext, images: list[bytes], episode: int) -> list[str | None]:
+        """The judged frames as JPEGs for the page: ep003_f0.jpg… (None without a run folder)."""
+        if ctx.run_dir is None:
+            return [None] * len(images)
+        out: list[str | None] = []
+        for i, img in enumerate(images):
+            name = f"ep{episode:03d}_f{i}.jpg"
+            ctx.files.path(name).write_bytes(img)
+            out.append(name)
+        return out
+
+    def _save_attempt(self, ctx: PluginContext, row: dict[str, Any]) -> None:
+        """attempts.json, rewritten after each attempt (the defer worker runs one job at a time)."""
+        self.attempts.append(row)
+        if ctx.run_dir is not None:
+            ctx.files.path("attempts.json").write_text(json.dumps(self.attempts, indent=1, ensure_ascii=False))
 
     def on_run_end(self, ctx: PluginContext) -> None:
         ctx.defer(self._summary, ctx, ctx.episodes)

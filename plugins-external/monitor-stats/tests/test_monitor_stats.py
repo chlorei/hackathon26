@@ -1,11 +1,13 @@
 """Replay tests with a fake vision model: no network, no credits, no simulator."""
 
+import io
 import json
 import re
 import sys
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from dreamkit.testing import replay
 
@@ -44,13 +46,20 @@ def test_judges_a_successful_attempt(model):
     result = replay("success_apple_bowl", plugins=["success-check", "monitor-stats"], keep=True)
     v = result.result["monitor-stats"]
     assert v["success"] is True and v["score"] == 90
-    assert len(calls) == 1 and 2 <= len(calls[0]["images"]) <= 8
+    assert len(calls) == 1 and len(calls[0]["images"]) == 6
     assert all(img[:2] == b"\xff\xd8" for img in calls[0]["images"])  # JPEG
     assert "put apple into the bowl" in calls[0]["prompt"]
     assert v["frames"][0]["comment"] == "frame 0" and "t_s" in v["frames"][0]  # the panel's style, with times
+    assert result.events.any(plugin="monitor-stats", level="info", message="judging attempt")
     assert result.events.any(plugin="monitor-stats", level="success")
     assert not result.errors("monitor-stats")
     assert result.budget_ms("monitor-stats") < 1.0
+    # what the page reads: the judged frames as JPEGs (at most 512 px wide) and attempts.json
+    folder = result.run_dir / "monitor-stats"
+    [row] = json.loads((folder / "attempts.json").read_text())
+    assert row["success"] is True and row["check"] is True and len(row["frames"]) == 6
+    jpg = (folder / row["frames"][0]["file"]).read_bytes()
+    assert jpg[:2] == b"\xff\xd8" and Image.open(io.BytesIO(jpg)).width <= 512
     summary = json.loads((result.run_dir / "monitor-stats" / "summary.json").read_text())
     assert summary["overall"]["successes"] == 1
     assert summary["agreement"] == {"attempts": 1, "agree": 1, "rate": 1.0}  # same verdict as success-check
@@ -63,8 +72,8 @@ def test_judges_a_failed_attempt_with_reason_code(model):
     v = result.result["monitor-stats"]
     assert v["success"] is False and v["reason"] == "dropped the apple while carrying it"
     assert v["reason_code"] == "dropped"
-    ev = [e for e in result.events.of("monitor-stats") if e["level"] == "warn"]
-    assert ev and ev[0]["data"]["reason"] == "dropped"
+    ev = [e for e in result.events.of("monitor-stats") if e["level"] == "error"]
+    assert ev and ev[0]["message"].startswith("camera verdict: dropped") and ev[0]["data"]["reason"] == "dropped"
     assert not result.errors("monitor-stats")
     assert result.budget_ms("monitor-stats") < 1.0
 
@@ -79,9 +88,9 @@ def test_asks_again_after_a_bad_reply_and_drops_unknown_codes(model):
 
 def test_model_down_does_not_break_the_run(model):
     calls, script = model
-    script.append(RuntimeError("no Gemini model available (gemini-3.8-flash: 503)"))
+    script.append(RuntimeError("no Gemini model available (gemini-3.5-flash-lite: 503)"))
     result = replay("success_apple_bowl", plugins=["monitor-stats"])
-    assert result.result["monitor-stats"] == {"error": "no Gemini model available (gemini-3.8-flash: 503)"}
+    assert result.result["monitor-stats"] == {"error": "no Gemini model available (gemini-3.5-flash-lite: 503)"}
     assert result.events.any(plugin="monitor-stats", level="warn")
     assert not result.errors("monitor-stats")
 

@@ -3,7 +3,7 @@
 A [dreamkit](https://github.com/chlorei/hackathon26) plugin that **judges every attempt from what the camera saw**
 and keeps the statistics across runs: how often the robot really succeeds, at which task, and why it fails.
 
-- **A vision judge.** At the end of each attempt, 8 frames taken evenly from one camera and the task go to Gemini
+- **A vision judge.** At the end of each attempt, 6 frames taken evenly from one camera and the task go to Gemini
   (or Claude). It answers: success or not, a 0–100 score, the reason in words and as a code from `dreamkit/reasons.py`,
   and a status with a comment for every frame. success-check decides from the simulator's object positions; the judge
   needs only frames, so it works on a real robot too.
@@ -13,8 +13,8 @@ and keeps the statistics across runs: how often the robot really succeeds, at wh
   they agree: `judge agrees with success-check on 9 of 10 attempts`.
 
 Nothing slow runs in the control loop: `on_step` only keeps a thinned buffer of small frames (budget well under
-1 ms); the model call runs on the `ctx.defer` worker and must finish within `max_wait_s` (90 s), because dreamkit
-saves the attempt after 120 s. If no model answers, the attempt gets `not judged` and the run goes on.
+1 ms); the model call runs on the `ctx.defer` worker: 10 s per call, 20 s for the verdict in all (`timeout_s`,
+`max_wait_s`), so the next attempt is not held up. If no model answers, the attempt gets `not judged` and the run goes on.
 
 ```bash
 dreamkit install https://github.com/chlorei/hackathon26/tree/main/plugins-external/monitor-stats
@@ -24,26 +24,33 @@ export GEMINI_API_KEY=...          # or provider: claude with ANTHROPIC_API_KEY 
 ```yaml
 plugins:
   - success-check                  # optional: lets the plugin measure how often the judge agrees
-  - monitor-stats                  # or: - monitor-stats: {camera: top, frames: 8}
+  - monitor-stats                  # or: - monitor-stats: {camera: top, frames: 6}
 ```
 
-Gemini models are tried in order `gemini-3.8-flash → gemini-3.6-flash → gemini-3.5-flash-lite`: a 503 ("high demand")
-or a timeout moves on to the next one. A reply that is not valid JSON of the schema is asked again, twice at most.
+Gemini Flash-Lite answers first (`gemini-3.5-flash-lite`, fast and cheap); on a 503 ("high demand") or a timeout,
+Flash (`gemini-3.8-flash`) takes over. A reply that is not valid JSON of the schema is asked again, twice at most.
 
 ## What it shows
 
-- Per attempt: a badge `judge: success · 87` or `judge: failed · 25`, timeline marks on the frames the judge flagged,
-  metrics `judged success` and `judge score`, and an event in the feed.
+- Per attempt: `judging attempt` in the feed, then `camera verdict: success, score 87, …` (success) or
+  `camera verdict: dropped the apple while carrying it (score 25)` (error); a badge `camera: success · 87`, timeline
+  marks (`ctx.ui.mark`) at the frames the judge flagged, metrics `judged success` and `judge score`.
+- **Its own page** (`ui/index.html`, PLUGIN_STANDARD §7a): click a monitor-stats line in Live or History. A summary
+  (attempts, successes, agreement with success-check), three charts (score of each attempt, why attempts fail, in
+  which frame a failed attempt first goes wrong), every attempt with its 6 frames and the judge's comment on each, and
+  *Download JSON / CSV*.
 - At the end of a run, in the feed: overall rate with its interval, agreement with success-check, the recommendation.
 - `run.json`, each attempt: `"monitor-stats": {"success", "score", "reason", "reason_code", "frames": [{"index",
   "status", "comment", "t_s"}]}` (or `{"error": ...}` when not judged).
+- `runs/<id>/monitor-stats/`: the judged frames `ep003_f0.jpg … ep003_f5.jpg` (512 px wide) and `attempts.json`
+  (this run's verdicts, what the page reads).
 - `runs/<id>/monitor-stats/summary.json`: `overall`, `by_task`, `reasons` (code, label, count, share, examples),
   `agreement`, `recommendation`.
 
 Example events:
 
 ```json
-{"plugin": "monitor-stats", "level": "warn", "message": "judge: failed, dropped the apple while carrying it (score 25)",
+{"plugin": "monitor-stats", "level": "error", "message": "camera verdict: dropped the apple while carrying it (score 25)",
  "data": {"score": 25, "frames_off": 2, "reason": "dropped"}}
 {"plugin": "monitor-stats", "level": "warn",
  "message": "record more demonstrations of 'put apple into the bowl': 2 of 5 judged successful, mostly dropped"}
@@ -64,11 +71,11 @@ dreamkit bench .        # ms/step on every bundled fixture
 | param | default | unit | what |
 |---|---|---|---|
 | `camera` | `top` | top / left / right | Camera the judge looks at (the first one if it is missing) |
-| `frames` | `8` |  | Frames per attempt sent to the judge |
+| `frames` | `6` |  | Frames per attempt sent to the judge |
 | `image_width` | `512` |  | Frames are scaled down to at most this many pixels wide |
 | `buffer` | `64` |  | Frames kept per attempt; above this every other one is dropped |
 | `provider` | `gemini` | gemini / claude | Vision model that judges (GEMINI_API_KEY or ANTHROPIC_API_KEY) |
-| `timeout_s` | `30.0` | s | Longest wait for one model call |
-| `max_wait_s` | `90.0` | s | Longest wait for a verdict, fallbacks included; dreamkit waits at most 120 s before saving the attempt |
+| `timeout_s` | `10.0` | s | Longest wait for one model call |
+| `max_wait_s` | `20.0` | s | Longest wait for a verdict, fallbacks included; dreamkit waits at most 120 s before saving the attempt |
 | `confidence` | `0.95` |  | Confidence level of the success-rate interval |
 <!-- /params -->
