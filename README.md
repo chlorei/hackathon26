@@ -129,6 +129,9 @@ python examples/sim_loop.py --episodes 10   # the same with Dream-1 (uses credit
 python examples/sim_loop.py --mock --behaviors dropped,grasped_air,released_off_target,success \
        --fault-camera top --fault-episode 4 # the demo: every plugin gets something to do
 python examples/recovery_ab.py --episodes 10  # Dream-1, same seeds with and without recovery (uses credits)
+python examples/ab_test.py --tune --episodes 10   # prompt tuner: paraphrases of the task, same seeds, ranked with proof
+python examples/ab_test.py --models dreamlabs/dream-1-beta,<fine-tune id> --episodes 20   # base vs fine-tune
+python examples/finetune.py --runs <run-id...>    # harvested successes -> validated -> upload -> fine-tune (--status)
 dreamkit ui                                 # the panel: Live / Plugins / History
 dreamkit harvest export <run-id...>         # successful episodes -> ./harvest, checked with validate_dataset
 dreamkit list | search | install | new      # plugins
