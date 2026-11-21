@@ -303,6 +303,13 @@ def install(target: str) -> tuple[bool, str]:
         log += ["-- check", *lines]
         if not passed:
             return False, _save_log(log + ["✗ not installed: dreamkit check failed"], False)
+        deps = _dependencies(src)
+        if deps:  # its tests import them (a model SDK, …); the plugin itself is installed only after its tests pass
+            proc = subprocess.run(registry.pip_command("install", *deps), capture_output=True, text=True)
+            log += [f"-- dependencies: {', '.join(deps)}", (proc.stdout + proc.stderr).strip()[-800:]]
+            if proc.returncode != 0:
+                return False, _save_log(log + ["✗ not installed: its dependencies did not install"], False)
+            importlib.invalidate_caches()
         passed, out = test(str(src))
         log += ["-- tests", out]
         if not passed:
@@ -322,7 +329,7 @@ def install(target: str) -> tuple[bool, str]:
         if target_info.app is not None:
             from . import apps  # noqa: PLC0415
 
-            importlib.invalidate_caches()
+            apps.forget(src)
             found_apps, app_problems = apps.discover()
             if name not in found_apps or not found_apps[name].origin.startswith("pip"):
                 dist = _dist_name(src)
@@ -330,8 +337,8 @@ def install(target: str) -> tuple[bool, str]:
                                                     dist), capture_output=True, text=True)
                 return False, _save_log(log + [f"✗ installed but the app did not load ({app_problems}); rolled back"], False)
             ok = True
-            log.append(f"✓ {name} installed and checked — restart `dreamkit ui` for its tab "
-                       f"({found_apps[name].title}); commands: dreamkit {found_apps[name].aliases[-1]} --help")
+            log.append(f"✓ {name} installed and checked — its tab \"{found_apps[name].title}\" is in the panel "
+                       f"(reload the page); commands: dreamkit {found_apps[name].aliases[-1]} --help")
             return True, _save_log(log, True)
         found, problems = discover()
         if name not in found or found[name]["source"] != "pip":
@@ -343,8 +350,20 @@ def install(target: str) -> tuple[bool, str]:
         log.append(f"✓ {name} installed and checked — switch it on in the panel or dreamkit.yaml")
         return True, _save_log(log, True)
     finally:
+        if src is not None:
+            from .apps import forget  # noqa: PLC0415
+
+            forget(src)  # the check imported it from here; the installed copy must be the one used from now on
         if tmp is not None:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _dependencies(src: Path) -> list[str]:
+    """The package's own requirements, without dreamkit itself (already here)."""
+    import tomllib  # noqa: PLC0415
+
+    reqs = tomllib.loads((src / "pyproject.toml").read_text()).get("project", {}).get("dependencies", [])
+    return [r for r in reqs if not re.match(r"^\s*dreamkit(\s|[<>=!~\[;]|$)", r)]
 
 
 def _dist_name(src: Path) -> str:

@@ -259,16 +259,19 @@ function useInstall() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['registry'] })
       queryClient.invalidateQueries({ queryKey: ['plugins'] })
+      queryClient.invalidateQueries({ queryKey: ['apps'] })  // an app plugin: its tab appears now
     },
   })
 }
 
-function InstallLog({ result }: { result?: { ok: boolean; log: string } }) {
+function InstallLog({ result }: { result?: { ok: boolean; log: string; app?: string | null } }) {
   if (!result) return null
   return (
     <div className="space-y-2">
       <p className={clsx('text-[13px] font-medium', result.ok ? 'text-ok' : 'text-bad')}>
-        {result.ok ? 'Installed: it passed check, tests and bench. Switch it on in the list.' : 'Not installed: it did not pass the checks below.'}
+        {!result.ok ? 'Not installed: it did not pass the checks below.'
+          : result.app ? `Installed: it passed check and its tests. Its tab "${result.app}" is in the top bar.`
+          : 'Installed: it passed check, tests and bench. Switch it on in the list.'}
       </p>
       <pre className="max-h-72 overflow-auto rounded-lg bg-log p-3 font-mono text-[12px] whitespace-pre-wrap text-[#e8e6e1]">{result.log}</pre>
     </div>

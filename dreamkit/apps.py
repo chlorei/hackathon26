@@ -163,6 +163,18 @@ def discover(extra: list[Path] | None = None) -> tuple[dict[str, App], list[str]
     return found, problems
 
 
+def forget(src: Path) -> None:
+    """Drops what a check imported from a source folder (a temporary clone during install): its sys.path entry and its
+    modules, so the installed copy is imported next time, not the deleted clone."""
+    src = Path(src).resolve()
+    sys.path[:] = [p for p in sys.path if Path(p or ".").resolve() != src]
+    for name, module in list(sys.modules.items()):
+        file = getattr(module, "__file__", None)
+        if file and src in Path(file).resolve().parents:
+            del sys.modules[name]
+    importlib.invalidate_caches()
+
+
 def world_available(cfg: Any, base: Path) -> bool:
     """Dream Labs' simulator is here: sim_path has yam_env.py, or the dreamlabs wheel's dream_examples."""
     try:

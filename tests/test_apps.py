@@ -114,3 +114,29 @@ def test_pdk_check_test_bench_for_an_app(tmp_path):
     assert ok, out
     ok, lines = pdk.bench(str(src))
     assert ok and "no per-step bench" in lines[0]
+
+
+def test_an_app_installed_while_the_panel_runs_gets_its_tab(tmp_path, monkeypatch):
+    """No restart: /api/apps looks again, and /apps/<name>/ serves the new app."""
+    cfg = tmp_path / "dreamkit.yaml"
+    cfg.write_text(yaml.safe_dump({"runs_dir": str(tmp_path / "runs")}))
+    monkeypatch.delenv("DREAMKIT_PLUGIN_PATH", raising=False)
+    client = TestClient(create_app(cfg))
+    assert "latecomer" not in {a["name"] for a in client.get("/api/apps").json()["apps"]}
+    assert client.get("/apps/latecomer/api/ping").status_code == 404
+    monkeypatch.setenv("DREAMKIT_PLUGIN_PATH", str(make_app(tmp_path, "latecomer", title="Late")))
+    assert "latecomer" in {a["name"] for a in client.get("/api/apps").json()["apps"]}
+    assert client.get("/apps/latecomer/api/ping").json()["pong"] is True
+    assert "hello app" in client.get("/apps/latecomer/").text
+
+
+def test_forget_drops_a_deleted_clone(tmp_path):
+    import shutil
+    import sys
+
+    src = make_app(tmp_path, "ephemeral")
+    found, _ = apps.discover(extra=[src])
+    assert "ephemeral" in sys.modules and str(src) in sys.path
+    apps.forget(src)
+    shutil.rmtree(src)
+    assert "ephemeral" not in sys.modules and str(src) not in sys.path

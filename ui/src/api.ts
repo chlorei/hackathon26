@@ -179,7 +179,7 @@ export const api = {
   updatePlugin: (name: string, body: { enabled?: boolean; params?: Record<string, unknown> }) =>
     call<{ plugins: PluginInfo[] }>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'POST', body: JSON.stringify(body) }),
   registry: () => call<{ source: string; plugins: RegistryEntry[] }>('/api/registry'),
-  install: (name: string) => call<{ ok: boolean; log: string }>('/api/install', { method: 'POST', body: JSON.stringify({ name }) }),
+  install: (name: string) => call<{ ok: boolean; log: string; app?: string | null }>('/api/install', { method: 'POST', body: JSON.stringify({ name }) }),
   runs: () => call<{ runs: RunInfo[] }>('/api/runs'),
   run: (id: string) => call<RunInfo>(`/api/runs/${id}`),
   trace: (id: string, episode: number) =>

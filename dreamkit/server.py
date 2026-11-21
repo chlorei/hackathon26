@@ -56,6 +56,63 @@ def _is_live(folder: Path, info: dict[str, Any] | None) -> bool:
     return bool(info and info.get("status") == "running" and beat and time.time() - beat.get("updated", 0) < LIVE_FRESH_S)
 
 
+class AppsHost:
+    """Serves every app plugin under /apps/<name>/: its router at api/, its page at /. Apps are looked up again on
+    refresh() (after an install, on /api/apps), so a new app works without restarting the panel (§13)."""
+
+    def __init__(self, context):
+        self.context = context
+        self.apps: dict[str, Any] = {}
+        self.problems: list[str] = []
+        self.subs: dict[str, Any] = {}
+        self.refresh()
+
+    def refresh(self) -> None:
+        import importlib
+
+        from . import apps as apps_mod
+
+        importlib.invalidate_caches()
+        found, problems = apps_mod.discover()
+        for name in list(self.subs):
+            if name not in found or found[name] is not self.apps.get(name):
+                del self.subs[name]
+        self.apps, self.problems = found, problems
+
+    def sub(self, name: str) -> Any:
+        if name not in self.subs:
+            a = self.apps[name]
+            sub = FastAPI(title=f"dreamkit app {name}")
+            if a.router is not None:
+                sub.include_router(a.router(self.context()), prefix="/api")
+            if a.page is not None:
+                sub.mount("/", StaticFiles(directory=a.page, html=True), name="page")
+            self.subs[name] = sub
+        return self.subs[name]
+
+    async def __call__(self, scope, receive, send) -> None:
+        from starlette.responses import JSONResponse, RedirectResponse
+        from starlette.routing import get_route_path
+
+        rest = get_route_path(scope)  # the path under /apps
+        name = rest.strip("/").split("/", 1)[0]
+        if name and name not in self.apps and scope["type"] == "http":
+            self.refresh()  # installed since the panel started
+        if not name or name not in self.apps:
+            response = JSONResponse({"detail": f"no app plugin named {name!r}"}, status_code=404)
+            return await response(scope, receive, send)
+        if rest.rstrip("/") == f"/{name}" and not rest.endswith("/") and scope["type"] == "http":
+            return await RedirectResponse(scope.get("root_path", "") + f"/{name}/")(scope, receive, send)
+        try:
+            sub = self.sub(name)
+        except Exception as error:  # noqa: BLE001 - one broken app never takes the panel down
+            response = JSONResponse({"detail": f"app {name} failed to start: {type(error).__name__}: {error}"},
+                                    status_code=500)
+            return await response(scope, receive, send)
+        child = dict(scope, root_path=scope.get("root_path", "") + f"/{name}")
+        await sub(child, receive, send)
+
+
 def create_app(config_path: str | Path) -> FastAPI:
     config_path = Path(config_path).expanduser().resolve()
     app = FastAPI(title="dreamkit")
@@ -187,8 +244,9 @@ def create_app(config_path: str | Path) -> FastAPI:
         cfg, base = load_cfg()
         entries, source = registry.load(cfg.registry_url)
         found, _ = discover([base / "plugins"])
+        host.refresh()
         for e in entries:
-            e["installed"] = e["name"] in found
+            e["installed"] = e["name"] in found or e["name"] in host.apps
         return {"source": "GitHub" if source.startswith("http") else "local registry.yaml", "plugins": entries}
 
     @app.post("/api/install")
@@ -199,7 +257,9 @@ def create_app(config_path: str | Path) -> FastAPI:
         import importlib
 
         importlib.invalidate_caches()
-        return {"ok": ok, "log": log}
+        host.refresh()
+        return {"ok": ok, "log": log, "app": next((a.title for a in host.apps.values()
+                                                  if body.name in (a.name, *a.aliases)), None)}
 
     # -- runs (the monitor) ------------------------------------------------------------------------------------
     @app.get("/api/live")
@@ -448,31 +508,30 @@ def create_app(config_path: str | Path) -> FastAPI:
         html = html[: at + 6] + head + html[at + 6 :] if at >= 0 else head + html
         return Response(html, media_type="text/html")
 
-    # -- app plugins (§13): their API, their page, the shared theme -----------------------------------------
+    # -- app plugins (§13): their API and page under /apps/<name>/, found again after an install -----------------
     from . import apps as apps_mod
 
-    found_apps, app_problems = apps_mod.discover()
-    cfg0, base0 = load_cfg()
-    world = apps_mod.world_available(cfg0, base0)
-    for name, plugin_app in found_apps.items():
-        ctx = apps_mod.AppContext(config_path=config_path, base=base0, runs_dir=runs_root(), world=world, config=cfg0)
-        try:
-            if plugin_app.router is not None:
-                app.include_router(plugin_app.router(ctx), prefix=f"/apps/{name}/api")
-            if plugin_app.page is not None:
-                app.mount(f"/apps/{name}", StaticFiles(directory=plugin_app.page, html=True), name=f"app-{name}")
-        except Exception as error:  # noqa: BLE001 - one broken app never takes the panel down
-            app_problems.append(f"app {name}: could not mount: {type(error).__name__}: {error}")
+    def app_context() -> "apps_mod.AppContext":
+        cfg, base = load_cfg()
+        return apps_mod.AppContext(config_path=config_path, base=base, runs_dir=runs_root(),
+                                   world=apps_mod.world_available(cfg, base), config=cfg)
+
+    host = AppsHost(app_context)
+    app.state.apps = host
+    app.mount("/apps", host, name="apps")
 
     @app.get("/api/apps")
     def list_apps():
+        host.refresh()  # an app installed a moment ago gets its tab without restarting the panel
+        cfg, base = load_cfg()
+        world = apps_mod.world_available(cfg, base)
         out = []
-        for name, a in found_apps.items():
+        for name, a in host.apps.items():
             d = a.describe()
             d["inactive"] = ("needs Dream Labs' simulator (set sim_path in dreamkit.yaml, or pip install dreamlabs)"
                              if "world" in a.manifest.needs and not world else None)
             out.append(d)
-        return {"apps": out, "problems": app_problems, "world": world}
+        return {"apps": out, "problems": host.problems, "world": world}
 
     if (UI_DIST / "index.html").is_file():
         app.mount("/", StaticFiles(directory=UI_DIST, html=True), name="ui")
