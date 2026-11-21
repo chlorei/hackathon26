@@ -118,13 +118,11 @@ class MockPolicy:
         dz = GRASP_DZ.get(obj, 0.003)
         place_dz = 0.07 if target == "bowl" else 0.06
 
-        place = g.copy()
-        if behavior == "missed_target":
-            away = place[:2] - p[:2]
-            away = away / (np.linalg.norm(away) + 1e-9)
-            place[:2] += away * 0.10  # overshoot past the target by 10 cm
         last_error: Exception | None = None
         for side in sides:
+            place = g.copy()
+            if behavior == "missed_target":
+                place[0] += 0.10 if side == "left" else -0.10  # 10 cm off the target, toward the picking arm
             for yaw in yaws:
                 try:
                     return self._script(env, side, yaw, p, place, dz, place_dz, behavior, hold)
@@ -185,7 +183,9 @@ class MockPolicy:
             wait(0, 5)
             move(p + [0, 0, 0.10], 0, 40)
             if behavior == "dropped":
-                mid = p + (place - p) * 0.3
+                away = p[:2] - place[:2]
+                away = away / (np.linalg.norm(away) + 1e-9)
+                mid = p[:2] + away * 0.06  # carries it away from the target, then lets go
                 move([mid[0], mid[1], p[2] + 0.12], 0, 25)
                 grip(0, 1, 6)  # lets go in mid-air, far from the target
                 wait(1, 400)

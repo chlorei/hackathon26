@@ -211,9 +211,10 @@ class Runner:
                 manager.call("after_model", ctx)
                 # Plugins may only tighten the chunk: run whatever they left through validate_chunk again.
                 left, right = ctx.actions
-                if len(left) == 0 or len(right) == 0:  # a plugin dropped every row: hold for one step instead
+                if len(left) == 0 or len(right) == 0:  # a plugin dropped every row: hold still for one chunk
                     state = env.state()
-                    left, right = state["left"][None, :], state["right"][None, :]
+                    left = np.repeat(state["left"][None, :], cfg.actions_per_chunk, axis=0)
+                    right = np.repeat(state["right"][None, :], cfg.actions_per_chunk, axis=0)
                 left, right = dc.validate_chunk(env, {"q_l_chunk": left, "q_r_chunk": right}, cfg.actions_per_chunk,
                                                 verbose=False)
                 executed = 0
