@@ -26,7 +26,7 @@ from typing import Any, Iterator
 import numpy as np
 
 from . import config as config_mod
-from . import history, reasons, storage
+from . import cost, history, reasons, storage
 from .events import Emitter
 from .live import LiveWriter
 from .manager import PluginManager
@@ -142,6 +142,7 @@ class Kit:
         self._next_is_retry = False
         self._episode_started = 0.0
         self._requests = 0
+        self._run_calls = 0  # real model calls in this run: what it costs (dreamkit.cost)
         self._frozen: dict[str, np.ndarray] = {}
         self._watch_checked, self._watch_seen = 0.0, False
         self.info: dict[str, Any] = {
@@ -149,7 +150,9 @@ class Kit:
             "id": self.run_id, "task": "", "model": "", "mock": bool(getattr(client, "mock", False)),
             "started": time.time(), "plugins": self.manager.names, "control": self.manager.control,
             "refused": self.manager.refused, "status": "running", "light": cfg.light, "standard": "1",
+            "cost_usd": 0.0,
         }
+        self.ctx.mock = self.info["mock"]
         self._save()
         self.emitter.emit("run_start", run_id=self.run_id, plugins=self.manager.names, mock=self.info["mock"])
         for name in self.manager.missing:
@@ -176,6 +179,10 @@ class Kit:
     def t(self) -> float:
         """Seconds into the current attempt (steps x 50 ms)."""
         return self.ctx.t
+
+    def _price(self) -> float:
+        """Dollars per robot-hour of this run's model (dreamkit.cost); 0 for a mock."""
+        return cost.price_per_hour(self.ctx.model, self.info["mock"], self.config.prices)
 
     @property
     def retry_requested(self) -> bool:
@@ -230,6 +237,8 @@ class Kit:
         else:
             reply = self.client.get_action(**kwargs)
             self._requests += 1
+            self._run_calls += 1
+            ctx._telemetry["spent_usd"] = round(cost.usd(self._run_calls, self._price()), 4)  # Live: money as it goes
             ctx.timing = getattr(self.client, "last_timing", None)
             ctx.store.pop("overridden_by", None)
             if self.recorder is not None:
@@ -373,6 +382,7 @@ class Kit:
         ctx.step, ctx.t = 0, 0.0
         ctx.result, ctx.actions, ctx.command, ctx.timing, ctx.reply = {}, None, None, None, None
         ctx._retry, ctx._telemetry, ctx._override, ctx._ui = False, {}, None, {}
+        ctx._telemetry["spent_usd"] = round(cost.usd(self._run_calls, self._price()), 4)
         self._frozen = {}
         if state is None:
             read = getattr(ctx.env, "state", None)
@@ -447,6 +457,7 @@ class Kit:
             "success": r.get("success"),
             "reason": r.get("reason", "timeout") if r.get("success") is False else None,  # unknown outcome: no reason
             "duration_s": round(ctx.t, 2), "requests": self._requests,
+            "cost_usd": round(cost.usd(self._requests, self._price()), 4),
             "wall_s": round(time.time() - self._episode_started, 2), "retry_requested": ctx._retry,
             **{k: v for k, v in r.items() if k not in ("success", "reason")},
             **{k: v for k, v in ctx.store.get("episode", {}).items() if k not in r},
@@ -456,6 +467,7 @@ class Kit:
         result["videos"] = sorted(
             str(p.relative_to(self.run_dir)) for p in (self.run_dir / "recorder").glob(f"ep{ctx.episode:03d}_*.mp4"))
         ctx.episodes.append(_plain(result))
+        self.info["cost_usd"] = round(cost.usd(self._run_calls, self._price()), 4)
         self._next_is_retry = ctx._retry
         if self.recorder is not None:
             self.recorder.end(ctx, ctx.episodes[-1])

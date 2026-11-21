@@ -22,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from dreamkit.cost import usd
 from dreamkit.plugin import Plugin, PluginContext
 from dreamkit.standard import Manifest
 
@@ -97,7 +98,7 @@ def summarize(episodes: list[dict[str, Any]], z: float, price_per_hour: float, c
     k = sum(1 for e in episodes if e.get("success"))
     lo, hi = wilson(k, n, z)
     calls = sum(int(e.get("requests") or 0) for e in episodes)
-    cost = calls * price_per_hour / calls_per_hour
+    cost = usd(calls, price_per_hour, calls_per_hour)  # dreamkit.cost: the one place a dollar is computed
     times = [float(e["duration_s"]) for e in episodes if e.get("success") and e.get("duration_s") is not None]
     reasons = Counter(e.get("reason") or "unknown" for e in episodes if not e.get("success"))
     return {

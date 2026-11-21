@@ -107,6 +107,7 @@ class Context:
     result: dict[str, Any] = field(default_factory=dict)
     store: dict[str, Any] = field(default_factory=dict)
     episodes: list[dict[str, Any]] = field(default_factory=list)
+    mock: bool = False  # a scripted client: no model, nothing billed
     emitter: Emitter | None = None
     world: World = field(default_factory=lambda: World(None))
     robot: Robot = field(default_factory=Robot)
@@ -294,6 +295,7 @@ class PluginContext:
     env = property(lambda self: self._core.env)
     task = property(lambda self: self._core.task)
     model = property(lambda self: self._core.model)
+    mock = property(lambda self: self._core.mock)
     run_id = property(lambda self: self._core.run_id)
     run_dir = property(lambda self: self._core.run_dir)
     config = property(lambda self: self._core.config)

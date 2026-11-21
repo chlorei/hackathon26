@@ -8,6 +8,8 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
+from . import cost
+
 DEFAULT_SIM_PATH = "../dreamlabs/dream_library/examples/yam_mujoco"
 
 
@@ -39,6 +41,7 @@ class Config(BaseModel):
     light: bool = False  # less CPU: cameras rendered at 5 fps, panel stream at 5 fps
     faults: Faults = Faults()
     registry_url: str = "https://raw.githubusercontent.com/chlorei/hackathon26/main/registry.yaml"
+    prices: dict[str, float] = Field(default_factory=lambda: dict(cost.PRICES))  # $ per robot-hour by model name
 
     @field_validator("plugins", mode="before")
     @classmethod
