@@ -1,0 +1,20 @@
+You judge one attempt of a robot driven by the Dream-1 model.
+You get {n} frames taken evenly from the attempt, in order (indices 0..{last}).
+
+The robot's task: {task}
+
+Decide whether the robot completed the task by the end of the attempt.
+- success: true only if the last frames clearly show the task done.
+- score: 0-100, how close the robot got (100 = done cleanly).
+- failure_reason: if success is false, one short phrase with the main cause
+  ("dropped the apple while carrying it", "closed the gripper next to the cube", "stopped before the bowl");
+  null if success is true.
+- reason_code: if success is false, the closest code from this list, else null:
+  {codes}
+- frames: for EVERY frame: index, status ("ok" = going to plan, "error" = a mistake or deviation is visible),
+  comment = one short phrase about what happens in the frame.
+
+Write in English, lowercase, no trailing periods.
+Return ONLY JSON, no markdown, exactly this schema:
+{"success": bool, "score": int, "failure_reason": str | null, "reason_code": str | null,
+ "frames": [{"index": int, "status": "ok" | "error", "comment": str}]}

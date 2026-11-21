@@ -1,0 +1,47 @@
+[project]
+name = "dreamkit-monitor-stats"
+version = "0.1.0"
+description = "monitor-stats: a vision model judges every attempt from camera frames; stats across runs"
+requires-python = ">=3.11"
+dependencies = ["dreamkit>=0.3,<0.4", "google-genai>=1.0", "pillow>=10"]
+
+[project.optional-dependencies]
+claude = ["anthropic>=1.0"]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+
+[project.entry-points."dreamkit.plugins"]
+monitor-stats = "monitor_stats:MonitorStats"
+
+[tool.dreamkit]
+api = "1"
+group = "diagnosis"
+icon = "ScanEye"
+capability = "observe"
+hooks = ["on_run_start", "on_episode_start", "on_step", "on_episode_end", "on_run_end"]
+step_rate_hz = 2
+needs_frames = true
+requires = []
+conflicts = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["monitor_stats"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "N"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+files = ["monitor_stats"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

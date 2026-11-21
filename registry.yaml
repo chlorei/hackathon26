@@ -10,3 +10,8 @@
   pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/reliability
   description: Success rate with a confidence interval, cost per success, and a proven A/B comparison between runs
   tags: [statistics, ab-test, reliability]
+- name: monitor-stats
+  repo: https://github.com/chlorei/hackathon26/tree/main/plugins-external/monitor-stats
+  pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/monitor-stats
+  description: A vision model judges every attempt from camera frames; success rate by task and top failure reasons across runs
+  tags: [vision, judge, statistics]
