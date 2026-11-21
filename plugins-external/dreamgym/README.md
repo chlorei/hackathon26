@@ -45,7 +45,7 @@ scratch copy of the model data and send joint rows through `env.step` like any p
 `policies/` (Dream-1, scripted IK expert) · `kit.py` (dreamkit.wrap around any policy) · `runner.py` (one episode through dreamkit) · `arena.py` / `compare.py` · `stats.py`
 (Wilson, McNemar, Fisher) · `lerobot_writer.py` · `finetune.py` · `web/` (router, page, teleop) · `app.py` (the app plugin).
 
-Known limits: the scripted expert cannot do `apple_bowl` (IK finds no carry pose; `banana_plate` works);
+Known limits: the scripted expert plans `banana_plate`, `apple_bowl` and `orange_bowl` (round fruit: each arm grips at the yaw its wrist reaches; carry and retreat over the bowl stay within ~0.14 m, the highest gripper-down pose the arm reaches there; if the nearer arm cannot reach every pose the other arm is used);
 recovery acts on Dream-1 and on the scripted expert (a new plan from where the arms are), not on Teleop; the success thresholds in `scene.py` come from the scene geometry; Teleop's key directions follow the
 top camera and are not tuned on hardware; fine-tuning on simulator data helps in the simulator, not necessarily on a
 real robot.

@@ -14,10 +14,20 @@ from ..core import Chunk, Context
 
 ## Grasp yaw per object at its stock orientation (mock_pickups grips the banana across).
 BASE_YAW = {"banana": np.pi / 2}
+## Round fruit can be gripped at any yaw, so each arm uses the yaw its wrist reaches best over the table
+## (worked out from the YAM kinematics: the right arm cannot hold a gripper-down pose at yaw 0 near the centre).
+ROUND = {"apple", "orange"}
+SIDE_YAW = {"left": 0.0, "right": np.pi / 2}
 ## Grasp height of the tool centre point above the object's centre (mock_pickups' values).
 GRASP_DZ = {"orange": -0.009}
-## Release height above the target's origin.
+## Release height above the target's origin (bowl rim is ~0.058 m high).
 RELEASE_DZ = {"bowl": 0.11, "plate": 0.08}
+## Heights tried, in order, above the release point for the carry and the retreat. A gripper-down pose over the
+## bowl is only reachable up to ~0.14 m above it, so the bowl needs the lower ones.
+CARRY_DZ = (0.05, 0.03, 0.015)
+RETREAT_DZ = (0.10, 0.05, 0.03)
+## Lift heights tried after the grasp.
+LIFT_DZ = (0.15, 0.12, 0.10)
 
 
 def _smooth(n: int) -> np.ndarray:
@@ -43,13 +53,32 @@ class ScriptedPickPlace:
         obj, target = task.obj, task.target
         p = scene.pos(env, obj)
         goal = scene.pos(env, target)
-        side = "left" if p[0] > 0 else "right"
-        yaw = BASE_YAW.get(obj, 0.0) + getattr(env, "dreamgym_yaw", {}).get(obj, 0.0)
+        near = "left" if p[0] > 0 else "right"
+        shift = [ctx.rng.normal(0, self.noise_m, 2) if self.noise_m else np.zeros(2) for _ in range(2)]
+        errors = []
+        # The nearer arm first; if it cannot reach every pose (e.g. an object near the middle), the other arm.
+        for side in (near, "right" if near == "left" else "left"):
+            try:
+                rows = self._plan(env, mock, side, obj, target, p, goal, shift)
+            except ValueError as error:
+                errors.append(str(error))
+                continue
+            hold = home.copy()
+            self._rows = [(r, hold) if side == "left" else (hold, r) for r in rows]
+            self._i = 0
+            return
+        raise ValueError("; ".join(errors))
+
+    def _plan(self, env, mock, side, obj, target, p, goal, shift) -> list[np.ndarray]:
+        """Joint rows for one arm: above, down, close, lift, carry, lower, open, retreat. Raises if unreachable."""
+        if obj in ROUND:
+            yaw = SIDE_YAW[side]
+        else:
+            yaw = BASE_YAW.get(obj, 0.0) + getattr(env, "dreamgym_yaw", {}).get(obj, 0.0)
         c, s = np.cos(yaw), np.sin(yaw)
         rotation = np.array([[c, s, 0], [s, -c, 0], [0, 0, -1.0]])
         q = np.asarray(env.state()[side][:6], dtype=float)
         rows: list[np.ndarray] = []
-        jitter = lambda: np.r_[ctx.rng.normal(0, self.noise_m, 2), 0.0] if self.noise_m else np.zeros(3)
 
         def reach(point, flexible):
             """Exact pose first; for carrying, fall back to a turned, lower or slightly tilted gripper."""
@@ -82,23 +111,32 @@ class ScriptedPickPlace:
                 rows.append(np.r_[q + (end - q) * a, opening])
             q = end
 
+        def move_first(points, opening, steps, flexible=False):
+            """The first of several heights that is reachable without the fallback; else the fallback on the first."""
+            nonlocal q
+            for point in points:
+                try:
+                    return move(point, opening, steps)
+                except ValueError:
+                    continue
+            return move(points[0], opening, steps, flexible=True) if flexible else move(points[-1], opening, steps)
+
         def grip(start, stop, steps):
             for a in _smooth(steps):
                 rows.append(np.r_[q, start + (stop - start) * a])
 
         dz = GRASP_DZ.get(obj, 0.003)
-        move(p + [0, 0, 0.14] + jitter(), 1.0, 50)  # above the object
+        pick = p + np.r_[shift[0], 0.0]
+        move(pick + [0, 0, 0.14], 1.0, 50)  # above the object
         move(p + [0, 0, dz], 1.0, 40)  # down
         grip(1.0, 0.0, 25)  # close
-        move(p + [0, 0, 0.15], 0.0, 40)  # lift
-        drop = goal + [0, 0, RELEASE_DZ[target]] + jitter()
-        move(drop + [0, 0, 0.05], 0.0, 60, flexible=True)  # carry (round fruit may be turned or tilted)
+        move_first([p + [0, 0, h] for h in LIFT_DZ], 0.0, 40)  # lift
+        drop = goal + [0, 0, RELEASE_DZ[target]] + np.r_[shift[1], 0.0]
+        move_first([drop + [0, 0, h] for h in CARRY_DZ], 0.0, 60, flexible=True)  # carry
         move(drop, 0.0, 25, flexible=True)  # lower
         grip(0.0, 1.0, 20)  # release
-        move(drop + [0, 0, 0.10], 1.0, 30, flexible=True)  # retreat
-        hold = home.copy()
-        self._rows = [(r, hold) if side == "left" else (hold, r) for r in rows]
-        self._i = 0
+        move_first([drop + [0, 0, h] for h in RETREAT_DZ], 1.0, 30, flexible=True)  # retreat
+        return rows
 
     def next_chunk(self, env, ctx: Context) -> Chunk:
         rows = self._rows[self._i : self._i + self.chunk_rows]
