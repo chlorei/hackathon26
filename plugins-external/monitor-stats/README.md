@@ -18,7 +18,7 @@ Nothing slow runs in the control loop: `on_step` only keeps a thinned buffer of 
 
 ```bash
 dreamkit install https://github.com/chlorei/hackathon26/tree/main/plugins-external/monitor-stats
-export GEMINI_API_KEY=...          # or provider: claude with ANTHROPIC_API_KEY (pip install "dreamkit-monitor-stats[claude]")
+export GEMINI_API_KEY=...          # or GEMINI_API_KEY=... in a .env next to your loop (or a folder above); or provider: claude with ANTHROPIC_API_KEY (pip install "dreamkit-monitor-stats[claude]")
 ```
 
 ```yaml
@@ -28,11 +28,12 @@ plugins:
 ```
 
 Gemini Flash-Lite answers first (`gemini-3.5-flash-lite`, fast and cheap); on a 503 ("high demand") or a timeout,
-Flash (`gemini-3.8-flash`) takes over. A reply that is not valid JSON of the schema is asked again, twice at most.
+Flash (`gemini-3.8-flash`) takes over. On Google's free tier Flash allows only 20 requests a day; when they are
+used up it answers 429 and the attempt is `not judged` if Flash-Lite failed too. A reply that is not valid JSON of the schema is asked again, twice at most.
 
 ## What it shows
 
-- Per attempt: `judging attempt` in the feed, then `camera verdict: success, score 87, …` (success) or
+- Per attempt: `judging attempt` in the feed, then `camera verdict: success, score 87, …` (success, with `model_s`: how long the model took) or
   `camera verdict: dropped the apple while carrying it (score 25)` (error); a badge `camera: success · 87`, timeline
   marks (`ctx.ui.mark`) at the frames the judge flagged, metrics `judged success` and `judge score`.
 - **Its own page** (`ui/index.html`, PLUGIN_STANDARD §7a): click a monitor-stats line in Live or History. A summary
@@ -41,7 +42,7 @@ Flash (`gemini-3.8-flash`) takes over. A reply that is not valid JSON of the sch
   *Download JSON / CSV*.
 - At the end of a run, in the feed: overall rate with its interval, agreement with success-check, the recommendation.
 - `run.json`, each attempt: `"monitor-stats": {"success", "score", "reason", "reason_code", "frames": [{"index",
-  "status", "comment", "t_s"}]}` (or `{"error": ...}` when not judged).
+  "status", "comment", "t_s"}], "model_s"}` (or `{"error": ...}` when not judged).
 - `runs/<id>/monitor-stats/`: the judged frames `ep003_f0.jpg … ep003_f5.jpg` (512 px wide) and `attempts.json`
   (this run's verdicts, what the page reads).
 - `runs/<id>/monitor-stats/summary.json`: `overall`, `by_task`, `reasons` (code, label, count, share, examples),

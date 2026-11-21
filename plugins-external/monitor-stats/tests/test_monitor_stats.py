@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -45,7 +46,7 @@ def test_judges_a_successful_attempt(model):
     script.append(lambda p: reply(p, True))
     result = replay("success_apple_bowl", plugins=["success-check", "monitor-stats"], keep=True)
     v = result.result["monitor-stats"]
-    assert v["success"] is True and v["score"] == 90
+    assert v["success"] is True and v["score"] == 90 and v["model_s"] >= 0
     assert len(calls) == 1 and len(calls[0]["images"]) == 6
     assert all(img[:2] == b"\xff\xd8" for img in calls[0]["images"])  # JPEG
     assert "put apple into the bowl" in calls[0]["prompt"]
@@ -102,6 +103,16 @@ def test_no_call_starts_after_the_deadline(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test")
     with pytest.raises(RuntimeError, match="out of time"):
         judge_mod.ask([b"x"], "p", "gemini", 30.0, time.monotonic() + 1.0)  # under MIN_CALL_S: no network
+
+
+def test_key_comes_from_the_nearest_env_file_without_overriding(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text('# keys\nexport GEMINI_API_KEY="from-file"\nANTHROPIC_API_KEY=set-before\n')
+    (tmp_path / "sub").mkdir()
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "from-shell")
+    judge_mod.load_env(tmp_path / "sub")
+    assert os.environ["GEMINI_API_KEY"] == "from-file"
+    assert os.environ["ANTHROPIC_API_KEY"] == "from-shell"  # the shell wins over the file
 
 
 def _ep(task, judged, sim=None, code=None, score=None):

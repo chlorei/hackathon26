@@ -203,10 +203,10 @@ class MonitorStats(Plugin):
         if v["success"]:
             ctx.ui.badge(f"camera: success · {v['score']}", "success")
             ctx.emit("success", f"camera verdict: success, score {v['score']}, {bad} of {len(times)} frames off",
-                     score=v["score"], frames_off=bad)
+                     score=v["score"], frames_off=bad, model_s=v["model_s"])
         else:
             ctx.ui.badge(f"camera: failed · {v['score']}", "error")
-            data: dict[str, Any] = {"score": v["score"], "frames_off": bad}
+            data: dict[str, Any] = {"score": v["score"], "frames_off": bad, "model_s": v["model_s"]}
             if v["reason_code"]:
                 data["reason"] = v["reason_code"]
             ctx.emit("error", f"camera verdict: {v['reason']} (score {v['score']})", **data)

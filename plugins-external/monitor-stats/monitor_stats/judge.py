@@ -79,8 +79,21 @@ def _ask_claude(images: list[bytes], prompt: str, timeout_s: float, deadline: fl
     return "".join(b.text for b in resp.content if b.type == "text")
 
 
+def load_env(start: Path | None = None) -> None:
+    """KEY=value lines of the nearest .env (the loop's folder or above) into os.environ; what is already set wins."""
+    folder = (start or Path.cwd()).resolve()
+    for d in (folder, *folder.parents):
+        if (d / ".env").is_file():
+            for line in (d / ".env").read_text(encoding="utf-8").splitlines():
+                key, sep, value = line.strip().removeprefix("export ").partition("=")
+                if sep and key.strip() and not key.lstrip().startswith("#"):
+                    os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+            return
+
+
 def ask(images: list[bytes], prompt: str, provider: str, timeout_s: float, deadline: float) -> str:
     """One model call (with Gemini's fallback chain), finished before `deadline` (time.monotonic). Tests replace it."""
+    load_env()
     if provider == "gemini":
         return _ask_gemini(images, prompt, timeout_s, deadline)
     if provider == "claude":
@@ -129,7 +142,8 @@ def validate(d: Any, n: int) -> dict[str, Any]:
 def judge(images: list[bytes], task: str, provider: str = "gemini", timeout_s: float = 10.0,
           max_wait_s: float = 20.0) -> dict[str, Any]:
     """JPEG frames of one attempt + its task -> {success, score, reason, reason_code, frames}, within max_wait_s."""
-    deadline = time.monotonic() + max_wait_s
+    start = time.monotonic()
+    deadline = start + max_wait_s
     prompt = (PROMPT.replace("{n}", str(len(images))).replace("{last}", str(len(images) - 1))
               .replace("{task}", task).replace("{codes}", ", ".join(reasons.FAILURES)))
     error = None
@@ -137,7 +151,8 @@ def judge(images: list[bytes], task: str, provider: str = "gemini", timeout_s: f
         p = prompt if error is None else f"{prompt}\n\nYour last reply was rejected: {error}. Return valid JSON only."
         text = ask(images, p, provider, timeout_s, deadline)  # network/key errors are not re-asked
         try:
-            return validate(_parse(text), len(images))
+            # model_s: from the first request to a valid verdict, fallbacks and re-asks included
+            return {**validate(_parse(text), len(images)), "model_s": round(time.monotonic() - start, 2)}
         except (ValueError, TypeError) as e:  # JSONDecodeError is a ValueError
             error = str(e)[:300]
     raise ValueError(f"the model gave no valid verdict in {1 + MAX_REASKS} tries: {error}")

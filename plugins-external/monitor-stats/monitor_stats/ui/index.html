@@ -164,7 +164,8 @@ function list() {
       h('figcaption', {}, `${f.t_s != null ? f.t_s.toFixed(1) + ' s' : ''}${f.comment ? ' · ' + f.comment : ''}`))))
     return h('div', { class: `att${r.episode === HERE ? ' here' : ''}`, id: `ep${r.episode}` },
       h('div', { class: 'att-head' }, h('b', {}, `Attempt ${r.episode}`), pill,
-        judged(r) ? h('span', { class: 'dk-muted' }, `score ${r.score}`) : null, check),
+        judged(r) ? h('span', { class: 'dk-muted' }, `score ${r.score}`) : null,
+        r.model_s != null ? h('span', { class: 'dk-faint' }, `answered in ${r.model_s.toFixed(1)} s`) : null, check),
       r.reason || r.error ? h('p', { class: 'dk-muted' }, r.reason || r.error) : null,
       grid)
   }))
@@ -174,10 +175,10 @@ function list() {
 
 function csvCell(v) { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
 function toCsv() {
-  const cols = ['episode', 'task', 'judge_success', 'score', 'reason_code', 'reason', 'success_check', 'first_error_s', 'error']
+  const cols = ['episode', 'task', 'judge_success', 'score', 'reason_code', 'reason', 'success_check', 'first_error_s', 'model_s', 'error']
   const lines = rows.map((r) => {
     const bad = (r.frames || []).find((f) => f.status === 'error')
-    return [r.episode, r.task, judged(r) ? r.success : '', r.score, r.reason_code, r.reason, r.check, bad ? bad.t_s : '', r.error]
+    return [r.episode, r.task, judged(r) ? r.success : '', r.score, r.reason_code, r.reason, r.check, bad ? bad.t_s : '', r.model_s, r.error]
       .map(csvCell).join(',')
   })
   return [cols.join(','), ...lines].join('\n') + '\n'

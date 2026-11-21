@@ -13,3 +13,4 @@ dreamkit.yaml
 labels.csv
 MUJOCO_LOG.TXT
 /gym/
+.env
