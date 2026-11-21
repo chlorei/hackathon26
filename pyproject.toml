@@ -16,6 +16,7 @@ dependencies = [
     "av>=17",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    "prompt_toolkit>=3",  # Dream Labs' simulator REPL (dreamkit sim)
 ]
 
 [project.optional-dependencies]
@@ -23,6 +24,7 @@ dev = ["pytest>=8", "httpx"]
 
 [project.scripts]
 dreamkit = "dreamkit.cli:main"
+dreamgym = "dreamgym.cli:main"   # DreamGym: Arena, Compare, Prompt Tuner, Data & fine-tune, Teleop (dreamgym/README.md)
 
 # Built-in plugins register the same way an external plugin does.
 [project.entry-points."dreamkit.plugins"]
@@ -38,8 +40,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["dreamkit"]
-artifacts = ["dreamkit/ui_dist/**"]
+packages = ["dreamkit", "dreamgym"]
+artifacts = ["dreamkit/ui_dist/**", "dreamgym/web/index.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

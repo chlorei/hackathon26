@@ -1,4 +1,4 @@
-"""dreamkit run | ui | list | search | install | new"""
+"""dreamkit sim | run | ui | list | search | install | new"""
 
 from __future__ import annotations
 
@@ -20,6 +20,92 @@ def cmd_ui(args) -> int:
 
     serve(_config_path(args.config) or "dreamkit.yaml", host=args.host, port=args.port)
     return 0
+
+
+def _panel(config: Path, port: int = 8800) -> tuple[str, object]:
+    """The panel's address; starts `dreamkit ui` beside the program when nothing answers there yet."""
+    import socket
+    import subprocess
+    import time
+
+    url = f"http://127.0.0.1:{port}"
+    with socket.socket() as s:
+        if s.connect_ex(("127.0.0.1", port)) == 0:
+            return url, None
+    proc = subprocess.Popen([sys.executable, "-m", "dreamkit.cli", "-c", str(config), "ui", "--port", str(port)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(50):
+        with socket.socket() as s:
+            if s.connect_ex(("127.0.0.1", port)) == 0:
+                break
+        time.sleep(0.1)
+    return url, proc
+
+
+def cmd_run(args) -> int:
+    """Runs any program on dream.DreamClient with dreamkit on top (dreamkit/attach.py); the program is not edited."""
+    import os
+    import subprocess
+    import webbrowser
+
+    from . import attach
+
+    command = [c for c in args.command if c != "--"]
+    if not command:
+        print("usage: dreamkit run [--mock BEHAVIOURS] -- <command>   e.g. dreamkit run -- python yam_mujoco.py")
+        return 2
+    if command[0] in ("python", "python3"):  # this environment's Python (the one dreamkit is installed in)
+        command = [sys.executable, *command[1:]]
+    elif command[0].endswith(".py"):
+        command = [sys.executable, *command]
+    config = Path(_config_path(args.config) or "dreamkit.yaml").resolve()
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join([str(attach.boot_dir()), *filter(None, [env.get("PYTHONPATH")])])
+    env["DREAMKIT_ATTACH"] = "1"
+    env["DREAMKIT_CONFIG"] = str(config)
+    if args.mock:
+        env["DREAMKIT_MOCK"] = args.mock
+        env.setdefault("DREAM_API_KEY", "dreamkit-mock")  # the program asks for a key; the mock never sends it
+    panel = None
+    if not args.no_panel:
+        url, panel = _panel(config, args.port)
+        env["DREAMKIT_PANEL"] = url
+        print(f"dreamkit: monitor on {url}  (plugins from {config if config.is_file() else 'defaults'})")
+        if panel is not None:
+            webbrowser.open(url + "/#/live")
+    try:
+        return subprocess.call(command, env=env)
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        if panel is not None:
+            panel.terminate()
+
+
+def cmd_sim(args) -> int:
+    """Dream Labs' own simulator (yam_mujoco.py, unchanged) with dreamkit on top."""
+    from . import config as config_mod
+
+    script = None
+    try:  # the installed dreamlabs wheel ships it as dream_examples/yam_mujoco
+        import importlib.util
+
+        spec = importlib.util.find_spec("dream_examples")
+        if spec and spec.submodule_search_locations:
+            cand = Path(list(spec.submodule_search_locations)[0]) / "yam_mujoco" / "yam_mujoco.py"
+            script = cand if cand.is_file() else None
+    except Exception:
+        script = None
+    if script is None:
+        cfg, base = config_mod.load(_config_path(args.config))
+        cand = cfg.sim_dir(base) / "yam_mujoco.py"
+        script = cand if cand.is_file() else None
+    if script is None:
+        print("dreamkit: Dream Labs' simulator not found. Install it (pip install dreamlabs) or set sim_path in "
+              "dreamkit.yaml to the folder with yam_mujoco.py")
+        return 1
+    args.command = [str(script), *args.extra]
+    return cmd_run(args)
 
 
 def cmd_list(args) -> int:
@@ -268,6 +354,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8800)
     p.set_defaults(func=cmd_ui)
+
+    p = sub.add_parser("sim", help="Dream Labs' simulator, unchanged, with dreamkit on top (type tasks in it)")
+    p.add_argument("--mock", metavar="BEHAVIOURS", help="no model calls: scripted attempts, e.g. dropped,grasped_air,success")
+    p.add_argument("--no-panel", action="store_true", help="do not start the monitor")
+    p.add_argument("--port", type=int, default=8800)
+    p.add_argument("extra", nargs=argparse.REMAINDER, help="passed to yam_mujoco.py")
+    p.set_defaults(func=cmd_sim)
+
+    p = sub.add_parser("run", help="any program on dream.DreamClient, unchanged, with dreamkit on top")
+    p.add_argument("--mock", metavar="BEHAVIOURS", help="no model calls (simulator only): scripted attempts")
+    p.add_argument("--no-panel", action="store_true", help="do not start the monitor")
+    p.add_argument("--port", type=int, default=8800)
+    p.add_argument("command", nargs=argparse.REMAINDER, help="-- python yam_mujoco.py | -- dreamcli ... | -- python my_loop.py")
+    p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("list", help="installed plugins")
     p.set_defaults(func=cmd_list)

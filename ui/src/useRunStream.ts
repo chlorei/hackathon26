@@ -37,7 +37,7 @@ export interface RunStream {
 
 const MAX_EVENTS = 300
 
-export function useRunStream(runId: string | null): RunStream {
+export function useRunStream(runId: string | null, frames = false): RunStream {
   const live = useMemo(() => new LiveStore(), [runId]) // eslint-disable-line react-hooks/exhaustive-deps
   const [state, setState] = useState<Omit<RunStream, 'live'>>({ events: [], episodes: [], current: null, status: 'idle', plugins: [], task: '' })
 
@@ -47,7 +47,7 @@ export function useRunStream(runId: string | null): RunStream {
       return
     }
     setState({ events: [], episodes: [], current: null, status: 'connecting', plugins: [], task: '' })
-    const socket = new WebSocket(wsUrl(`/ws/live/${runId}`))
+    const socket = new WebSocket(wsUrl(`/ws/live/${runId}${frames ? '?frames=1' : ''}`))
     let scheduled = 0
     const schedule = () => {
       if (!scheduled) scheduled = requestAnimationFrame(() => { scheduled = 0; live.notify() })
@@ -102,7 +102,7 @@ export function useRunStream(runId: string | null): RunStream {
       cancelAnimationFrame(scheduled)
       socket.close()
     }
-  }, [runId, live])
+  }, [runId, live, frames])
 
   return { ...state, live }
 }

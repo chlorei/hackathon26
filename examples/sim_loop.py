@@ -50,10 +50,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fault-at", type=float, default=5.0, help="seconds into the attempt")
     parser.add_argument("--fault-episode", type=int, help="only in this attempt (1-based)")
     parser.add_argument("--light", action="store_true", help="fewer camera frames, less CPU")
+    parser.add_argument("--viewer", action="store_true", help="open the simulator's own MuJoCo window: watch the arm "
+                        "like a real one on the table (macOS: re-runs itself under mjpython)")
     parser.add_argument("--no-world", action="store_true", help="give dreamkit only state, images and commands — what "
                         "a real robot reports — not the simulator (no positions, no contacts)")
     parser.add_argument("--fake-rtt-ms", type=float, help="mock only: report this model round trip")
     args = parser.parse_args(argv)
+
+    if args.viewer and sys.platform == "darwin" and os.environ.get("DREAMKIT_UNDER_MJPYTHON") != "1":
+        # MuJoCo's window needs mjpython on macOS (as Dream Labs' yam_mujoco.py does it)
+        mjpython = Path(sys.executable).with_name("mjpython")
+        os.environ["DREAMKIT_UNDER_MJPYTHON"] = "1"
+        os.execv(str(mjpython), [str(mjpython), str(Path(__file__).resolve()), *(argv if argv is not None else sys.argv[1:])])
 
     cfg, base = dk_config.load(args.config if Path(args.config).is_file() else None)
     yam_env, dc = sim.use(Path(args.sim).expanduser() if args.sim else cfg.sim_dir(base))
@@ -75,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
         poses = args.model in dc.POSE_MODELS
         base_client = dream.DreamClient(api_key=key)
 
+    viewer = sync = None
+    if args.viewer:
+        import mujoco.viewer
+
+        viewer = mujoco.viewer.launch_passive(env.model, env.data, show_left_ui=False, show_right_ui=False)
+        yam_env.aim_viewer(viewer)  # Dream Labs' own starting view
+        sync = dc.RunViewerSync(env)  # their sync: the viewer's reset key cannot rewind a run
+
     # ---- the one line dreamkit asks for ----------------------------------------------------------------------
     overrides = {"light": True} if args.light else {}
     if args.fault_camera:
@@ -90,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
             env.reset()
             seed = args.seed + scene_index
             positions = scene.randomize(env, ["apple", "orange", "banana"], args.jitter, seed)
+            if viewer is not None:
+                sync(viewer)
             where = "  ".join(f"{k} ({v[0]:+.3f}, {v[1]:+.3f})" for k, v in positions.items() if k in ("apple", "orange", "banana"))
             print(f"scene {scene_index + 1}{' (retry)' if client.retry_requested else ''}, seed {seed}: {where}", flush=True)
 
@@ -120,6 +138,10 @@ def main(argv: list[str] | None = None) -> int:
                             dc.feed(client, env, windows, args.task, args.model, steps, station=poses)
                         steps += 1
                         client.step(state=env.state(), images=images, command=(l, r), **world)
+                        if viewer is not None:
+                            if not viewer.is_running():
+                                raise KeyboardInterrupt  # the window was closed: stop like Ctrl-C
+                            sync(viewer)
                         if client.t >= args.seconds:
                             break
                         if not args.fast:
@@ -132,6 +154,13 @@ def main(argv: list[str] | None = None) -> int:
         return 130
     finally:
         client.close()
+        if viewer is not None:
+            if viewer.is_running():
+                print("run finished: close the MuJoCo window to exit", flush=True)
+            while viewer.is_running():  # keep the last scene on screen until the window is closed
+                sync(viewer)
+                time.sleep(0.05)
+            viewer.close()
         env.close()
     ok = sum(1 for e in client.episodes if e["success"])
     print(f"{ok}/{len(client.episodes)} attempts succeeded; run saved in {os.path.relpath(client.run_dir)}", flush=True)

@@ -9,6 +9,23 @@ makes each of those a plugin you switch on with one line, and adds the story nob
 - **harvester** saves every attempt as a LeRobot v2.1 dataset; the successful ones pass Dream Labs' own
   `validate_dataset` and are ready for fine-tuning.
 
+**On top of what you already run.** Install the base arm from Dream Labs, put dreamkit over it, change nothing:
+
+```bash
+pip install dreamlabs            # the base: Dream Labs' client, station and YAM simulator
+pip install -e path/to/dreamkit  # the overlay
+
+dreamkit sim                     # Dream Labs' simulator window + REPL, unchanged; type a task, dreamkit watches
+dreamkit sim --mock dropped,grasped_air,success   # same, no model calls: scripted attempts (free)
+dreamkit run -- python my_loop.py                 # any program on dream.DreamClient: your loop, a station script
+```
+
+`dreamkit run` starts the program as is; when it imports `dream`, its `DreamClient` gets the plugins, and when it
+imports Dream Labs' `yam_env`, every `YamEnv.step()` becomes a dreamkit step with the simulator's world. No world
+(a real robot): the steps come from the observations the program sends. One `policy()` … `close()` is one attempt; when
+a plugin ends it (success, camera failure), the program's next `get_action()` stops that task the way any error does.
+The monitor opens at http://127.0.0.1:8800. Writing your own loop? The same in one line:
+
 ```python
 import dream, dreamkit
 
@@ -129,6 +146,9 @@ python examples/sim_loop.py --episodes 10   # the same with Dream-1 (uses credit
 python examples/sim_loop.py --mock --behaviors dropped,grasped_air,released_off_target,success \
        --fault-camera top --fault-episode 4 # the demo: every plugin gets something to do
 python examples/recovery_ab.py --episodes 10  # Dream-1, same seeds with and without recovery (uses credits)
+python examples/ab_test.py --tune --episodes 10   # prompt tuner: paraphrases of the task, same seeds, ranked with proof
+python examples/ab_test.py --models dreamlabs/dream-1-beta,<fine-tune id> --episodes 20   # base vs fine-tune
+python examples/finetune.py --runs <run-id...>    # harvested successes -> validated -> upload -> fine-tune (--status)
 dreamkit ui                                 # the panel: Live / Plugins / History
 dreamkit harvest export <run-id...>         # successful episodes -> ./harvest, checked with validate_dataset
 dreamkit list | search | install | new      # plugins
@@ -154,6 +174,14 @@ path and an *Open folder* button):
 **Less CPU.** Switch on *Light mode* in the panel (or `light: true` in `dreamkit.yaml`): cameras are rendered at
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
 cameras and graphs outside React and pauses when its tab is hidden.
+
+## DreamGym (in this repo)
+
+`dreamgym serve` opens a second app on http://127.0.0.1:8765 that drives the simulator itself: **Arena** (success rate
+with a 95% interval over seeded, randomised scenes, failure GIFs), **Compare** and **Prompt Tuner** (same seeds,
+McNemar's test), **Data & fine-tune** (scripted demos, Harvester, `validate_dataset`, upload + train, job status) and
+**Teleop** (keyboard control in the browser, recorded as LeRobot v2.1). See [dreamgym/README.md](dreamgym/README.md).
+Its numbers per run also come to dreamkit runs through the `reliability` plugin.
 
 ## Add plugins from GitHub
 
