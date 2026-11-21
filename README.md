@@ -9,6 +9,23 @@ makes each of those a plugin you switch on with one line, and adds the story nob
 - **harvester** saves every attempt as a LeRobot v2.1 dataset; the successful ones pass Dream Labs' own
   `validate_dataset` and are ready for fine-tuning.
 
+**On top of what you already run.** Install the base arm from Dream Labs, put dreamkit over it, change nothing:
+
+```bash
+pip install dreamlabs            # the base: Dream Labs' client, station and YAM simulator
+pip install -e path/to/dreamkit  # the overlay
+
+dreamkit sim                     # Dream Labs' simulator window + REPL, unchanged; type a task, dreamkit watches
+dreamkit sim --mock dropped,grasped_air,success   # same, no model calls: scripted attempts (free)
+dreamkit run -- python my_loop.py                 # any program on dream.DreamClient: your loop, a station script
+```
+
+`dreamkit run` starts the program as is; when it imports `dream`, its `DreamClient` gets the plugins, and when it
+imports Dream Labs' `yam_env`, every `YamEnv.step()` becomes a dreamkit step with the simulator's world. No world
+(a real robot): the steps come from the observations the program sends. One `policy()` … `close()` is one attempt; when
+a plugin ends it (success, camera failure), the program's next `get_action()` stops that task the way any error does.
+The monitor opens at http://127.0.0.1:8800. Writing your own loop? The same in one line:
+
 ```python
 import dream, dreamkit
 

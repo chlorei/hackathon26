@@ -16,6 +16,7 @@ dependencies = [
     "av>=17",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    "prompt_toolkit>=3",  # Dream Labs' simulator REPL (dreamkit sim)
 ]
 
 [project.optional-dependencies]
