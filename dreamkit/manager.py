@@ -21,10 +21,7 @@ from .config import PluginSpec
 from .plugin import Context, EndEpisode, Plugin, PluginContext, StopEpisode
 from .standard import HOOKS, PluginStandardError, Problem
 
-BUILTIN_MODULES = (
-    "success_check", "failure_monitor", "camera_check", "latency_monitor", "safety",
-    "recovery", "recorder", "harvester", "recap", "report",
-)
+BUILTIN_MODULES = ("success_check", "failure_monitor", "camera_check", "recovery", "recorder", "harvester")
 LOCAL_DIRS = (Path("~/.dreamkit/plugins").expanduser(), Path("plugins"))
 ## Hooks that run inside a control step and count against the budget (§5).
 STEP_HOOKS = ("before_model", "after_model", "on_step")
@@ -33,7 +30,13 @@ PLUGIN_BUDGET_MS = 1.0
 BUDGET_WINDOW = 100  # on_step calls per budget check
 MAX_ERRORS_IN_A_ROW = 5
 MAX_OVER_BUDGET = 3
-MERGED = {"retry": "retry is part of recovery now (recovery: retry_attempts, retry_reasons)"}
+MERGED = {
+    "retry": "retry is part of recovery now (recovery: retry_attempts, retry_reasons)",
+    "latency-monitor": "latency is part of failure-monitor now (slow_ms)",
+    "recap": "recaps are part of History now (always on)",
+    "report": "the report is part of History now (always on)",
+    "safety": "safety is an external example now: dreamkit install plugins-external/safety",
+}
 
 
 def _classes_in(module) -> list[type[Plugin]]:

@@ -37,7 +37,7 @@ class Params(BaseModel):
     lift_s: float = Field(1.0, gt=0, le=10, description="How long that lift takes", json_schema_extra={"unit": "s"})
     retry_attempts: int = Field(1, ge=0, le=10, description="Retries of a failed scene once recoveries are used up",
                                 json_schema_extra={"unit": ""})
-    retry_reasons: list[str] = Field(["dropped", "released_off_target", "missed_target", "grasped_air",
+    retry_reasons: list[str] = Field(["dropped", "released_off_target", "grasped_air",
                                       "not_reached", "stalled"], description="Final reasons worth a retry",
                                      json_schema_extra=CHOICES)
 

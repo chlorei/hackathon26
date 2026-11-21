@@ -29,14 +29,9 @@ dreamkit = "dreamkit.cli:main"
 success-check = "dreamkit.plugins.success_check:SuccessCheck"
 failure-monitor = "dreamkit.plugins.failure_monitor:FailureMonitor"
 camera-check = "dreamkit.plugins.camera_check:CameraCheck"
-retry = "dreamkit.plugins.retry:Retry"
-latency-monitor = "dreamkit.plugins.latency_monitor:LatencyMonitor"
-recorder = "dreamkit.plugins.recorder:Recorder"
-safety = "dreamkit.plugins.safety:Safety"
-recap = "dreamkit.plugins.recap:Recap"
-harvester = "dreamkit.plugins.harvester:Harvester"
 recovery = "dreamkit.plugins.recovery:Recovery"
-report = "dreamkit.plugins.report:Report"
+recorder = "dreamkit.plugins.recorder:Recorder"
+harvester = "dreamkit.plugins.harvester:Harvester"
 
 [build-system]
 requires = ["hatchling"]

@@ -17,14 +17,13 @@ from dreamkit.standard import Manifest
 
 SIDES = ("left", "right")
 ## Tie-break when two causes happen within tie_s of each other: the more specific one wins.
-PRIORITY = ("fell_off_table", "camera_failure", "dropped", "released_off_target", "missed_target", "grasped_air",
+PRIORITY = ("fell_off_table", "camera_failure", "dropped", "released_off_target", "grasped_air",
             "collision", "stalled", "not_reached", "slow_model", "timeout")
 LABEL = {
     "fell_off_table": "{obj} fell off the table",
     "camera_failure": "camera failure",
     "dropped": "dropped {obj} (the gripper never opened)",
-    "released_off_target": "let go of {obj} away from the {target}",
-    "missed_target": "missed the {target} with {obj}",
+    "released_off_target": "let go of {obj} outside the {target}",
     "grasped_air": "grasped air next to {obj}",
     "collision": "collision: {what}",
     "stalled": "arms stalled",
@@ -58,8 +57,8 @@ class Params(BaseModel):
                                 "grasped air", json_schema_extra={"unit": "m"})
     slip_m: float = Field(0.07, gt=0, le=0.3, description="A lifted object this far from every hand has left it",
                           json_schema_extra={"unit": "m"})
-    miss_max_m: float = Field(0.15, gt=0, le=0.5, description="Released this close to the target, it missed it "
-                              "(farther: released off target)", json_schema_extra={"unit": "m"})
+    miss_max_m: float = Field(0.15, gt=0, le=0.5, description="A release this close to the target is marked a near "
+                              "miss in the details", json_schema_extra={"unit": "m"})
     fell_below_m: float = Field(0.05, gt=0, le=0.5, description="This far below the table top, it fell off",
                                 json_schema_extra={"unit": "m"})
     contact_force_n: float = Field(2.0, gt=0, le=200, description="A robot contact this strong is a collision",
@@ -72,8 +71,8 @@ class Params(BaseModel):
                                      json_schema_extra={"unit": "rad/s"})
     stall_s: float = Field(3.0, gt=0, le=60, description="Not moving this long is a stall",
                            json_schema_extra={"unit": "s"})
-    slow_ms: float = Field(700.0, gt=0, le=10000, description="A mean model round trip above this is too slow",
-                           json_schema_extra={"unit": "ms"})
+    slow_ms: float = Field(700.0, gt=0, le=10000, description="A model round trip above this is slow: warned at once, "
+                           "and a failure if the attempt's mean is above it", json_schema_extra={"unit": "ms"})
     tie_s: float = Field(1.0, ge=0, le=10, description="Causes this close in time count as simultaneous",
                          json_schema_extra={"unit": "s"})
     settle_s: float = Field(1.0, gt=0, le=10, description="Wait this long after the object leaves the hand before "
@@ -97,6 +96,8 @@ class FailureMonitor(Plugin):
 
     # -- recording ---------------------------------------------------------------------------------------------
     def on_episode_start(self, ctx: PluginContext) -> None:
+        self.rtts: list[tuple[float, float]] = []  # latency works on any robot
+        self.mock_calls = False
         self.active = ctx.world.available
         if not self.active:
             ctx.emit("info", "no simulator world in episode() or step(): physics diagnosis is off")
@@ -104,6 +105,7 @@ class FailureMonitor(Plugin):
         self.obj, self.target = ctx.target["object"], ctx.target["target"]
         self.rows: list[dict[str, Any]] = []
         self.rtts: list[tuple[float, float]] = []
+        self.mock_calls = False
         self.contacts: dict[tuple[str, str], dict[str, Any]] = {}
         self.collisions: list[dict[str, Any]] = []
         self.milestones: list[dict[str, Any]] = []
@@ -146,8 +148,25 @@ class FailureMonitor(Plugin):
         self.rows.append(row)
 
     def after_model(self, ctx: PluginContext) -> None:
-        if self.active and ctx.timing and ctx.timing.get("rtt_ms") is not None:
-            self.rtts.append((ctx.t, float(ctx.timing["rtt_ms"])))
+        """Model latency (what latency-monitor used to do): every round trip, a warning when slow."""
+        timing = ctx.timing or {}
+        if timing.get("mock"):
+            self.mock_calls = True
+            return
+        if timing.get("rtt_ms") is None:
+            return
+        rtt = float(timing["rtt_ms"])
+        self.rtts.append((ctx.t, rtt))
+        ctx.ui.series("rtt", ctx.t, rtt, unit="ms")
+        if rtt > self.params.slow_ms:
+            ctx.emit("warn", f"model round trip {rtt:.0f} ms, slow", rtt_ms=rtt)
+
+    def _latency(self) -> dict[str, Any]:
+        if not self.rtts:
+            return {"mock": True} if self.mock_calls else {}
+        a = np.asarray([r for _, r in self.rtts])
+        return {"mean_ms": round(float(a.mean()), 1), "p95_ms": round(float(np.percentile(a, 95)), 1),
+                "max_ms": round(float(a.max()), 1), "calls": len(a)}
 
     def on_step(self, ctx: PluginContext) -> None:
         if not self.active:
@@ -283,8 +302,7 @@ class FailureMonitor(Plugin):
         sep["final_distance_m"] = final_dist and round(final_dist, 3)
         if not sep["released"]:
             return "dropped"
-        if release is not None and release <= p.miss_max_m:
-            return "missed_target"
+        sep["near_target"] = bool(release is not None and release <= p.miss_max_m)  # close miss, or far
         return "released_off_target"
 
     def _live_verdict(self, ctx: PluginContext, row: dict[str, Any]) -> None:
@@ -370,6 +388,7 @@ class FailureMonitor(Plugin):
 
     def on_episode_end(self, ctx: PluginContext) -> None:
         if not self.active:
+            ctx.result["failure-monitor"] = {"latency": self._latency()}
             return
         self._save_trace(ctx)
         ctx.result["timeline"] = self.milestones
@@ -397,4 +416,4 @@ class FailureMonitor(Plugin):
         path = ctx.files.path(ctx.files.episode_name("trace.json"))
         payload = {"object": self.obj, "target": self.target, "rows": out, "milestones": self.milestones}
         ctx.defer(path.write_text, json.dumps(payload))
-        ctx.result["failure-monitor"] = {"trace": ctx.files.relative(path)}
+        ctx.result["failure-monitor"] = {"trace": ctx.files.relative(path), "latency": self._latency()}

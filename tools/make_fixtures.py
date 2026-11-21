@@ -24,7 +24,7 @@ FIXTURES = {
     "success_apple_bowl": ("success", 20, {}, []),
     "dropped_mid_carry": ("dropped", 16, {}, []),
     "released_off_target": ("released_off_target", 16, {}, []),
-    "missed_target": ("missed_target", 20, {}, []),
+    "released_near_target": ("released_near_target", 20, {}, []),
     "grasped_air": ("grasped_air", 12, {}, []),
     "not_reached": ("not_reached", 18, {}, []),
     "collision_table": ("collision", 10, {}, []),

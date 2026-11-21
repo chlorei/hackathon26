@@ -28,6 +28,11 @@ client.close()
 The panel (`dreamkit ui`) never starts anything: it watches whatever your loop is doing (Live), manages plugins, and
 keeps the history with videos, recaps and harvested datasets.
 
+> **About `--mock`.** The mock policy is a scripted arm that **fails on purpose** — it drops the apple, grasps air,
+> lets go off target, stalls, hits the table — so every plugin can be built and tested without the model or credits.
+> Its numbers (failure rates, "recovery 20% → 100%") say that the *mechanism* works, nothing about Dream-1. Mock runs
+> carry a **mock: scripted failures** badge in the panel and the report. Real numbers come from runs without `--mock`.
+
 ## Install
 
 You need **Python 3.11–3.13**, **git**, **[uv](https://docs.astral.sh/uv/)** (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
@@ -73,9 +78,11 @@ Every model call uses credits.
 ## Use
 
 ```bash
-python examples/sim_loop.py --mock          # Dream Labs' simulator loop with dreamkit.wrap, scripted arm (free)
+python examples/sim_loop.py --mock          # Dream Labs' simulator loop with dreamkit.wrap, scripted failures (free)
 python examples/sim_loop.py --episodes 10   # the same with Dream-1 (uses credits)
-python examples/recovery_ab.py --mock       # same seeds with and without recovery: "success without X%, with Y%"
+python examples/sim_loop.py --mock --behaviors dropped,grasped_air,released_off_target,success \
+       --fault-camera top --fault-episode 4 # the demo: every plugin gets something to do
+python examples/recovery_ab.py --episodes 10  # Dream-1, same seeds with and without recovery (uses credits)
 dreamkit ui                                 # the panel: Live / Plugins / History
 dreamkit harvest export <run-id...>         # successful episodes -> ./harvest, checked with validate_dataset
 dreamkit list | search | install | new      # plugins
@@ -92,11 +99,11 @@ path and an *Open folder* button):
 | file | what |
 |---|---|
 | `recorder/ep003_top.mp4` … | each camera, per attempt; video time = simulated time |
-| `recap/ep003_recap.mp4`, `recap/summary.json` | the key moments, captioned; the run in plain words |
+| `history/ep003_recap.mp4`, `history/summary.json` | the key moments, captioned; the run in plain words |
 | `failure-monitor/ep003_trace.json` | what failure-monitor measured, step by step |
 | `harvester/success/ep003/`, `harvester/failed/ep003/` | one LeRobot v2.1 dataset per attempt, `dreamkit.json` has the outcome |
 | `run.json`, `events.jsonl` | results and the full event feed |
-| `report/report.html` | the run summary |
+| `history/report.html` | the run summary, self-contained |
 
 **Less CPU.** Switch on *Light mode* in the panel (or `light: true` in `dreamkit.yaml`): cameras are rendered at
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
@@ -122,34 +129,35 @@ here with a pull request. `plugins-external/gripper-check/` is a complete exampl
 
 ## The whole config
 
+`dreamkit.yaml` says which plugins run and how — nothing else. What to run (task, attempts, model, mock, seed) is
+your loop's business: `python examples/sim_loop.py --help`.
+
 ```yaml
-task: put apple into the bowl
-episodes: 5
+sim_path: ../dreamlabs/dream_library/examples/yam_mujoco
+runs_dir: runs
 plugins:
   - camera-check
-  - latency-monitor: {warn_ms: 700}
   - success-check
-  - failure-monitor
+  - failure-monitor: {slow_ms: 700}
   - recovery: {max_recoveries: 3, retry_attempts: 1}
-  - recorder: {fps: 10}
-  - recap
-  - report
+  - recorder: {video_fps: 10}
+  - harvester
 ```
 
 ## Built-in plugins
 
 | plugin | what it does |
 |---|---|
-| `success-check` | object in the bowl / on the plate with the gripper released → success; ends the attempt early |
-| `failure-monitor` | first cause in time: `fell_off_table`, `dropped` (gripper never opened), `released_off_target`, `missed_target`, `grasped_air`, `collision`, `stalled`, `not_reached`, `slow_model`, `timeout`; live verdicts mid-attempt |
+| `failure-monitor` | why and when an attempt failed, first cause in time: `dropped` (the gripper never opened), `released_off_target`, `grasped_air`, `not_reached`, `collision`, `fell_off_table`, `stalled`, `slow_model` (model latency), `camera_failure`, `timeout`; live verdicts mid-attempt |
 | `recovery` | the one control plugin. On a live verdict: arms home (`yam_env.home_path`) + `reset_episode()` + same prompt; grasped air: open, lift 5 cm, continue; `camera_failure`: stop; then retry the scene (`retry_attempts`) |
 | `harvester` | every attempt as LeRobot v2.1 (state/action: right arm, right gripper, left arm, left gripper; videos overhead / wrist_l / wrist_r) |
-| `recap` | per attempt a captioned highlights clip and one-sentence story; per run a plain-language summary |
-| `camera-check` | flags a black, uniform or frozen camera before the next model call; recovery stops the robot (`faults: {camera_black: top}` in dreamkit.yaml for a demo) |
-| `latency-monitor` | warns above `warn_ms`; mean and p95 per attempt and per run |
-| `recorder` | MP4 per camera per attempt; `top.mp4#t=9.3` is the moment |
-| `safety` | joint speed cap and a workspace box for the tool points, only ever *stricter* than the simulator |
-| `report` | self-contained `report.html` |
+| `success-check` | object in the bowl / on the plate with the gripper released → success; the attempt ends there |
+| `recorder` | MP4 per camera per attempt; video time = simulated time, so `ep003_top.mp4#t=9.3` is the moment |
+| `camera-check` | flags a black, uniform or frozen camera before the next model call; recovery stops the robot |
+
+Examples of external plugins in `plugins-external/`: `gripper-check` (observe) and `safety` (modify_actions: a joint
+speed cap and a workspace box — it may only make a chunk stricter). Recaps, the run summary and the report are part
+of **History**, made by the core for every run.
 
 Every threshold is a plugin setting: on the Plugins page, or `- failure-monitor: {reach_m: 0.05}`.
 
@@ -208,19 +216,33 @@ the simulator with `dreamkit record my_case --mock --behavior grasped_air`.
 ## Rules we keep
 
 The robot is Dream Labs' as shipped: dreamkit never edits the simulator's files, the arm model or the cameras, and
-every chunk goes through `dream_control.validate_chunk`, twice when a plugin edited it. Plugins may only move objects
-(scene randomisation) and tighten actions.
+every chunk goes through `dream_control.validate_chunk` in the loop after the plugins. Plugins may only tighten
+actions; the example loop only moves the fruit (scene randomisation).
 
 ## How it works
 
 ```
-your loop ⇄ dreamkit.wrap(DreamClient) ⇄ DreamAPI          dreamkit ui (FastAPI :8800) → React
-              │ hooks → plugins                                ▲ reads the files, never the process
-              └→ runs/<id>/  run.json  events.jsonl  live/*.jpg  live.json  <plugin>/…
+ your control loop (sim or robot)                       the panel — dreamkit ui (FastAPI :8800 + React)
+ ─────────────────────────────────                      ────────────────────────────────────────────────
+ client = dreamkit.wrap(DreamClient)                     Live     watches the run being written
+   │ get_action()  step()  episode()                     Plugins  dreamkit.yaml + each plugin's status
+   ▼                                                     History  videos, verdicts, recaps, datasets
+ PluginManager ── order, one control plugin,                 ▲
+   │              budget, errors, scoped ctx                 │ reads files only — never your process
+   ▼                                                         │
+ plugins ── failure-monitor → recovery → harvester …         │
+   │        (ctx.world, ctx.ui, ctx.files, ctx.defer)        │
+   ▼                                                         │
+ runs/<id>/  run.json  events.jsonl  live/  <plugin>/  history/ ┘
 ```
 
-The panel follows the run folder (events, live frames, a heartbeat with telemetry), so your loop never depends on it:
-open or close the panel any time, over SSH too.
+1. **wrap** — `dreamkit.wrap(dream.DreamClient())` is the same client; `get_action()` runs `before_model` / `after_model`
+   around the model call, `step()` runs `on_step` after each executed row, `episode()` opens and closes an attempt.
+2. **manager** — loads plugins by the standard (requires, conflicts, one control plugin), gives each a context scoped to
+   its capability, times every hook and switches off a plugin that keeps failing or runs over budget.
+3. **plugins** — measure, decide, act (only `recovery` acts), save their files under `runs/<id>/<plugin>/`.
+4. **runs/** — the run folder is the only interface: events, live frames, a heartbeat, results, videos, datasets.
+5. **panel** — follows that folder, so your loop never depends on it: open or close it any time, over SSH too.
 
 ## Develop the panel
 

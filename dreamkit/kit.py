@@ -26,7 +26,7 @@ from typing import Any, Iterator
 import numpy as np
 
 from . import config as config_mod
-from . import reasons, storage
+from . import history, reasons, storage
 from .events import Emitter
 from .live import LiveWriter
 from .manager import PluginManager
@@ -119,7 +119,7 @@ class Kit:
         self.emitter.open_file(self.run_dir / "events.jsonl")
         self.live = LiveWriter(self.run_dir, fps=cfg.stream_fps)
         self.ctx = Context(env=None, task="", model="", run_id=self.run_id, run_dir=self.run_dir, config=cfg,
-                           emitter=self.emitter, seed=cfg.seed)
+                           emitter=self.emitter)
         self.ctx._reset_policy = self._reset_policy
         self.deferred = Deferred(self._deferred_error)
         self.ctx._defer = self.deferred
@@ -372,7 +372,11 @@ class Kit:
             self.reset_episode()
         except Exception:
             pass
-        self.deferred.flush()  # videos, traces, datasets of this attempt are on disk before it is saved
+        r = ctx.result
+        if r.get("success") is None and r.get("reason") not in (None, "timeout"):
+            r["success"] = False  # nobody judged success, but a failure was found: that settles it
+        ctx.result["recap"] = history.episode_recap(ctx, self.run_dir, self.deferred)  # after the recorder closed
+        self.deferred.flush()  # videos, traces, datasets and the recap clip are on disk before it is saved
         r = ctx.result
         if r.get("success") is not True and not r.get("reason"):  # no failure-monitor: the first live verdict, if any
             first = (ctx.store.get("verdicts") or [None])[0]
@@ -437,6 +441,12 @@ class Kit:
         self.deferred.flush()
         self.info["status"] = status
         self.info["finished"] = time.time()
+        try:
+            self.summary = history.write_run(self.run_dir, self.info, self.ctx.episodes)
+            self.ctx.event("dreamkit", "success" if any(e.get("success") for e in self.ctx.episodes) else "info",
+                           self.summary["text"][0].lower() + self.summary["text"][1:].rstrip("."))
+        except Exception as error:  # the run is saved either way
+            self.ctx.event("dreamkit", "error", f"history summary failed: {error}")
         self._save()
         self._beat(force=True)
         if self.recorder is not None:

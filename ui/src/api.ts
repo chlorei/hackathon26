@@ -209,7 +209,7 @@ export function wsUrl(path: string): string {
 export const REASON_LABEL: Record<string, string> = {
   fell_off_table: 'fell off table',
   dropped: 'dropped',
-  missed_target: 'missed target',
+  missed_target: 'released off target',  // runs before the merge
   released_off_target: 'released off target',
   camera_failure: 'camera failure',
   stopped_by_plugin: 'camera failure',

@@ -11,20 +11,6 @@ from pydantic import BaseModel, Field, field_validator
 DEFAULT_SIM_PATH = "../dreamlabs/dream_library/examples/yam_mujoco"
 
 
-class Randomize(BaseModel):
-    objects: list[str] = []
-    xy_jitter: float = Field(0.0, ge=0, le=0.1)
-
-
-class Mock(BaseModel):
-    """The scripted stand-in for the model (`--mock`): no API calls, no credits."""
-
-    ## Behaviour per attempt, cycled: success, dropped, not_reached, grasped_air, missed_target, stalled, collision.
-    behaviors: list[str] = ["success"]
-    latency_ms: float = 250
-    jitter_ms: float = 80
-
-
 class Faults(BaseModel):
     """Demo/test faults the core injects before any plugin sees the step (plugins never alter the world)."""
 
@@ -41,18 +27,13 @@ class PluginSpec(BaseModel):
 
 
 class Config(BaseModel):
+    """dreamkit.yaml: which plugins, their settings, where the simulator and the runs are. What to run (task,
+    attempts, model, mock) belongs to the user's loop, not here (examples/sim_loop.py takes them as arguments)."""
+
     sim_path: str = DEFAULT_SIM_PATH
-    model: str = "dreamlabs/dream-1-beta"
-    task: str = "put apple into the bowl"
-    episodes: int = Field(1, ge=1, le=1000)
-    seconds: float = Field(60, gt=0, le=3600)
-    actions_per_chunk: int = Field(24, ge=1, le=48)
-    seed: int = 42
-    randomize: Randomize = Randomize()
-    plugins: list[PluginSpec] = []
     runs_dir: str = "runs"
-    mock: Mock = Mock()
-    realtime: bool = False  # sleep so a 50 ms step takes 50 ms of wall time (nicer to watch)
+    plugins: list[PluginSpec] = []
+    # advanced, rarely set by hand; examples/sim_loop.py passes faults and light through dreamkit.wrap(...)
     render_every: int = Field(2, ge=1, le=4)  # render cameras every N steps (2 = 10 fps); the model gets 5 fps
     stream_fps: float = Field(8, ge=1, le=20)  # live frames to the panel per second
     light: bool = False  # less CPU: cameras rendered at 5 fps, panel stream at 5 fps

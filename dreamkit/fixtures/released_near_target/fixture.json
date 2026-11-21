@@ -124,10 +124,10 @@
       ]
     }
   },
-  "name": "missed_target",
+  "name": "released_near_target",
   "steps": 401,
   "expected": {
     "success": false,
-    "reason": "missed_target"
+    "reason": "released_off_target"
   }
 }

@@ -74,7 +74,7 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
                 {running ? 'Your loop is running' : 'Finished'}{live.data?.mock ? ', mock policy' : live.data?.model ? `, ${live.data.model}` : ''}
               </p>
             </div>
-            {live.data?.mock && <Tag tone="steel">mock</Tag>}
+            {live.data?.mock && <Tag tone="warn" title="The mock policy fails on purpose so the plugins can be tested; no model is called">mock: scripted failures</Tag>}
           </div>
           <div className="flex gap-2 border-t border-line px-4 py-2.5">
             <Button variant="quiet" onClick={() => api.reveal(runId)}><FolderOpen className="h-4 w-4" /> Open folder</Button>

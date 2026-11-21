@@ -25,7 +25,7 @@ spec.loader.exec_module(sim_loop)
 sys.path.insert(0, str(HERE.parent))
 from dreamkit import config as dk_config  # noqa: E402
 
-BASE = ["camera-check", "latency-monitor", "success-check", "failure-monitor", "recorder"]
+BASE = ["camera-check", "success-check", "failure-monitor", "recorder"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,7 +34,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seconds", type=float, default=50)
     parser.add_argument("--task", default="put apple into the bowl")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--mock", action="store_true", help="scripted failures instead of Dream-1 (tests the mechanism only)")
     parser.add_argument("--behaviors", default="dropped,grasped_air,released_off_target,not_reached,success")
     parser.add_argument("--config", default="dreamkit.yaml", help="sim_path and runs_dir come from here")
     parser.add_argument("--fast", action="store_true")

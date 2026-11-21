@@ -22,7 +22,7 @@ GRASP_DZ = {"apple": 0.003, "orange": -0.009, "banana": 0.003}
 ## gripper, so the fruit slides out. `fell_off_table`: a violent wrist flick (joints, amplitude in rad, rows).
 LOOSE_GRIP = 0.74
 FLING_SHAKE = ([4], 1.57, 14)
-BEHAVIORS = ("success", "dropped", "released_off_target", "missed_target", "not_reached", "grasped_air", "stalled",
+BEHAVIORS = ("success", "dropped", "released_off_target", "released_near_target", "not_reached", "grasped_air", "stalled",
              "collision", "fell_off_table")
 
 
@@ -108,7 +108,7 @@ class MockClient:
         error: Exception | None = None
         for side in sides:
             place = g.copy()
-            if behavior == "missed_target":
+            if behavior == "released_near_target":
                 place[0] += 0.10 if side == "left" else -0.10
             for yaw in yaws:
                 try:

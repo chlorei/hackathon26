@@ -1,4 +1,4 @@
-"""safety: tightens each chunk, never loosens it — a joint speed cap and a workspace box (PLUGIN_STANDARD.md).
+"""safety (an external example of a modify_actions plugin): tightens each chunk, never loosens it — a joint speed cap and a workspace box (PLUGIN_STANDARD.md).
 
 Rows that move a joint faster than the cap are slowed; a row that takes a tool point out of the box ends the chunk
 there and the arm holds until the next model call."""
@@ -8,8 +8,8 @@ from __future__ import annotations
 import numpy as np
 from pydantic import BaseModel, Field
 
-from dreamkit.plugin import Plugin, PluginContext
-from dreamkit.standard import Manifest
+from dreamkit import Manifest, Plugin
+from dreamkit.plugin import PluginContext
 
 SIDES = ("left", "right")
 STEP_S = 0.05

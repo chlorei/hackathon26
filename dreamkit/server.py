@@ -219,13 +219,14 @@ def create_app(config_path: str | Path) -> FastAPI:
         if info.get("status") == "running" and not info["live"]:
             info["status"] = "interrupted"
         info["recap"] = None
-        for recap in (folder / "recap" / "summary.json", folder / "recap.json"):  # standard path, then older runs
+        for recap in (folder / "history" / "summary.json", folder / "recap" / "summary.json", folder / "recap.json"):
             try:
                 info["recap"] = json.loads(recap.read_text())
                 break
             except (OSError, ValueError):
                 pass
-        report = next((r for r in (folder / "report" / "report.html", folder / "report.html") if r.is_file()), None)
+        report = next((r for r in (folder / "history" / "report.html", folder / "report" / "report.html",
+                                   folder / "report.html") if r.is_file()), None)
         info["report"] = str(report.relative_to(folder)) if report else None
         return info
 

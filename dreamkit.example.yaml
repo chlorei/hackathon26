@@ -1,27 +1,11 @@
-# dreamkit: the whole configuration. Copy to dreamkit.yaml.
-sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator (relative to this file)
-model: dreamlabs/dream-1-beta
-task: put apple into the bowl
-episodes: 5
-seconds: 60              # simulated time per attempt
-actions_per_chunk: 24    # rows executed per model reply, 1..48
-seed: 42                 # scenes are reproducible
-randomize:
-  objects: [apple, orange, banana]
-  xy_jitter: 0.02        # metres
+# dreamkit.yaml — which plugins run around Dream-1, and their settings. Nothing else:
+# what to run (task, attempts, model, mock) is your loop's business — see examples/sim_loop.py --help.
+sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator, relative to this file
+runs_dir: runs                                             # where each run's folder goes (the panel reads it)
 plugins:
   - camera-check
-  - latency-monitor: {warn_ms: 700}
-  - safety: {enabled: false}   # caps joint speed: on for real robots; off for the mock's 'dropped' jerk
   - success-check
-  - failure-monitor
-  - recovery: {max_recoveries: 3}   # fixes a failure mid-attempt; the scene is never reset
-  - recorder: {fps: 10}
-  - harvester                     # every attempt -> LeRobot v2.1 (runs/<id>/dataset/)
-  - recap
-  - report
-# --mock: a scripted policy instead of Dream-1 (no credits). Behaviours cycle per attempt:
-# success, dropped, not_reached, grasped_air, missed_target, stalled, collision
-mock:
-  behaviors: [dropped, success]
-  latency_ms: 250
+  - failure-monitor: {slow_ms: 700}
+  - recovery: {max_recoveries: 3, retry_attempts: 1}       # the one control plugin
+  - recorder: {video_fps: 10}
+  - harvester

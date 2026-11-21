@@ -22,7 +22,7 @@ def _run(config_path, *args):
     ("success", None),
     ("dropped", "dropped"),
     ("released_off_target", "released_off_target"),
-    ("missed_target", "missed_target"),
+    ("released_near_target", "released_off_target"),
     ("not_reached", "not_reached"),
     ("grasped_air", "grasped_air"),
     ("stalled", "stalled"),
@@ -43,7 +43,7 @@ def test_failure_monitor_names_the_scripted_failure(make_config, behavior, reaso
 def test_scenes_differ_and_retry_then_success_with_video_and_recap(make_config):
     code, info, folder = _run(make_config(
         plugins=["success-check", "failure-monitor", {"recovery": {"max_recoveries": 0, "retry_attempts": 1}},
-                 "latency-monitor", "recorder", "recap", "report"],
+                 "recorder"],
     ), "--episodes", "2", "--behaviors", "dropped,success")
     assert code == 0
     eps = info["episodes"]
@@ -53,10 +53,10 @@ def test_scenes_differ_and_retry_then_success_with_video_and_recap(make_config):
     assert len({e["duration_s"] for e in eps if e["success"]}) == 2  # mock phase lengths vary
     assert (folder / "recorder" / "ep001_top.mp4").stat().st_size > 1000
     assert (folder / eps[0]["recap"]["video"]).stat().st_size > 1000
-    assert eps[0]["latency-monitor"] == {"mock": True}
-    recap = json.loads((folder / "recap" / "summary.json").read_text())["text"]
-    assert "Mock: no model calls" in recap and "Retries saved 2 scenes" in recap
-    assert (folder / "report" / "report.html").is_file()
+    assert eps[0]["failure-monitor"]["latency"] == {"mock": True}
+    recap = json.loads((folder / "history" / "summary.json").read_text())["text"]
+    assert "scripted on purpose" in recap and "Retries saved 2 scenes" in recap
+    assert "mock: scripted failures" in (folder / "history" / "report.html").read_text()
 
 
 def test_camera_failure_stops_the_robot(make_config):

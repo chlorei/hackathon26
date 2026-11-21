@@ -45,6 +45,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="mock only: what goes wrong, one per attempt, cycled")
     parser.add_argument("--fast", action="store_true", help="no real-time pacing (tests)")
     parser.add_argument("--record", help="save the first attempt as a replay fixture in this folder")
+    parser.add_argument("--fault-camera", choices=["top", "left", "right"], help="demo: this camera fails")
+    parser.add_argument("--fault-kind", choices=["black", "frozen"], default="black")
+    parser.add_argument("--fault-at", type=float, default=5.0, help="seconds into the attempt")
+    parser.add_argument("--fault-episode", type=int, help="only in this attempt (1-based)")
+    parser.add_argument("--light", action="store_true", help="fewer camera frames, less CPU")
     parser.add_argument("--fake-rtt-ms", type=float, help="mock only: report this model round trip")
     args = parser.parse_args(argv)
 
@@ -69,7 +74,11 @@ def main(argv: list[str] | None = None) -> int:
         base_client = dream.DreamClient(api_key=key)
 
     # ---- the one line dreamkit asks for ----------------------------------------------------------------------
-    client = dreamkit.wrap(base_client, config=args.config, record=args.record)
+    overrides = {"light": True} if args.light else {}
+    if args.fault_camera:
+        overrides["faults"] = {f"camera_{args.fault_kind}": args.fault_camera, "at_s": args.fault_at,
+                               "episode": args.fault_episode}
+    client = dreamkit.wrap(base_client, config=args.config, record=args.record, **overrides)
     client.policy(dc.policy_config(args.model, gateway, poses))
     render_every = client.config.render_every
 

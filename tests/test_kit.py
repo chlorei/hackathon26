@@ -79,7 +79,7 @@ def _config(tmp_path):
     (tmp_path / "plugins" / "spies.py").write_text(SPIES)
     path = tmp_path / "dreamkit.yaml"
     path.write_text(yaml.safe_dump({"runs_dir": str(tmp_path / "runs"),
-                                    "plugins": ["spy-stop", "spy-trim", "latency-monitor"]}))
+                                    "plugins": ["spy-stop", "spy-trim", "failure-monitor"]}))
     return path
 
 
@@ -107,7 +107,7 @@ def test_hooks_fire_inside_the_users_calls(tmp_path):
     assert run["status"] == "finished" and run["model"] == "dreamlabs/dream-1-beta" and run["control"] == "spy-stop"
     (ep,) = run["episodes"]
     assert ep["reason"] == "stalled" and ep["stopped_by"] == "spy-stop" and ep["at_s"] == 0.15
-    assert ep["latency-monitor"]["mean_ms"] == 420.0
+    assert ep["failure-monitor"]["latency"]["mean_ms"] == 420.0
     assert run["plugin_stats"]["spy-trim"]["errors"] == 0
     assert (tmp_path / "runs" / run["id"] / "live.json").is_file()
 

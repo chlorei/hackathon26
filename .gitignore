@@ -11,3 +11,4 @@ mock_results/
 dreamkit.yaml
 .playwright-mcp/
 labels.csv
+MUJOCO_LOG.TXT

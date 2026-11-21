@@ -176,7 +176,7 @@ Verdicts — `ctx.result`
 - Only `success-check` writes `ctx.result["success"]`; only `failure-monitor` writes `reason`, `at_s`, `details`.
 - Other plugins add keys under their own name: `ctx.result["gripper-check"] = {...}`.
 - Failure reasons are snake_case codes from the shared list in `dreamkit/reasons.py`
-  (`dropped`, `released_off_target`, `missed_target`, `grasped_air`, `not_reached`, `collision`, `fell_off_table`,
+  (`dropped`, `released_off_target`, `grasped_air`, `not_reached`, `collision`, `fell_off_table`,
   `stalled`, `slow_model`, `camera_failure`, `timeout`; and `stopped`, `model_error`, `error` for attempts cut short).
   New codes are added there, with a human label.
 - `data` keys: snake_case; a float is a measurement and needs a unit suffix (`t_s`, `dist_m`, `rtt_ms`); strings,
@@ -324,4 +324,11 @@ Error messages always name the rule, the file and line when known, and the fix:
 - Demo faults (a black or frozen camera) are injected by the core (`faults:` in dreamkit.yaml), never by a plugin.
 - `contacts(with_force=True)` returns `(a, b, force_n)`.
 - Bundled fixtures: `collision_table` (the mock hits the table, not the bowl) instead of `collision_bowl`; also
-  `missed_target`.
+  `released_near_target`.
+
+**v1.2** (cleanup)
+- `missed_target` is folded into `released_off_target` (details say whether it was a near miss).
+- Built-ins: failure-monitor (with model latency), recovery, harvester, success-check, recorder, camera-check.
+  `latency-monitor` merged into failure-monitor; recaps and the report are part of History (core);
+  `safety` and `gripper-check` are external examples in plugins-external/.
+- dreamkit.yaml holds plugins and their settings only (+ sim_path, runs_dir).

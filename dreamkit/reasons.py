@@ -7,7 +7,6 @@ from __future__ import annotations
 REASONS: dict[str, str] = {
     "dropped": "dropped",
     "released_off_target": "released off target",
-    "missed_target": "missed target",
     "grasped_air": "grasped air",
     "not_reached": "not reached",
     "collision": "collision",
@@ -22,10 +21,10 @@ REASONS: dict[str, str] = {
     "error": "error in the loop",
 }
 ## Codes for a failure of the task itself (what failure-monitor diagnoses and recovery can act on).
-FAILURES = ("dropped", "released_off_target", "missed_target", "grasped_air", "not_reached", "collision",
+FAILURES = ("dropped", "released_off_target", "grasped_air", "not_reached", "collision",
             "fell_off_table", "stalled", "slow_model", "camera_failure", "timeout")
 ## Codes written by runs before the standard, still read by the panel.
-LEGACY = {"stopped_by_plugin": "camera_failure"}
+LEGACY = {"stopped_by_plugin": "camera_failure", "missed_target": "released_off_target"}
 
 
 def label(code: str | None) -> str:

@@ -19,6 +19,12 @@ def test_quiet_on_success_with_a_timeline():
     assert kinds[:3] == ["reached", "grasp", "lifted"]
 
 
+def test_model_latency_is_part_of_failure_monitor():
+    r = replay("slow_model", plugins=["failure-monitor"])
+    assert r.events.any(plugin="failure-monitor", level="warn")
+    assert r.result["failure-monitor"]["latency"]["mean_ms"] > 700
+
+
 def test_live_verdict_mid_attempt():
     r = replay("dropped_mid_carry", plugins=["failure-monitor"])
     v = [e for e in r.events if e["data"].get("kind") == "verdict"]
