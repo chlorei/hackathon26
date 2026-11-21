@@ -41,6 +41,7 @@
   }
   const card = (title, ...body) => h('section', { class: 'dk-card' }, h('h2', { class: 'dk-title' }, title), h('div', { class: 'dk-body' }, body))
   const empty = (text) => h('p', { class: 'dk-empty' }, text)
+  const row = (...kids) => h('div', { class: 'dk-row' }, kids)
 
   /** Vertical bars: [{label, value, tone, title}] */
   function bars(data, { max, unit = '', height = 120 } = {}) {
@@ -137,5 +138,5 @@
     tick()
   }
 
-  window.dk = { h, s, media, fmt, pct, stats, card, empty, bars, hbars, timeline, table, downloadButton, page, RUN, ATTEMPT }
+  window.dk = { h, s, media, fmt, pct, stats, card, empty, row, bars, hbars, timeline, table, downloadButton, page, RUN, ATTEMPT }
 })()

@@ -50,7 +50,7 @@ class Recovery(Plugin):
     name = "recovery"
     Params = Params
     manifest = Manifest(group="core", icon="LifeBuoy", capability="control",
-                        hooks=["on_episode_start", "before_model", "on_episode_end"])
+                        hooks=["on_episode_start", "before_model", "on_episode_end"], ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.used = 0

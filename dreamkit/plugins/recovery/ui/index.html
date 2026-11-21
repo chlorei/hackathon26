@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>recovery</title></head>
+<body>
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// What recovery did in this run: attempts it saved, the success rate with and without it, when it stepped in.
+dk.page('recovery', 'Recovery', ({ episodes, mine }) => {
+  const rows = episodes.map((e) => {
+    const r = e.recovery || {}
+    const acts = mine.filter((m) => m.episode === e.episode && m.data && m.data.action)
+    return { attempt: e.episode, success: e.success, recoveries: r.count || 0, actions: (r.actions || []).join(', '),
+      reasons: acts.map((a) => (a.data.reason || '').replace(/_/g, ' ')).join(', '),
+      at_s: acts.map((a) => a.t_s), duration_s: e.duration_s, saved: Boolean(r.count && e.success), _here: e._here }
+  })
+  const n = rows.length, ok = rows.filter((r) => r.success).length, saved = rows.filter((r) => r.saved).length
+  const used = rows.reduce((a, r) => a + r.recoveries, 0)
+  return [
+    dk.stats([
+      { label: 'attempts saved', value: String(saved), sub: `of ${rows.filter((r) => r.recoveries).length} it stepped in`, tone: saved ? 'ok' : null },
+      { label: 'success with recovery', value: dk.pct(ok, n), sub: `${ok} of ${n}` },
+      { label: 'without it', value: dk.pct(ok - saved, n), sub: 'a first failure counted as final', tone: saved ? 'bad' : null },
+      { label: 'recoveries used', value: String(used) },
+    ]),
+    dk.card('Each attempt', dk.bars(rows.map((r) => ({ label: String(r.attempt), value: Math.max(r.recoveries, 0.15),
+      tone: r.saved ? 'steel' : r.success ? 'ok' : 'bad',
+      title: `attempt ${r.attempt}: ${r.saved ? 'saved by recovery' : r.success ? 'worked on its own' : 'failed'}, ${r.recoveries} recoveries` })), { max: 3 }),
+      dk.h('p', { class: 'dk-faint' }, 'bar height: recoveries used · blue: saved by recovery · green: worked on its own · red: failed')),
+    dk.card('When it stepped in', dk.timeline(rows.map((r) => ({ label: `attempt ${r.attempt}`, duration: r.duration_s,
+      tone: r.success ? 'ok' : 'bad', marks: r.at_s.map((t, i) => ({ t, tone: 'steel', title: `recovery ${i + 1}: ${rows.find((x) => x.attempt === r.attempt).reasons.split(', ')[i] || ''}` })) })))),
+    dk.card('Attempts', dk.row(dk.downloadButton('recovery', () => rows.map(({ _here, ...r }) => r))),
+      dk.table([{ key: 'attempt', label: 'attempt' }, { key: 'success', label: 'outcome', fmt: (v, r) => (r.saved ? 'saved' : v ? 'success' : 'failed') },
+        { key: 'recoveries', label: 'recoveries' }, { key: 'reasons', label: 'after' }, { key: 'actions', label: 'action' },
+        { key: 'duration_s', label: 'took', fmt: (v) => `${dk.fmt(v)} s` }], rows)),
+  ]
+})
+</script>
+</body>
+</html>
