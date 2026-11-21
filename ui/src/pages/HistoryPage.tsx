@@ -18,68 +18,133 @@ export default function HistoryPage({ runId, episode, onOpen, onBack }: {
   return runId ? <RunDetail id={runId} initial={episode} onBack={onBack} onOpen={onOpen} /> : <RunList onOpen={onOpen} />
 }
 
+type Policy = 'real' | 'mock' | 'all'
+const DASH = '—'
+const field = (e: EpisodeResult, key: string) => (e as unknown as Record<string, unknown>)[key] as Record<string, unknown> | undefined
+
+/** One run as the table shows it: every number from what the run already recorded; DASH where it did not. */
+function rowOf(r: RunInfo) {
+  const eps = r.episodes ?? []
+  const lat = eps.map((e) => field(e, 'failure-monitor')?.latency as { mean_ms?: number; calls?: number } | undefined)
+    .filter((l): l is { mean_ms: number; calls: number } => Boolean(l && l.mean_ms != null && l.calls))
+  const calls = lat.reduce((a, l) => a + l.calls, 0)
+  const meanMs = calls ? lat.reduce((a, l) => a + l.mean_ms * l.calls, 0) / calls : null
+  const judged = eps.filter((e) => typeof field(e, 'monitor-stats')?.success === 'boolean' && typeof e.success === 'boolean')
+  const agree = judged.filter((e) => field(e, 'monitor-stats')!.success === e.success).length
+  const helped = eps.filter((e) => (field(e, 'recovery')?.count as number | undefined))
+  const duration = eps.reduce((a, e) => a + (e.duration_s ?? 0), 0)
+  return {
+    duration: eps.length ? `${duration.toFixed(0)} s` : DASH,
+    latency: meanMs == null ? DASH : meanMs >= 1000 ? `${(meanMs / 1000).toFixed(1)} s` : `${Math.round(meanMs)} ms`,
+    cost: typeof r.cost_usd === 'number' ? `$${r.cost_usd.toFixed(2)}` : DASH,
+    judge: judged.length ? `${agree}/${judged.length} agree` : DASH,
+    judgeTone: judged.length && agree < judged.length ? 'text-warn' : 'text-dim',
+    saves: helped.length ? `${helped.filter((e) => e.success).length} of ${helped.length}` : DASH,
+  }
+}
+
 function RunList({ onOpen }: { onOpen: (id: string) => void }) {
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 6000 })
-  const list = runs.data?.runs ?? []
+  const [policy, setPolicy] = useState<Policy>(() => (localStorage.getItem('dk-history-policy') as Policy) || 'real')
+  const choose = (p: Policy) => { localStorage.setItem('dk-history-policy', p); setPolicy(p) }
+  const everything = runs.data?.runs ?? []
+  const list = everything.filter((r) => policy === 'all' || (policy === 'mock') === Boolean(r.mock))
   const all = list.flatMap((r) => r.episodes ?? [])
-  const reasons = useMemo(() => {
-    // one bar per meaning: an old code and its new name (stopped_by_plugin / camera_failure) are the same reason
-    const m: Record<string, number> = {}
-    for (const e of all) if (e.success === false) {
-      const label = REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason ?? 'unknown'
-      m[label] = (m[label] ?? 0) + 1
-    }
-    return Object.entries(m).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
-  }, [all])
+  // one bar per meaning: an old code and its new name (stopped_by_plugin / camera_failure) are the same reason
+  const byReason: Record<string, number> = {}
+  for (const e of all) if (e.success === false) {
+    const label = REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason ?? 'unknown'
+    byReason[label] = (byReason[label] ?? 0) + 1
+  }
+  const reasons = Object.entries(byReason).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
   const ok = all.filter((e) => e.success).length
+  const counts = { real: everything.filter((r) => !r.mock).length, mock: everything.filter((r) => r.mock).length, all: everything.length }
+  const scope = { real: 'real policy runs only', mock: 'mock runs only (scripted failures, not the model)', all: 'all runs, real and mock' }[policy]
+  const top = Math.max(1, ...reasons.map((r) => r.n))
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[13px]" role="tablist" aria-label="Which runs">
+          {(['real', 'mock', 'all'] as const).map((p) => (
+            <button key={p} role="tab" aria-selected={policy === p} onClick={() => choose(p)}
+              className={clsx('rounded-md px-3 py-1', policy === p ? 'bg-raised font-medium text-ink' : 'text-dim hover:text-ink')}>
+              {p === 'real' ? 'Real' : p === 'mock' ? 'Mock' : 'All'} <span className="text-faint">{counts[p]}</span>
+            </button>
+          ))}
+        </div>
+        <p className="text-[13px] text-faint">Showing {scope}.</p>
+      </div>
       <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
         <Panel className="px-4 py-4">
-          <p className="text-[13px] text-dim">Across all runs</p>
+          <p className="text-[13px] text-dim">Across {policy === 'all' ? 'all' : policy} runs</p>
           <p className="mt-1 text-[40px] font-semibold leading-none">{all.length ? Math.round((100 * ok) / all.length) : 0}<span className="text-[20px] text-dim">%</span></p>
           <p className="mt-2 text-[13px] text-dim">{ok} of {all.length} attempts worked in {list.length} runs</p>
         </Panel>
         <Panel>
           <PanelTitle>Why attempts failed</PanelTitle>
-          <div className="px-2 pb-2" style={{ height: Math.max(96, reasons.length * 24 + 36) }}>
-            {reasons.length ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={reasons} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <XAxis type="number" allowDecimals={false} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="reason" tick={{ fill: 'var(--dk-dim)', fontSize: 12 }} width={150} interval={0} axisLine={false} tickLine={false} />
-                  <Tooltip {...TIP} cursor={{ fill: '#efede8' }} />
-                  <Bar dataKey="n" name="attempts" fill="#c8402f" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={14} />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : <p className="px-2 pt-6 text-[13px] text-faint">No failures recorded yet.</p>}
-          </div>
+          {!reasons.length ? <p className="px-5 pb-4 text-[13px] text-faint">No failures recorded{policy === 'all' ? '' : ` in ${policy} runs`}.</p>
+            : reasons.length <= 3 ? (
+              <ul className="px-5 pb-4 text-[14px]">
+                {reasons.map((r) => (
+                  <li key={r.reason} className="flex items-baseline justify-between border-b border-line/60 py-1.5 last:border-0">
+                    <span>{r.reason}</span><span className="font-semibold tabular-nums">{r.n}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="px-2 pb-2" style={{ height: reasons.length * 22 + 30 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={reasons} layout="vertical" margin={{ left: 8, right: 16 }}>
+                    <XAxis type="number" allowDecimals={false} domain={[0, top]} tickCount={Math.min(top, 6) + 1} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="reason" tick={{ fill: 'var(--dk-dim)', fontSize: 12 }} width={150} interval={0} axisLine={false} tickLine={false} />
+                    <Tooltip {...TIP} cursor={{ fill: '#efede8' }} />
+                    <Bar dataKey="n" name="attempts" fill="#c8402f" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={12} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
         </Panel>
       </div>
       <Panel>
         <PanelTitle>Runs</PanelTitle>
-        <table className="w-full text-[13px]">
-          <thead className="border-y border-line text-left text-[12px] text-faint">
-            <tr><th className="px-4 py-2 font-normal">Started</th><th className="px-4 py-2 font-normal">Task</th><th className="px-4 py-2 font-normal">Attempts</th><th className="px-4 py-2 font-normal">Failures</th><th className="px-4 py-2 font-normal">Policy</th></tr>
-          </thead>
-          <tbody>
-            {list.map((r) => (
-              <tr key={r.id} tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)}
-                className="cursor-pointer border-b border-line/60 hover:bg-raised/50">
-                <td className="whitespace-nowrap px-4 py-2.5 text-dim">{when(r.started)}{r.status === 'running' && <Tag tone="signal">running</Tag>}</td>
-                <td className="px-4 py-2.5">{r.source === 'gym' && <span className="mr-1.5"><Tag tone="steel" title="Run by the Gym app (Arena, Compare, Record or Teleop)">Gym</Tag></span>}{r.task}</td>
-                <td className="px-4 py-2.5"><span className="tracking-[2px]">{(r.episodes ?? []).map((e) => <Outcome key={e.episode} success={e.success} />)}</span></td>
-                <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{Object.entries(Object.entries(r.summary?.reasons ?? {}).reduce<Record<string, number>>((acc, [k, n]) => {
-                  const label = REASON_LABEL[k] ?? k
-                  acc[label] = (acc[label] ?? 0) + n
-                  return acc
-                }, {})).map(([label, n]) => <Tag key={label} tone="bad">{label}{n > 1 ? ` ×${n}` : ''}</Tag>)}</div></td>
-                <td className="px-4 py-2.5 text-dim">{r.mock ? <Tag tone="warn">mock: scripted failures</Tag> : r.model}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead className="border-y border-line text-left text-[12px] text-faint">
+              <tr>
+                {['Started', 'Task', 'Attempts', 'Duration', 'Avg model latency', 'Cost', 'Camera judge', 'Recovery saves', 'Failures', 'Policy'].map((h) => (
+                  <th key={h} className="whitespace-nowrap px-3 py-2 font-normal first:pl-4">{h}</th>
+                ))}
               </tr>
-            ))}
-            {!list.length && <tr><td colSpan={5} className="px-4 py-10 text-center text-faint">No runs yet. Start one on the Run page.</td></tr>}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {list.map((r) => {
+                const row = rowOf(r)
+                return (
+                  <tr key={r.id} tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)}
+                    className="cursor-pointer border-b border-line/60 hover:bg-raised/50">
+                    <td className="whitespace-nowrap py-2.5 pr-3 pl-4 text-dim">{when(r.started)}{r.status === 'running' && <Tag tone="signal">running</Tag>}</td>
+                    <td className="px-3 py-2.5">{r.source === 'gym' && <span className="mr-1.5"><Tag tone="steel" title="Run by the Gym app (Arena, Compare, Record or Teleop)">Gym</Tag></span>}{r.task}</td>
+                    <td className="px-3 py-2.5"><span className="tracking-[2px]">{(r.episodes ?? []).map((e) => <Outcome key={e.episode} success={e.success} />)}</span>{!(r.episodes ?? []).length && DASH}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-dim tabular-nums">{row.duration}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-dim tabular-nums">{row.latency}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-dim tabular-nums">{row.cost}</td>
+                    <td className={clsx('whitespace-nowrap px-3 py-2.5', row.judgeTone)}>{row.judge}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-dim">{row.saves}</td>
+                    <td className="px-3 py-2.5"><div className="flex flex-wrap gap-1">{Object.entries(Object.entries(r.summary?.reasons ?? {}).reduce<Record<string, number>>((acc, [k, n]) => {
+                      const label = REASON_LABEL[k] ?? k
+                      acc[label] = (acc[label] ?? 0) + n
+                      return acc
+                    }, {})).map(([label, n]) => <Tag key={label} tone="bad">{label}{n > 1 ? ` ×${n}` : ''}</Tag>)}{!Object.keys(r.summary?.reasons ?? {}).length && <span className="text-faint">{DASH}</span>}</div></td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-dim">{r.mock ? <Tag tone="warn">mock</Tag> : r.model || DASH}</td>
+                  </tr>
+                )
+              })}
+              {!list.length && <tr><td colSpan={10} className="px-4 py-10 text-center text-faint">
+                {everything.length ? `No ${policy} runs yet. ${policy === 'real' ? 'Mock runs are under Mock.' : ''}` : 'No runs yet. Start one with python examples/sim_loop.py.'}
+              </td></tr>}
+            </tbody>
+          </table>
+        </div>
       </Panel>
     </div>
   )

@@ -84,6 +84,7 @@ export interface RunInfo {
   path?: string
   light?: boolean
   recap?: { text: string; attempts: string[] } | null
+  cost_usd?: number | null  // what the model's time cost (dreamkit.cost); null for a mock run
 }
 
 export interface PluginStats {
