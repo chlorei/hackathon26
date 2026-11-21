@@ -297,11 +297,16 @@ class FailureMonitor(Plugin):
             return
         diagnosis = self.diagnose(ctx)
         ctx.result["timeline"] = self.milestones
-        if ctx.result.get("reason") in ("stopped", "stopped_by_plugin", "model_error", "error"):
+        if ctx.result.get("reason") == "stopped" and diagnosis["reason"] != "timeout":
+            # stopped by the user after something had already gone wrong: that is the story
+            ctx.result["details"] = {**diagnosis["details"], "stopped_by_user_at": ctx.result.get("at")}
+        elif ctx.result.get("reason") in ("stopped", "stopped_by_plugin", "model_error", "error"):
             ctx.result["diagnosis"] = diagnosis  # the attempt was cut short; that stays the reason
             return
+        else:
+            ctx.result["details"] = diagnosis["details"]
         ctx.result.update(success=False, reason=diagnosis["reason"], at=diagnosis["at"],
-                          details=diagnosis["details"], message=diagnosis["message"],
+                          message=diagnosis["message"],
                           candidates=diagnosis["candidates"])
         ctx.emit("error", f"{diagnosis['message']} at {diagnosis['at']:.1f} s", reason=diagnosis["reason"],
                  at=diagnosis["at"], video=f"ep{ctx.episode}/top.mp4#t={max(0.0, diagnosis['at'] - 1):.1f}")
