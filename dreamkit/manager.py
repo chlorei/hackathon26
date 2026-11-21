@@ -165,7 +165,7 @@ class PluginManager:
         for spec in specs:
             if not spec.enabled:
                 continue
-            if spec.name in MERGED:
+            if spec.name in MERGED and spec.name not in self.available:
                 self.refused[spec.name] = MERGED[spec.name]
                 continue
             entry = self.available.get(spec.name)
