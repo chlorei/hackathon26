@@ -21,7 +21,7 @@ GRASP_DZ = {"apple": 0.003, "orange": -0.009, "banana": 0.003}
 ## `dropped`: the grip loosens mid-carry to this opening (the fruit's width is ~0.7) without the policy opening the
 ## gripper, so the fruit slides out. `fell_off_table`: a violent wrist flick (joints, amplitude in rad, rows).
 LOOSE_GRIP = 0.74
-FLING_SHAKE = ([4], 1.5, 10)
+FLING_SHAKE = ([4], 1.57, 14)
 BEHAVIORS = ("success", "dropped", "released_off_target", "missed_target", "not_reached", "grasped_air", "stalled",
              "collision", "fell_off_table")
 
@@ -30,7 +30,7 @@ class MockClient:
     mock = True
 
     def __init__(self, env, behaviors: list[str] | None = None, seed: int = 0, latency_ms: float = 0.0,
-                 recovery_behaviors: list[str] | None = None):
+                 recovery_behaviors: list[str] | None = None, fake_rtt_ms: float | None = None):
         self.env = env
         self.solve = importlib.import_module("mock_pickups").solve  # the simulator folder is on sys.path
         self.behaviors = list(behaviors or ["success"])
@@ -42,6 +42,7 @@ class MockClient:
         if unknown:
             raise ValueError(f"unknown mock behaviour(s) {unknown}; choose from {', '.join(BEHAVIORS)}")
         self.seed = seed
+        self.fake_rtt_ms = fake_rtt_ms  # report this round trip without waiting (the slow_model fixture)
         self.latency_ms = latency_ms
         self.attempt = 0
         self.plan: list[tuple[np.ndarray, np.ndarray]] | None = None
@@ -70,7 +71,8 @@ class MockClient:
         done = int(round((float(self.env.data.time) - self.t0) / STEP_S))
         rows = self.plan[done : done + CHUNK]
         rows += [self.plan[-1]] * (CHUNK - len(rows))
-        self.last_timing = {"mock": True}  # no model was called: latency plugins say so instead of reporting 0 ms
+        self.last_timing = ({"rtt_ms": float(self.fake_rtt_ms + self.rng.normal(0, 60))} if self.fake_rtt_ms
+                            else {"mock": True})  # no model was called: latency plugins say so, not "0 ms"
         return {"q_l_chunk": np.array([r[0] for r in rows]).tolist(), "q_r_chunk": np.array([r[1] for r in rows]).tolist()}
 
     def reset_episode(self, recovery: bool = False) -> None:

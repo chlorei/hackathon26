@@ -1,0 +1,133 @@
+{
+  "task": "put apple into the bowl",
+  "limits": {
+    "left": [
+      [
+        -2.61799,
+        3.13
+      ],
+      [
+        0.0,
+        3.65
+      ],
+      [
+        0.0,
+        3.13
+      ],
+      [
+        -1.5708,
+        1.5708
+      ],
+      [
+        -1.5708,
+        1.5708
+      ],
+      [
+        -2.0944,
+        2.0944
+      ]
+    ],
+    "right": [
+      [
+        -2.61799,
+        3.13
+      ],
+      [
+        0.0,
+        3.65
+      ],
+      [
+        0.0,
+        3.13
+      ],
+      [
+        -1.5708,
+        1.5708
+      ],
+      [
+        -1.5708,
+        1.5708
+      ],
+      [
+        -2.0944,
+        2.0944
+      ]
+    ]
+  },
+  "bodies": [
+    "world",
+    "center_camera_stand",
+    "center_camera_housing",
+    "left_base",
+    "left_world",
+    "left_link1",
+    "left_link2",
+    "left_link3",
+    "left_link4",
+    "left_link5",
+    "left_link6",
+    "left_gripper",
+    "left_grasp_site",
+    "left_tip_left",
+    "left_tip_right",
+    "right_base",
+    "right_world",
+    "right_link1",
+    "right_link2",
+    "right_link3",
+    "right_link4",
+    "right_link5",
+    "right_link6",
+    "right_gripper",
+    "right_grasp_site",
+    "right_tip_left",
+    "right_tip_right",
+    "apple",
+    "banana",
+    "orange",
+    "water_bottle",
+    "bowl",
+    "plate"
+  ],
+  "info": {
+    "seed": 42,
+    "positions": {
+      "apple": [
+        0.161,
+        0.1026,
+        0.7913
+      ],
+      "orange": [
+        0.0143,
+        0.1379,
+        0.7898
+      ],
+      "banana": [
+        -0.1313,
+        0.1041,
+        0.7743
+      ],
+      "water_bottle": [
+        0.22,
+        -0.11,
+        0.8349
+      ],
+      "bowl": [
+        0.0,
+        -0.04,
+        0.76
+      ],
+      "plate": [
+        -0.22,
+        -0.045,
+        0.764
+      ]
+    }
+  },
+  "name": "released_off_target",
+  "steps": 321,
+  "expected": {
+    "success": false,
+    "reason": "released_off_target"
+  }
+}

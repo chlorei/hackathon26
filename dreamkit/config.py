@@ -25,6 +25,15 @@ class Mock(BaseModel):
     jitter_ms: float = 80
 
 
+class Faults(BaseModel):
+    """Demo/test faults the core injects before any plugin sees the step (plugins never alter the world)."""
+
+    camera_black: str | None = None  # a camera name that goes dark
+    camera_frozen: str | None = None  # a camera name whose picture stops changing
+    at_s: float = Field(5.0, ge=0)
+    episode: int | None = None  # only in this attempt (1-based); None = every attempt
+
+
 class PluginSpec(BaseModel):
     name: str
     enabled: bool = True
@@ -47,6 +56,7 @@ class Config(BaseModel):
     render_every: int = Field(2, ge=1, le=4)  # render cameras every N steps (2 = 10 fps); the model gets 5 fps
     stream_fps: float = Field(8, ge=1, le=20)  # live frames to the panel per second
     light: bool = False  # less CPU: cameras rendered at 5 fps, panel stream at 5 fps
+    faults: Faults = Faults()
     registry_url: str = "https://raw.githubusercontent.com/chlorei/hackathon26/main/registry.yaml"
 
     @field_validator("plugins", mode="before")

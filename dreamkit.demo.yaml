@@ -2,14 +2,14 @@
 #   python examples/sim_loop.py --mock --config dreamkit.demo.yaml --episodes 4 --behaviors dropped,grasped_air,released_off_target,success
 sim_path: ../dreamlabs/dream_library/examples/yam_mujoco
 runs_dir: runs
+faults: {camera_black: top, at_s: 5, episode: 4}   # attempt 4: the overhead camera dies (demo)
 plugins:
-  - camera-check: {simulate_failure: top, simulate_at_s: 5, simulate_episode: 4}   # attempt 4: the overhead camera dies
+  - camera-check
   - latency-monitor
   - success-check
   - failure-monitor
   - gripper-check
-  - recovery: {max_recoveries: 2}
-  - retry: {attempts: 1, on: [dropped, released_off_target, grasped_air, not_reached, stalled]}
+  - recovery: {max_recoveries: 2, retry_attempts: 1}
   - recorder
   - harvester
   - recap

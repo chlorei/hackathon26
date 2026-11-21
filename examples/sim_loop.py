@@ -44,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--behaviors", default="dropped,success,released_off_target,success",
                         help="mock only: what goes wrong, one per attempt, cycled")
     parser.add_argument("--fast", action="store_true", help="no real-time pacing (tests)")
+    parser.add_argument("--record", help="save the first attempt as a replay fixture in this folder")
+    parser.add_argument("--fake-rtt-ms", type=float, help="mock only: report this model round trip")
     args = parser.parse_args(argv)
 
     cfg, base = dk_config.load(args.config if Path(args.config).is_file() else None)
@@ -53,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.mock:
         from dreamkit.mock import MockClient
 
-        base_client = MockClient(env, behaviors=args.behaviors.split(","), seed=args.seed)
+        base_client = MockClient(env, behaviors=args.behaviors.split(","), seed=args.seed, fake_rtt_ms=args.fake_rtt_ms)
         gateway, poses = "mock", False
     else:
         import dream
@@ -67,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
         base_client = dream.DreamClient(api_key=key)
 
     # ---- the one line dreamkit asks for ----------------------------------------------------------------------
-    client = dreamkit.wrap(base_client, config=args.config)
+    client = dreamkit.wrap(base_client, config=args.config, record=args.record)
     client.policy(dc.policy_config(args.model, gateway, poses))
     render_every = client.config.render_every
 
@@ -98,7 +100,9 @@ def main(argv: list[str] | None = None) -> int:
                         tick = time.monotonic()
                         env.step(l, r)
                         kept = steps % dc.FRAME_EVERY_STEPS == 0
-                        images = dc.capture(env, windows, keep=kept) if kept or steps % render_every == 0 else None
+                        # the model needs a frame every 4th step; plugins and the Live page only when they ask
+                        wanted = steps % render_every == 0 and client.wants_frames
+                        images = dc.capture(env, windows, keep=kept) if kept or wanted else None
                         if kept:
                             dc.feed(client, env, windows, args.task, args.model, steps, station=poses)
                         steps += 1

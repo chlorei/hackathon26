@@ -8,11 +8,16 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from .plugins.harvester import YAM_CONFIG
+from .plugins.harvester.plugin import YAM_CONFIG
 
 
 def episodes(run_dir: Path, split: str = "success") -> list[Path]:
-    return sorted(p.parent.parent for p in (run_dir / "dataset" / split).glob("ep*/meta/info.json"))
+    """The harvester's episodes of a run (run_dir/harvester/<split>/; runs before the standard used dataset/)."""
+    for base in (run_dir / "harvester", run_dir / "dataset"):
+        found = sorted(p.parent.parent for p in (base / split).glob("ep*/meta/info.json"))
+        if found:
+            return found
+    return []
 
 
 def validate(path: Path, config: dict[str, Any] | None = None) -> dict[str, Any]:

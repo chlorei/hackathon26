@@ -196,11 +196,15 @@ def create_app(config_path: str | Path) -> FastAPI:
         info["live"] = _is_live(folder, info)
         if info.get("status") == "running" and not info["live"]:
             info["status"] = "interrupted"
-        info["report"] = (folder / "report.html").is_file()
-        try:
-            info["recap"] = json.loads((folder / "recap.json").read_text())
-        except (OSError, ValueError):
-            info["recap"] = None
+        info["recap"] = None
+        for recap in (folder / "recap" / "summary.json", folder / "recap.json"):  # standard path, then older runs
+            try:
+                info["recap"] = json.loads(recap.read_text())
+                break
+            except (OSError, ValueError):
+                pass
+        report = next((r for r in (folder / "report" / "report.html", folder / "report.html") if r.is_file()), None)
+        info["report"] = str(report.relative_to(folder)) if report else None
         return info
 
     @app.delete("/api/runs/{run_id}")
@@ -234,7 +238,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         folder = run_folder(run_id)
         ready, failed = harvest.episodes(folder), harvest.episodes(folder, "failed")
         try:
-            check = json.loads((folder / "dataset" / "validation.json").read_text())
+            check = json.loads((folder / "harvester" / "validation.json").read_text())
         except (OSError, ValueError):
             check = None
         return {"success": len(ready), "failed": len(failed), "validation": check}
@@ -247,14 +251,18 @@ def create_app(config_path: str | Path) -> FastAPI:
         folder = run_folder(run_id)
         if not harvest.episodes(folder):
             raise HTTPException(404, "no successful episodes in this run (is the harvester plugin on?)")
-        report = await asyncio.to_thread(harvest.validate, folder / "dataset" / "success")
+        report = await asyncio.to_thread(harvest.validate, harvest.episodes(folder)[0].parent)
         report["checked"] = time.time()
-        storage.write_json(folder / "dataset" / "validation.json", report)
+        (folder / "harvester").mkdir(exist_ok=True)
+        storage.write_json(folder / "harvester" / "validation.json", report)
         return report
 
     @app.get("/api/runs/{run_id}/trace/{episode}")
     def get_trace(run_id: str, episode: int):
-        path = run_folder(run_id) / f"ep{episode}" / "trace.json"
+        folder = run_folder(run_id)
+        path = folder / "failure-monitor" / f"ep{episode:03d}_trace.json"
+        if not path.is_file():
+            path = folder / f"ep{episode}" / "trace.json"  # older runs
         if not path.is_file():
             raise HTTPException(404, "no trace")
         return json.loads(path.read_text())

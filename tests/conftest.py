@@ -21,7 +21,7 @@ def make_config(tmp_path):
             "episodes": 1,
             "seconds": 20,
             "runs_dir": str(tmp_path / "runs"),
-            "render_every": 4,
+            "render_every": 2,
             "mock": {"behaviors": ["success"], "latency_ms": 0},
             "plugins": ["success-check", "failure-monitor"],
         }

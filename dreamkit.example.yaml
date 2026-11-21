@@ -16,7 +16,6 @@ plugins:
   - success-check
   - failure-monitor
   - recovery: {max_recoveries: 3}   # fixes a failure mid-attempt; the scene is never reset
-  - retry: {attempts: 2, on: [not_reached, grasped_air, dropped, missed_target]}
   - recorder: {fps: 10}
   - harvester                     # every attempt -> LeRobot v2.1 (runs/<id>/dataset/)
   - recap

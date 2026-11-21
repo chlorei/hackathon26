@@ -66,88 +66,107 @@ def cmd_search(args) -> int:
     return 0
 
 
-def cmd_install(args) -> int:
+def _print(lines, ok: bool) -> int:
     from rich.console import Console
 
-    from . import config as config_mod
-    from . import registry
-
-    path = _config_path(args.config)
-    url = config_mod.load(path)[0].registry_url if path else None
-    entries, _ = registry.load(url)
-    console = Console()
-    spec = registry.resolve(args.target, entries)
-    console.print(f"installing [bold]{spec}[/bold] …")
-    result = registry.install(args.target, entries)
-    if result.returncode != 0:
-        console.print(result.stdout[-2000:] + result.stderr[-2000:])
-        console.print("[red]install failed[/red]")
-        return 1
-    console.print("[green]installed[/green] — enable it in dreamkit.yaml under `plugins:` or in the panel")
-    return 0
+    console = Console(highlight=False)
+    for line in ([lines] if isinstance(lines, str) else lines):
+        style = "green" if line.startswith("✓") else "red" if line.startswith("✗") else None
+        console.print(line, style=style, markup=False)
+    console.print("[green]passed[/green]" if ok else "[red]failed[/red]")
+    return 0 if ok else 1
 
 
-PLUGIN_TEMPLATE = '''"""{title}: a dreamkit plugin."""
+def cmd_check(args) -> int:
+    from . import pdk
 
-from dreamkit import Context, Plugin
+    if args.all:
+        from .manager import discover
+
+        found, problems = discover()
+        ok = not problems
+        lines = [f"✗ {p}" for p in problems]
+        for name in sorted(found):
+            passed, out = pdk.check(name)
+            ok = ok and passed
+            lines += out
+        return _print(lines, ok)
+    passed, out = pdk.check(args.target, readme=args.readme)
+    return _print(out, passed)
 
 
-class {cls}(Plugin):
-    """What it checks, in one line."""
+def cmd_test(args) -> int:
+    from . import pdk
 
-    name = "{name}"
-    description = "TODO: one line for the panel"
-    defaults = {{"threshold": 0.5}}  # every number lives here, editable from dreamkit.yaml and the panel
+    if args.target == "all":
+        from .manager import discover
 
-    def on_episode_start(self, ctx: Context) -> None:
-        self.count = 0
+        found, _ = discover()
+        ok, lines = True, []
+        for name in sorted(found):
+            passed, out = pdk.test(name)
+            ok = ok and passed
+            lines.append(f"{'✓' if passed else '✗'} {name}: {out.splitlines()[-1] if out else ''}")
+        return _print(lines, ok)
+    passed, out = pdk.test(args.target, args.replay)
+    return _print(out, passed)
 
-    def on_step(self, ctx: Context) -> None:
-        # ctx.env.data (MuJoCo), ctx.state, ctx.frames, ctx.command, ctx.t ...
-        self.count += 1
 
-    def on_episode_end(self, ctx: Context) -> None:
-        ctx.emit("info", f"{name} saw {{self.count}} steps")
-'''
+def cmd_bench(args) -> int:
+    from . import pdk
 
-PYPROJECT_TEMPLATE = '''[project]
-name = "dreamkit-{name}"
-version = "0.1.0"
-description = "{name}: a dreamkit plugin"
-requires-python = ">=3.11"
-dependencies = ["dreamkit"]
+    passed, lines = pdk.bench(args.target, accuracy=args.accuracy)
+    return _print(lines, passed)
 
-[project.entry-points."dreamkit.plugins"]
-{name} = "{module}:{cls}"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+def cmd_install(args) -> int:
+    from . import pdk
 
-[tool.hatch.build.targets.wheel]
-only-include = ["{module}.py"]
-'''
+    passed, log = pdk.install(args.target)
+    return _print(log.splitlines(), passed)
+
+
+def cmd_publish(args) -> int:
+    from . import pdk
+
+    passed, out = pdk.publish(args.path)
+    return _print(out.splitlines(), passed)
 
 
 def cmd_new(args) -> int:
+    from .template import scaffold
+
     name = args.name.strip().lower()
-    if not re.fullmatch(r"[a-z][a-z0-9-]*", name):
-        print("plugin names are lowercase words joined by '-', e.g. gripper-check", file=sys.stderr)
+    if not re.fullmatch(r"[a-z]+(-[a-z]+){0,2}", name):
+        print("plugin names are 1-3 lowercase words joined by '-', e.g. gripper-check", file=sys.stderr)
         return 2
-    module = name.replace("-", "_")
-    cls = "".join(part.capitalize() for part in name.split("-"))
-    folder = Path(f"dreamkit-{name}")
-    if folder.exists():
-        print(f"{folder} already exists", file=sys.stderr)
+    if Path(f"dreamkit-{name}").exists():
+        print(f"dreamkit-{name} already exists", file=sys.stderr)
         return 1
-    folder.mkdir()
-    (folder / f"{module}.py").write_text(PLUGIN_TEMPLATE.format(title=name, cls=cls, name=name))
-    (folder / "pyproject.toml").write_text(PYPROJECT_TEMPLATE.format(name=name, module=module, cls=cls))
-    (folder / "README.md").write_text(f"# dreamkit-{name}\n\n```bash\ndreamkit install ./dreamkit-{name}\n```\n\n"
-                                      f"Then add `- {name}` under `plugins:` in dreamkit.yaml.\n")
-    print(f"created {folder}/ — edit {module}.py, then: dreamkit install ./{folder}")
-    print(f"(or drop {module}.py into ./plugins/ to use it without installing)")
+    root = scaffold(name, args.kind, Path.cwd())
+    print(f"created {root.name}/ ({args.kind}) — it already passes the standard:")
+    print(f"  dreamkit check {root.name} && dreamkit test {root.name} && dreamkit bench {root.name}")
     return 0
+
+
+def cmd_record(args) -> int:
+    import importlib.util
+
+    loop = Path(__file__).resolve().parent.parent / "examples" / "sim_loop.py"
+    if not loop.is_file():
+        print("dreamkit record needs the dreamkit checkout (examples/sim_loop.py)", file=sys.stderr)
+        return 2
+    spec = importlib.util.spec_from_file_location("sim_loop", loop)
+    sim_loop = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(sim_loop)
+    argv = ["--episodes", "1", "--seconds", str(args.seconds), "--task", args.task, "--record", args.out, "--fast"]
+    if args.mock:
+        argv += ["--mock", "--behaviors", args.behavior]
+    if args.config:
+        argv += ["--config", args.config]
+    code = sim_loop.main(argv)
+    print(f"fixture saved in {args.out}: dreamkit test <plugin> --replay {args.out}")
+    return code
 
 
 def _runs_root(config: str | None) -> Path:
@@ -255,9 +274,36 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("search", help="search the plugin catalogue")
     p.add_argument("word", nargs="?", default="")
     p.set_defaults(func=cmd_search)
-    p = sub.add_parser("install", help="install a plugin: catalogue name, GitHub URL or local folder")
-    p.add_argument("target")
+    p = sub.add_parser("check", help="check a plugin against PLUGIN_STANDARD.md")
+    p.add_argument("target", nargs="?", default=".", help="plugin name or source folder")
+    p.add_argument("--all", action="store_true", help="every installed plugin")
+    p.add_argument("--readme", action="store_true", help="regenerate the README params table")
+    p.set_defaults(func=cmd_check)
+    p = sub.add_parser("test", help="run a plugin's replay tests (no simulator, no credits)")
+    p.add_argument("target", nargs="?", default=".", help="plugin name, source folder, or 'all'")
+    p.add_argument("--replay", help="run the plugin on this fixture instead")
+    p.set_defaults(func=cmd_test)
+    p = sub.add_parser("bench", help="ms/step on every bundled fixture against the 1 ms budget")
+    p.add_argument("target", nargs="?", default=".")
+    p.add_argument("--accuracy", action="store_true", help="also score verdicts against each fixture's expected one")
+    p.set_defaults(func=cmd_bench)
+    p = sub.add_parser("install", help="check + test + bench a plugin, then install it (never unchecked)")
+    p.add_argument("target", help="catalogue name, owner/repo, GitHub URL, a .py URL or a folder")
     p.set_defaults(func=cmd_install)
+    p = sub.add_parser("publish", help="check + test + bench, then the registry.yaml entry")
+    p.add_argument("path", nargs="?", default=".")
+    p.set_defaults(func=cmd_publish)
+    p = sub.add_parser("new", help="scaffold a plugin package that already passes the standard")
+    p.add_argument("name")
+    p.add_argument("--kind", choices=["observe", "modify", "control"], default="observe")
+    p.set_defaults(func=cmd_new)
+    p = sub.add_parser("record", help="record a replay fixture from the simulator")
+    p.add_argument("out", help="fixture folder to create")
+    p.add_argument("--mock", action="store_true")
+    p.add_argument("--behavior", default="success")
+    p.add_argument("--task", default="put apple into the bowl")
+    p.add_argument("--seconds", type=float, default=20)
+    p.set_defaults(func=cmd_record)
     p = sub.add_parser("review", help="export failed attempts to a CSV for labelling (accuracy check)")
     p.add_argument("--out", default="labels.csv")
     p.add_argument("--limit", type=int, default=0)
@@ -274,9 +320,6 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--out", default="harvest")
     e.add_argument("--no-validate", action="store_true")
     e.set_defaults(func=cmd_harvest)
-    p = sub.add_parser("new", help="scaffold a plugin package")
-    p.add_argument("name")
-    p.set_defaults(func=cmd_new)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "config"):

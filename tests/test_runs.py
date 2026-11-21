@@ -37,13 +37,13 @@ def test_failure_monitor_names_the_scripted_failure(make_config, behavior, reaso
     else:
         assert episode["success"] is False
         assert episode["reason"] == reason, episode.get("candidates")
-        assert 0 < episode["at"] < 20
+        assert 0 < episode["at_s"] < 20
 
 
 def test_scenes_differ_and_retry_then_success_with_video_and_recap(make_config):
     code, info, folder = _run(make_config(
-        plugins=["success-check", "failure-monitor", {"retry": {"attempts": 1}}, "latency-monitor", "recorder",
-                 "recap", "report"],
+        plugins=["success-check", "failure-monitor", {"recovery": {"max_recoveries": 0, "retry_attempts": 1}},
+                 "latency-monitor", "recorder", "recap", "report"],
     ), "--episodes", "2", "--behaviors", "dropped,success")
     assert code == 0
     eps = info["episodes"]
@@ -51,23 +51,23 @@ def test_scenes_differ_and_retry_then_success_with_video_and_recap(make_config):
     assert eps[0]["positions"] != eps[2]["positions"]  # a new scene really moves the fruit
     assert eps[0]["positions"] == eps[1]["positions"]  # a retry keeps it
     assert len({e["duration_s"] for e in eps if e["success"]}) == 2  # mock phase lengths vary
-    assert (folder / "ep1" / "top.mp4").stat().st_size > 1000
-    assert (folder / "ep1" / "recap.mp4").stat().st_size > 1000
-    assert eps[0]["latency"] == {"mock": True}
-    recap = json.loads((folder / "recap.json").read_text())["text"]
+    assert (folder / "recorder" / "ep001_top.mp4").stat().st_size > 1000
+    assert (folder / eps[0]["recap"]["video"]).stat().st_size > 1000
+    assert eps[0]["latency-monitor"] == {"mock": True}
+    recap = json.loads((folder / "recap" / "summary.json").read_text())["text"]
     assert "Mock: no model calls" in recap and "Retries saved 2 scenes" in recap
-    assert (folder / "report.html").is_file()
+    assert (folder / "report" / "report.html").is_file()
 
 
 def test_camera_failure_stops_the_robot(make_config):
     code, info, _ = _run(make_config(
-        plugins=[{"camera-check": {"simulate_failure": "top", "simulate_at_s": 2.0}}, "success-check",
-                 "failure-monitor"],
+        faults={"camera_black": "top", "at_s": 2.0},
+        plugins=["camera-check", "success-check", "failure-monitor", "recovery"],
     ), "--episodes", "1")
     (episode,) = info["episodes"]
-    assert episode["reason"] == "stopped_by_plugin"
+    assert episode["reason"] == "camera_failure" and episode["stopped_by"] == "recovery"
     assert "camera top is black" in episode["details"]["message"]
-    assert episode["at"] < 5
+    assert episode["at_s"] < 5
 
 
 def test_recovery_fixes_failures_mid_attempt_without_resetting_the_scene(make_config):
@@ -76,10 +76,10 @@ def test_recovery_fixes_failures_mid_attempt_without_resetting_the_scene(make_co
     ), "--episodes", "3", "--seconds", "45", "--behaviors", "dropped,grasped_air,released_off_target")
     eps = info["episodes"]
     assert [e["success"] for e in eps] == [True, True, True]
-    assert [e["recoveries"] for e in eps] == [1, 2, 1]  # grasped air: back off, then stalled: home + ask again
+    assert [e["recovery"]["count"] for e in eps] == [1, 2, 1]  # grasped air: back off, then stalled: home + ask again
     assert all(e["attempt"] == 1 for e in eps)  # one attempt each: no scene reset, no retry
     events = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()]
-    actions = [e["data"].get("action") for e in events if e.get("plugin") == "recovery" and e["data"].get("action")]
+    actions = [e["data"].get("action") for e in events if e.get("plugin") == "recovery" and (e.get("data") or {}).get("action")]
     assert actions == ["home", "lift", "home", "home"]
 
 
@@ -89,7 +89,7 @@ def test_harvested_episodes_pass_dream_labs_dataset_checks(make_config, tmp_path
     code, info, folder = _run(make_config(plugins=["success-check", "failure-monitor", "harvester"]),
                               "--episodes", "2", "--behaviors", "success,dropped")
     assert len(harvest.episodes(folder)) == 1 and len(harvest.episodes(folder, "failed")) == 1
-    failed = json.loads((harvest.episodes(folder, "failed")[0] / "dreamkit.json").read_text())
+    failed = json.loads((harvest.episodes(folder, "failed")[0] / "dreamkit.json").read_text())  # harvester/failed/
     assert failed["success"] is False and failed["reason"] == "dropped"
     out = tmp_path / "export"
     assert len(harvest.export([folder], out)) == 1

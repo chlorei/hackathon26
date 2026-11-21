@@ -5,7 +5,9 @@
 """
 
 from .kit import Kit, wrap
-from .plugin import Context, EndEpisode, Plugin, StopEpisode
+from .plugin import Context, EndEpisode, Plugin, PluginContext, StopEpisode
+from .standard import Manifest, PluginStandardError
 
-__all__ = ["wrap", "Kit", "Plugin", "Context", "StopEpisode", "EndEpisode"]
-__version__ = "0.2.0"
+__all__ = ["wrap", "Kit", "Plugin", "Manifest", "Context", "PluginContext", "StopEpisode", "EndEpisode",
+           "PluginStandardError"]
+__version__ = "0.3.0"

@@ -81,7 +81,7 @@ class Emitter:
 
     def event(self, plugin: str, level: str, message: str, **data: Any) -> None:
         episode = data.pop("episode", None)
-        t = data.pop("t", None)
+        t = data.pop("t_s", data.pop("t", None))
         record = {
             "type": "event",
             "ts": round(time.time(), 3),
@@ -89,7 +89,7 @@ class Emitter:
             "level": level,
             "message": message,
             "episode": episode,
-            "t": t,
+            "t_s": t,
             "data": data,
         }
         self._write(record)

@@ -43,7 +43,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg, base = dk_config.load(args.config if Path(args.config).is_file() else None)
     results = {}
     with tempfile.TemporaryDirectory() as tmp:
-        for label, plugins in (("without recovery", BASE), ("with recovery", [*BASE, "recovery"])):
+        for label, plugins in (("without recovery", BASE),
+                               ("with recovery", [*BASE, {"recovery": {"retry_attempts": 0}}])):
             path = Path(tmp) / f"{label.replace(' ', '_')}.yaml"
             runs = Path(cfg.runs_dir) if Path(cfg.runs_dir).is_absolute() else base / cfg.runs_dir
             path.write_text(yaml.safe_dump({"sim_path": str(cfg.sim_dir(base)), "runs_dir": str(runs),
@@ -59,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             run = max(runs.iterdir(), key=lambda p: p.stat().st_mtime)
             eps = json.loads((run / "run.json").read_text())["episodes"]
             results[label] = (sum(1 for e in eps if e["success"]), len(eps), run.name,
-                              sum(e.get("recoveries", 0) for e in eps))
+                              sum((e.get("recovery") or {}).get("count", 0) for e in eps))
     print()
     for label, (ok, n, run, rec) in results.items():
         extra = f", {rec} recoveries" if rec else ""
