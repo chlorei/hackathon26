@@ -1,0 +1,16 @@
+[project]
+name = "dreamkit-gripper-check"
+version = "0.1.0"
+description = "gripper-check: a dreamkit plugin"
+requires-python = ">=3.11"
+dependencies = ["dreamkit"]
+
+[project.entry-points."dreamkit.plugins"]
+gripper-check = "gripper_check:GripperCheck"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["gripper_check.py"]

@@ -56,11 +56,13 @@ def _summary(episodes: list[dict[str, Any]]) -> dict[str, Any]:
 class Runner:
     def __init__(self, cfg: config_mod.Config, base: Path, *, mock: bool, json_events: bool, run_id: str | None = None,
                  console: bool = True):
+        if cfg.light:
+            cfg = cfg.model_copy(update={"render_every": 4, "stream_fps": min(cfg.stream_fps, 5)})
         self.cfg = cfg
         self.base = base
         self.mock = mock
         self.interrupt = _Interrupt()
-        self.emitter = Emitter(json_events=json_events, console=console)
+        self.emitter = Emitter(json_events=json_events, console=console, frame_fps=cfg.stream_fps)
         self.run_id = run_id or storage.new_run_id()
         runs_root = Path(cfg.runs_dir).expanduser()
         if not runs_root.is_absolute():
@@ -94,6 +96,8 @@ class Runner:
             "seed": cfg.seed,
             "started": time.time(),
             "plugins": [p.name for p in cfg.plugins if p.enabled],
+            "path": str(self.run_dir),
+            "light": cfg.light,
         }
         self._save(None, "starting")
 
@@ -180,6 +184,7 @@ class Runner:
         ctx.result = {}
         ctx.actions = ctx.command = ctx.timing = None
         ctx._retry = False
+        ctx._telemetry = {}
         ctx.frames, ctx.frames_new = dict(images), True
         ctx.state = env.state()
         ctx.store.setdefault("episode", {})
@@ -236,6 +241,7 @@ class Runner:
                     ctx.t = ctx.step * STEP_S
                     ctx.state = env.state()
                     manager.call("on_step", ctx)
+                    self.emitter.telemetry(ctx._telemetry, ctx.episode, ctx.t)
                     if ctx.frames_new:
                         self.emitter.frames(ctx.frames, ctx.episode, ctx.t)
                     if cfg.realtime:

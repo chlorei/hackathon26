@@ -38,12 +38,15 @@ def test_failure_monitor_names_the_scripted_failure(make_config, behavior, reaso
 def test_retry_then_success_with_video_and_report(make_config):
     code, info, folder = _run(make_config(
         mock={"behaviors": ["dropped", "success"], "latency_ms": 0},
-        plugins=["success-check", "failure-monitor", {"retry": {"attempts": 1}}, "recorder", "report"],
+        plugins=["success-check", "failure-monitor", {"retry": {"attempts": 1}}, "recorder", "recap", "report"],
     ))
     assert code == 0
     assert [(e["scene"], e["attempt"], e["success"]) for e in info["episodes"]] == [(0, 1, False), (0, 2, True)]
     assert (folder / "ep1" / "top.mp4").stat().st_size > 1000
     assert (folder / "report.html").is_file()
+    assert (folder / "ep1" / "recap.mp4").stat().st_size > 1000
+    assert "dropped" in info["episodes"][0]["recap"]["headline"]
+    assert "Retries saved 1 scene" in (folder / "recap.json").read_text()
     assert info["summary"]["scene_successes"] == 1
 
 

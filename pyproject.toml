@@ -33,6 +33,7 @@ retry = "dreamkit.plugins.retry:Retry"
 latency-monitor = "dreamkit.plugins.latency_monitor:LatencyMonitor"
 recorder = "dreamkit.plugins.recorder:Recorder"
 safety = "dreamkit.plugins.safety:Safety"
+recap = "dreamkit.plugins.recap:Recap"
 report = "dreamkit.plugins.report:Report"
 
 [build-system]

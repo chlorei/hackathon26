@@ -45,7 +45,9 @@ class Config(BaseModel):
     mock: Mock = Mock()
     realtime: bool = False  # sleep so a 50 ms step takes 50 ms of wall time (nicer to watch)
     render_every: int = Field(2, ge=1, le=4)  # render cameras every N steps (2 = 10 fps); the model gets 5 fps
-    registry_url: str = "https://raw.githubusercontent.com/dreamkit-hack/dreamkit/main/registry.yaml"
+    stream_fps: float = Field(8, ge=1, le=20)  # live frames to the panel per second
+    light: bool = False  # less CPU: cameras rendered at 5 fps, panel stream at 5 fps
+    registry_url: str = "https://raw.githubusercontent.com/chlorei/hackathon26/main/registry.yaml"
 
     @field_validator("plugins", mode="before")
     @classmethod

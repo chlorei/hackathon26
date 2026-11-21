@@ -1,41 +1,48 @@
-// Small shadcn-style building blocks.
 import clsx from 'clsx'
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from 'react'
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
 import {
-  Activity, Camera, CircleCheck, Film, FileText, Gauge, Plug, RefreshCcw, ShieldCheck, Sparkles, TriangleAlert,
+  Activity, Camera, CircleCheck, Clapperboard, Film, FileText, Gauge, Hand, Plug, RefreshCcw, ScanSearch, ShieldCheck,
 } from 'lucide-react'
 import type { Level } from './api'
+import type { LiveStore } from './useRunStream'
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={clsx('rounded-xl border border-zinc-800 bg-zinc-900/60', className)}>{children}</div>
+export function Panel({ className, children }: { className?: string; children: ReactNode }) {
+  return <section className={clsx('rounded-lg border border-line bg-panel', className)}>{children}</section>
 }
 
-export function CardHeader({ title, icon, right }: { title: ReactNode; icon?: ReactNode; right?: ReactNode }) {
+export function PanelTitle({ children, right, className }: { children: ReactNode; right?: ReactNode; className?: string }) {
   return (
-    <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-2.5">
-      <div className="flex items-center gap-2 text-sm font-medium text-zinc-300">
-        {icon}
-        {title}
-      </div>
+    <div className={clsx('flex items-center justify-between gap-3 px-4 pt-3 pb-2', className)}>
+      <h2 className="text-[13px] font-medium text-dim">{children}</h2>
       {right}
     </div>
   )
 }
 
-type Variant = 'primary' | 'danger' | 'ghost' | 'outline'
-export function Button({ variant = 'primary', className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
+type Variant = 'go' | 'stop' | 'quiet' | 'line'
+export function Button({ variant = 'line', className, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
   return (
     <button
       {...props}
       className={clsx(
-        'inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40',
-        variant === 'primary' && 'bg-zinc-100 text-zinc-900 hover:bg-white',
-        variant === 'danger' && 'bg-red-500/90 text-white hover:bg-red-500',
-        variant === 'ghost' && 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100',
-        variant === 'outline' && 'border border-zinc-700 text-zinc-200 hover:bg-zinc-800',
+        'inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+        variant === 'go' && 'bg-signal text-base hover:brightness-110',
+        variant === 'stop' && 'bg-bad text-white hover:brightness-110',
+        variant === 'quiet' && 'text-dim hover:bg-raised hover:text-ink',
+        variant === 'line' && 'border border-line text-ink hover:bg-raised',
         className,
       )}
     />
+  )
+}
+
+export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[12px] text-dim">{label}</span>
+      {children}
+      {hint && <span className="mt-1 block text-[11px] text-faint">{hint}</span>}
+    </label>
   )
 }
 
@@ -44,78 +51,188 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={clsx(
-        'w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-zinc-500',
+        'w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-faint focus:border-dim disabled:opacity-60',
         props.className,
       )}
     />
   )
 }
 
-export function Label({ children }: { children: ReactNode }) {
-  return <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">{children}</label>
-}
-
-export function Switch({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+export function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label?: ReactNode }) {
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={clsx(
-        'relative h-5 w-9 shrink-0 rounded-full transition disabled:opacity-40',
-        checked ? 'bg-emerald-500' : 'bg-zinc-700',
-      )}
-    >
-      <span className={clsx('absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all', checked ? 'left-[18px]' : 'left-0.5')} />
+    <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}
+      className="group inline-flex items-center gap-2 text-[13px] text-dim disabled:opacity-40">
+      <span className={clsx('relative h-[18px] w-8 shrink-0 rounded-full transition-colors', checked ? 'bg-signal' : 'bg-line')}>
+        <span className={clsx('absolute top-[2px] h-[14px] w-[14px] rounded-full bg-base transition-all', checked ? 'left-[16px]' : 'left-[2px]')} />
+      </span>
+      {label}
     </button>
   )
 }
 
-export function Badge({ tone = 'zinc', children }: { tone?: 'zinc' | 'green' | 'yellow' | 'red' | 'blue' | 'violet'; children: ReactNode }) {
-  const tones = {
-    zinc: 'bg-zinc-800 text-zinc-300',
-    green: 'bg-emerald-500/15 text-emerald-400',
-    yellow: 'bg-amber-500/15 text-amber-400',
-    red: 'bg-red-500/15 text-red-400',
-    blue: 'bg-sky-500/15 text-sky-400',
-    violet: 'bg-violet-500/15 text-violet-300',
-  }
-  return <span className={clsx('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium', tones[tone])}>{children}</span>
+export function Tag({ tone = 'plain', children, title }: { tone?: 'plain' | 'ok' | 'bad' | 'signal' | 'steel'; children: ReactNode; title?: string }) {
+  return (
+    <span title={title} className={clsx('inline-flex items-center gap-1 rounded px-1.5 py-px text-[12px]',
+      tone === 'plain' && 'bg-raised text-dim',
+      tone === 'ok' && 'bg-ok/12 text-ok',
+      tone === 'bad' && 'bg-bad/12 text-bad',
+      tone === 'signal' && 'bg-signal/15 text-signal',
+      tone === 'steel' && 'bg-steel/12 text-steel')}>{children}</span>
+  )
 }
 
-export const LEVEL_STYLE: Record<Level, { text: string; dot: string; border: string }> = {
-  info: { text: 'text-zinc-300', dot: 'bg-zinc-500', border: 'border-zinc-800' },
-  warn: { text: 'text-amber-300', dot: 'bg-amber-400', border: 'border-amber-500/30' },
-  error: { text: 'text-red-300', dot: 'bg-red-500', border: 'border-red-500/40' },
-  success: { text: 'text-emerald-300', dot: 'bg-emerald-400', border: 'border-emerald-500/40' },
-}
+export const LEVEL_TONE: Record<Level, string> = { info: 'text-dim', warn: 'text-signal', error: 'text-bad', success: 'text-ok' }
 
 const PLUGIN_ICONS: Record<string, typeof Plug> = {
-  'success-check': CircleCheck,
-  'failure-monitor': Sparkles,
-  'camera-check': Camera,
-  retry: RefreshCcw,
-  'latency-monitor': Gauge,
-  recorder: Film,
-  safety: ShieldCheck,
-  report: FileText,
-  dreamkit: Activity,
+  'success-check': CircleCheck, 'failure-monitor': ScanSearch, 'camera-check': Camera, retry: RefreshCcw,
+  'latency-monitor': Gauge, recorder: Film, safety: ShieldCheck, report: FileText, recap: Clapperboard,
+  'gripper-check': Hand, dreamkit: Activity,
 }
-
 export function PluginIcon({ name, className }: { name: string; className?: string }) {
-  const Icon = PLUGIN_ICONS[name] ?? (name.includes('check') ? TriangleAlert : Plug)
-  return <Icon className={clsx('h-4 w-4', className)} />
+  const Icon = PLUGIN_ICONS[name] ?? Plug
+  return <Icon className={clsx('h-[15px] w-[15px] shrink-0', className)} strokeWidth={1.75} />
 }
 
-export function ResultMark({ success }: { success: boolean | null | undefined }) {
-  if (success === true) return <span className="font-semibold text-emerald-400">✓</span>
-  if (success === false) return <span className="font-semibold text-red-400">✗</span>
-  return <span className="text-zinc-500">?</span>
+export function Outcome({ success }: { success: boolean | null | undefined }) {
+  if (success === true) return <span className="text-ok" aria-label="success">✓</span>
+  if (success === false) return <span className="text-bad" aria-label="failed">✗</span>
+  return <span className="text-faint" aria-label="unknown">–</span>
 }
 
-export function formatTime(ts?: number) {
+export function when(ts?: number) {
   if (!ts) return ''
   return new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The attempt strip: one attempt as a line of time. Marks are what the plugins saw; the red notch is the verdict.
+
+export interface Mark { t: number; label: string; tone: 'info' | 'warn' | 'bad' | 'ok' }
+
+export function AttemptStrip({ duration, marks, verdict, playhead, onSeek, live }: {
+  duration: number
+  marks: Mark[]
+  verdict?: { t: number; label: string } | null
+  playhead?: number
+  onSeek?: (t: number) => void
+  live?: boolean
+}) {
+  const [hover, setHover] = useState<number | null>(null)
+  const span = Math.max(duration, 1)
+  const pct = (t: number) => `${Math.min(100, Math.max(0, (100 * t) / span))}%`
+  const ticks = Array.from({ length: Math.floor(span / 5) + 1 }, (_, i) => i * 5)
+  return (
+    <div className="select-none">
+      <div
+        className={clsx('relative h-11 rounded-md border border-line bg-base', onSeek && 'cursor-pointer')}
+        onMouseMove={(e) => {
+          const r = e.currentTarget.getBoundingClientRect()
+          setHover(((e.clientX - r.left) / r.width) * span)
+        }}
+        onMouseLeave={() => setHover(null)}
+        onClick={(e) => {
+          if (!onSeek) return
+          const r = e.currentTarget.getBoundingClientRect()
+          onSeek(((e.clientX - r.left) / r.width) * span)
+        }}
+      >
+        {playhead != null && (
+          <div className={clsx('absolute inset-y-0 left-0 rounded-l-md', live ? 'bg-signal/10' : 'bg-raised/60')} style={{ width: pct(playhead) }} />
+        )}
+        {marks.map((m, i) => (
+          <div key={i} title={`${m.t.toFixed(1)} s  ${m.label}`} className="group absolute inset-y-0" style={{ left: pct(m.t) }}>
+            <div className={clsx('absolute top-2 bottom-2 w-[3px] -translate-x-1/2 rounded-full',
+              m.tone === 'bad' && 'bg-bad', m.tone === 'warn' && 'bg-signal', m.tone === 'ok' && 'bg-ok', m.tone === 'info' && 'bg-steel/80')} />
+          </div>
+        ))}
+        {verdict && (
+          <div className="absolute inset-y-0" style={{ left: pct(verdict.t) }}>
+            <div className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-bad" />
+            <div className="absolute -top-[7px] h-0 w-0 -translate-x-1/2 border-x-[6px] border-t-[7px] border-x-transparent border-t-bad" />
+          </div>
+        )}
+        {playhead != null && (
+          <div className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-signal" style={{ left: pct(playhead) }} />
+        )}
+        {hover != null && onSeek && (
+          <div className="pointer-events-none absolute inset-y-0 w-px bg-ink/40" style={{ left: pct(hover) }}>
+            <span className="absolute -top-6 -translate-x-1/2 rounded bg-raised px-1.5 py-0.5 text-[11px] text-ink">{hover.toFixed(1)} s</span>
+          </div>
+        )}
+      </div>
+      <div className="relative mt-1 h-4 text-[11px] text-faint">
+        {ticks.map((t) => (
+          <span key={t} className="absolute -translate-x-1/2" style={{ left: pct(t) }}>{t}s</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Sparklines on a canvas, redrawn from the live store (no React re-render per point).
+
+export function Sparkline({ live, field, label, unit, color, scale = 1, max, warnAbove }: {
+  live: LiveStore
+  field: string
+  label: string
+  unit: string
+  color: string
+  scale?: number
+  max?: number
+  warnAbove?: number
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null)
+  const value = useRef<HTMLSpanElement>(null)
+  useEffect(() => {
+    let last = 0
+    const draw = () => {
+      const now = performance.now()
+      if (now - last < 150) return // ~6 redraws a second is plenty for a trend
+      last = now
+      const c = canvas.current
+      if (!c) return
+      const ctx = c.getContext('2d')!
+      const w = (c.width = c.clientWidth * devicePixelRatio)
+      const h = (c.height = c.clientHeight * devicePixelRatio)
+      const pts = live.points.filter((p) => p.v[field] != null)
+      ctx.clearRect(0, 0, w, h)
+      if (pts.length < 2) return
+      const window = 20 // seconds shown
+      const t1 = pts[pts.length - 1].t
+      const t0 = Math.max(0, t1 - window)
+      const ys = pts.map((p) => p.v[field] * scale)
+      const top = max ?? Math.max(...ys, (warnAbove ?? 0) * 1.1, 1e-6)
+      const x = (t: number) => ((t - t0) / window) * w
+      const y = (v: number) => h - 4 * devicePixelRatio - (Math.max(0, v) / top) * (h - 8 * devicePixelRatio)
+      if (warnAbove != null && warnAbove < top) {
+        ctx.strokeStyle = 'rgba(240,180,60,.45)'
+        ctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio])
+        ctx.beginPath(); ctx.moveTo(0, y(warnAbove)); ctx.lineTo(w, y(warnAbove)); ctx.stroke()
+        ctx.setLineDash([])
+      }
+      ctx.strokeStyle = color
+      ctx.lineWidth = 1.75 * devicePixelRatio
+      ctx.beginPath()
+      pts.forEach((p, i) => {
+        if (p.t < t0) return
+        const px = x(p.t), py = y(p.v[field] * scale)
+        if (i === 0) ctx.moveTo(px, py)
+        else ctx.lineTo(px, py)
+      })
+      ctx.stroke()
+      if (value.current) value.current.textContent = (ys[ys.length - 1]).toFixed(unit === 'ms' ? 0 : 1)
+    }
+    draw()
+    return live.subscribe(draw)
+  }, [live, field, color, scale, max, warnAbove, unit])
+  return (
+    <div className="min-w-0">
+      <div className="flex items-baseline justify-between text-[12px]">
+        <span className="text-dim">{label}</span>
+        <span className="text-ink"><span ref={value}>–</span> <span className="text-faint">{unit}</span></span>
+      </div>
+      <canvas ref={canvas} className="mt-1 h-10 w-full" />
+    </div>
+  )
 }

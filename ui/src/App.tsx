@@ -35,25 +35,25 @@ export default function App() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="sticky top-0 z-10 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur">
-        <div className="mx-auto flex max-w-[1600px] items-center gap-6 px-5 py-3">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-violet-500 to-sky-500 text-sm font-bold text-white">dk</div>
-            <span className="font-semibold tracking-tight">dreamkit</span>
-            <span className="text-xs text-zinc-500">plugins for Dream-1</span>
-          </div>
-          <nav className="flex gap-1">
+      <header className="sticky top-0 z-20 border-b border-line bg-base/90 backdrop-blur">
+        <div className="mx-auto flex h-[52px] max-w-[1640px] items-center gap-8 px-5">
+          <a href="#/run" className="flex items-baseline gap-2">
+            <span className="text-[17px] font-semibold tracking-tight">dreamkit</span>
+            <span className="text-[12px] text-faint">for Dream-1</span>
+          </a>
+          <nav className="flex h-full gap-1" aria-label="Main">
             {tabs.map((t) => (
-              <button key={t.page} onClick={() => go(t.hash)}
-                className={clsx('flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition',
-                  route.page === t.page ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-100')}>
-                <t.icon className="h-4 w-4" /> {t.label}
+              <button key={t.page} onClick={() => go(t.hash)} aria-current={route.page === t.page ? 'page' : undefined}
+                className={clsx('relative flex items-center gap-1.5 px-3 text-[13px] transition-colors',
+                  route.page === t.page ? 'text-ink' : 'text-dim hover:text-ink')}>
+                <t.icon className="h-4 w-4" strokeWidth={1.75} /> {t.label}
+                {route.page === t.page && <span className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-signal" />}
               </button>
             ))}
           </nav>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-5 py-4">
+      <main className="mx-auto w-full max-w-[1640px] flex-1 px-5 py-4">
         {route.page === 'run' && <RunPage onOpenRun={openRun} />}
         {route.page === 'plugins' && <PluginsPage />}
         {route.page === 'history' && (

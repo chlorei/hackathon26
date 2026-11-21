@@ -129,6 +129,12 @@ class FailureMonitor(Plugin):
                 self.stall["until"] = round(ctx.t, 2)
             self.still_since = None
             self.stall_warned = False
+        values = {"grip_l": round(row["cmd_left"], 3), "grip_r": round(row["cmd_right"], 3)}
+        if self.obj:
+            values.update(d=round(row["d"], 4), z=round(float(row["obj"][2]) - self.z0, 4))
+            if "target" in row:
+                values["dt"] = round(float(np.linalg.norm(row["obj"][:2] - row["target"][:2])), 4)
+        ctx.telemetry(**values)
         if not self.obj:
             return
         # reach

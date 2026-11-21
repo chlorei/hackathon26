@@ -17,6 +17,7 @@ plugins:
   - failure-monitor
   - retry: {attempts: 2, on: [not_reached, grasped_air, dropped, missed_target]}
   - recorder: {fps: 10}
+  - recap
   - report
 # --mock: a scripted policy instead of Dream-1 (no credits). Behaviours cycle per attempt:
 # success, dropped, not_reached, grasped_air, missed_target, stalled, collision

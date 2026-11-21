@@ -15,7 +15,7 @@ class Recorder(Plugin):
 
     name = "recorder"
     description = "Records every camera to MP4 per attempt (video time = sim time)"
-    defaults = {"fps": 10, "cameras": ["top", "left", "right"], "crf": 26}
+    defaults = {"fps": 10, "cameras": ["top", "left", "right"], "crf": 28, "preset": "ultrafast"}
 
     def on_episode_start(self, ctx: Context) -> None:
         self.streams: dict[str, tuple] = {}
@@ -31,7 +31,7 @@ class Recorder(Plugin):
         stream.height, stream.width = rgb.shape[0] - rgb.shape[0] % 2, rgb.shape[1] - rgb.shape[1] % 2
         stream.pix_fmt = "yuv420p"
         stream.codec_context.time_base = Fraction(1, 1000)
-        stream.options = {"preset": "veryfast", "crf": str(self.params["crf"])}
+        stream.options = {"preset": str(self.params["preset"]), "crf": str(self.params["crf"])}
         self.streams[cam] = (container, stream)
         return container, stream
 

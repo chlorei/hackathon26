@@ -22,6 +22,7 @@ BUILTIN_MODULES = (
     "latency_monitor",
     "recorder",
     "safety",
+    "recap",
     "report",
 )
 LOCAL_DIRS = (Path("~/.dreamkit/plugins").expanduser(), Path("plugins"))

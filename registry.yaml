@@ -1,13 +1,7 @@
-# The dreamkit plugin catalogue. Add yours with a pull request: name, repo, description.
+# The dreamkit plugin catalogue. Add yours with a pull request: name, repo, description (and `pip` if the plugin
+# lives in a subfolder).
 - name: gripper-check
-  repo: https://github.com/dreamkit-hack/dreamkit-gripper-check
+  repo: https://github.com/chlorei/hackathon26/tree/main/plugins-external/gripper-check
+  pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/gripper-check
   description: Catches a gripper closed on nothing and a grip that loosens mid-carry
   tags: [gripper, grasp]
-- name: success-check
-  repo: builtin
-  description: Task success from physics (object in bowl / on plate)
-  tags: [builtin]
-- name: failure-monitor
-  repo: builtin
-  description: Why and when an attempt failed, with the video moment
-  tags: [builtin, failures]

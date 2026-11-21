@@ -8,3 +8,6 @@ ui/dist/
 .pytest_cache/
 mock_results/
 .DS_Store
+dreamkit.yaml
+.playwright-mcp/
+labels.csv

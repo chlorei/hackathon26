@@ -35,6 +35,7 @@ class LatencyMonitor(Plugin):
         if rtt is None:
             return
         rtt = float(rtt)
+        ctx.telemetry(rtt=rtt)
         self.rtts.append(rtt)
         ctx.store.setdefault("latency_all", []).append(rtt)
         for key in ("serve_infer_ms", "network_ms"):

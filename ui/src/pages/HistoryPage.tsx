@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import {
-  Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
-} from 'recharts'
-import { ArrowLeft, BarChart3, FileText, History, Video } from 'lucide-react'
+import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { ArrowLeft, Clapperboard, FileText, FolderOpen } from 'lucide-react'
 import { api, REASON_LABEL, type EpisodeResult, type RunInfo } from '../api'
-import { Badge, Button, Card, CardHeader, formatTime, ResultMark } from '../ui'
+import { AttemptStrip, Button, Outcome, Panel, PanelTitle, Tag, when, type Mark } from '../ui'
 
-const TOOLTIP = { contentStyle: { background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 12 } }
+const TIP = { contentStyle: { background: '#222a35', border: '1px solid #2c3540', borderRadius: 6, fontSize: 12, color: '#e6e9ed' } }
+const BAD_KINDS = new Set(['separated', 'fell', 'collision', 'stalled'])
 
 export default function HistoryPage({ runId, episode, onOpen, onBack }: {
   runId: string | null
@@ -16,297 +15,225 @@ export default function HistoryPage({ runId, episode, onOpen, onBack }: {
   onOpen: (id: string, episode?: number) => void
   onBack: () => void
 }) {
-  if (runId) return <RunDetail id={runId} initialEpisode={episode} onBack={onBack} />
-  return <RunList onOpen={onOpen} />
+  return runId ? <RunDetail id={runId} initial={episode} onBack={onBack} onOpen={onOpen} /> : <RunList onOpen={onOpen} />
 }
 
 function RunList({ onOpen }: { onOpen: (id: string) => void }) {
-  const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 5000 })
+  const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 6000 })
   const list = runs.data?.runs ?? []
   const all = list.flatMap((r) => r.episodes ?? [])
+  const reasons = useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const e of all) if (e.success === false) m[e.reason ?? 'unknown'] = (m[e.reason ?? 'unknown'] ?? 0) + 1
+    return Object.entries(m).map(([r, n]) => ({ reason: REASON_LABEL[r] ?? r, n })).sort((a, b) => b.n - a.n)
+  }, [all])
+  const ok = all.filter((e) => e.success).length
   return (
     <div className="space-y-4">
-      <Charts runs={list} episodes={all} />
-      <Card>
-        <CardHeader icon={<History className="h-4 w-4" />} title="Runs" right={<span className="text-xs text-zinc-500">{list.length}</span>} />
-        <table className="w-full text-sm">
-          <thead className="text-left text-xs uppercase tracking-wide text-zinc-500">
-            <tr>
-              <th className="px-4 py-2 font-medium">when</th>
-              <th className="px-4 py-2 font-medium">task</th>
-              <th className="px-4 py-2 font-medium">model</th>
-              <th className="px-4 py-2 font-medium">result</th>
-              <th className="px-4 py-2 font-medium">failures</th>
-              <th className="px-4 py-2 font-medium">status</th>
-            </tr>
+      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+        <Panel className="px-4 py-4">
+          <p className="text-[13px] text-dim">Across all runs</p>
+          <p className="mt-1 text-[40px] font-semibold leading-none">{all.length ? Math.round((100 * ok) / all.length) : 0}<span className="text-[20px] text-dim">%</span></p>
+          <p className="mt-2 text-[13px] text-dim">{ok} of {all.length} attempts worked in {list.length} runs</p>
+        </Panel>
+        <Panel>
+          <PanelTitle>Why attempts failed</PanelTitle>
+          <div className="h-36 px-2 pb-2">
+            {reasons.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={reasons} layout="vertical" margin={{ left: 8, right: 16 }}>
+                  <XAxis type="number" allowDecimals={false} tick={{ fill: '#5b6673', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="reason" tick={{ fill: '#8b96a3', fontSize: 12 }} width={110} axisLine={false} tickLine={false} />
+                  <Tooltip {...TIP} cursor={{ fill: '#222a35' }} />
+                  <Bar dataKey="n" name="attempts" fill="#ef6262" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={14} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : <p className="px-2 pt-6 text-[13px] text-faint">No failures recorded yet.</p>}
+          </div>
+        </Panel>
+      </div>
+      <Panel>
+        <PanelTitle>Runs</PanelTitle>
+        <table className="w-full text-[13px]">
+          <thead className="border-y border-line text-left text-[12px] text-faint">
+            <tr><th className="px-4 py-2 font-normal">Started</th><th className="px-4 py-2 font-normal">Task</th><th className="px-4 py-2 font-normal">Attempts</th><th className="px-4 py-2 font-normal">Failures</th><th className="px-4 py-2 font-normal">Policy</th></tr>
           </thead>
           <tbody>
             {list.map((r) => (
-              <tr key={r.id} onClick={() => onOpen(r.id)} className="cursor-pointer border-t border-zinc-800 hover:bg-zinc-800/40">
-                <td className="whitespace-nowrap px-4 py-2.5 text-zinc-400">{formatTime(r.started)}</td>
+              <tr key={r.id} tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)}
+                className="cursor-pointer border-b border-line/60 hover:bg-raised/50">
+                <td className="whitespace-nowrap px-4 py-2.5 text-dim">{when(r.started)}{r.status === 'running' && <Tag tone="signal">running</Tag>}</td>
                 <td className="px-4 py-2.5">{r.task}</td>
-                <td className="px-4 py-2.5">{r.mock ? <Badge tone="violet">mock</Badge> : <span className="text-zinc-400">{r.model}</span>}</td>
-                <td className="px-4 py-2.5">
-                  <div className="flex gap-0.5">
-                    {(r.episodes ?? []).map((e) => <ResultMark key={e.episode} success={e.success} />)}
-                  </div>
-                </td>
-                <td className="px-4 py-2.5">
-                  <div className="flex flex-wrap gap-1">
-                    {Object.entries(r.summary?.reasons ?? {}).map(([k, n]) => (
-                      <Badge key={k} tone="red">{REASON_LABEL[k] ?? k} ×{n}</Badge>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-2.5"><StatusBadge status={r.status} /></td>
+                <td className="px-4 py-2.5"><span className="tracking-[2px]">{(r.episodes ?? []).map((e) => <Outcome key={e.episode} success={e.success} />)}</span></td>
+                <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{Object.entries(r.summary?.reasons ?? {}).map(([k, n]) => <Tag key={k} tone="bad">{REASON_LABEL[k] ?? k}{n > 1 ? ` ×${n}` : ''}</Tag>)}</div></td>
+                <td className="px-4 py-2.5 text-dim">{r.mock ? 'mock' : r.model}</td>
               </tr>
             ))}
-            {!list.length && (
-              <tr><td colSpan={6} className="px-4 py-10 text-center text-zinc-600">No runs yet.</td></tr>
-            )}
+            {!list.length && <tr><td colSpan={5} className="px-4 py-10 text-center text-faint">No runs yet. Start one on the Run page.</td></tr>}
           </tbody>
         </table>
-      </Card>
+      </Panel>
     </div>
   )
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const tone = status === 'finished' ? 'green' : status === 'running' ? 'blue' : status === 'error' ? 'red' : 'zinc'
-  return <Badge tone={tone}>{status}</Badge>
-}
-
-function Charts({ runs, episodes }: { runs: RunInfo[]; episodes: EpisodeResult[] }) {
-  const byTask = useMemo(() => {
-    const m = new Map<string, { task: string; ok: number; fail: number }>()
-    for (const e of episodes) {
-      const row = m.get(e.task) ?? { task: e.task.replace(/^put /, ''), ok: 0, fail: 0 }
-      if (e.success) row.ok += 1
-      else row.fail += 1
-      m.set(e.task, row)
-    }
-    return [...m.values()]
-  }, [episodes])
-  const reasons = useMemo(() => {
-    const m: Record<string, number> = {}
-    for (const e of episodes) if (e.success === false) m[e.reason ?? 'unknown'] = (m[e.reason ?? 'unknown'] ?? 0) + 1
-    return Object.entries(m).map(([reason, n]) => ({ reason: REASON_LABEL[reason] ?? reason, n })).sort((a, b) => b.n - a.n)
-  }, [episodes])
-  const latency = useMemo(
-    () => runs.slice().reverse().flatMap((r) => (r.episodes ?? []).filter((e) => e.latency).map((e) => ({
-      name: `${r.id.slice(9, 13)}#${e.episode}`, mean: e.latency!.mean_ms, p95: e.latency!.p95_ms,
-    }))).slice(-40),
-    [runs],
-  )
-  const ok = episodes.filter((e) => e.success).length
-  return (
-    <div className="grid grid-cols-12 gap-4">
-      <Card className="col-span-12 p-4 md:col-span-3">
-        <div className="text-xs uppercase tracking-wide text-zinc-500">success rate</div>
-        <div className={clsx('mt-1 text-4xl font-semibold', ok / Math.max(1, episodes.length) >= 0.5 ? 'text-emerald-400' : 'text-red-400')}>
-          {episodes.length ? Math.round((100 * ok) / episodes.length) : 0}%
-        </div>
-        <div className="text-sm text-zinc-500">{ok}/{episodes.length} attempts · {runs.length} runs</div>
-      </Card>
-      <ChartCard title="success by task" className="md:col-span-3">
-        <BarChart data={byTask}>
-          <CartesianGrid stroke="#27272a" vertical={false} />
-          <XAxis dataKey="task" tick={{ fill: '#a1a1aa', fontSize: 11 }} />
-          <YAxis allowDecimals={false} tick={{ fill: '#71717a', fontSize: 11 }} width={24} />
-          <Tooltip {...TOOLTIP} cursor={{ fill: '#27272a' }} />
-          <Bar dataKey="ok" stackId="a" fill="#22c55e" name="success" />
-          <Bar dataKey="fail" stackId="a" fill="#ef4444" name="fail" radius={[4, 4, 0, 0]} />
-        </BarChart>
-      </ChartCard>
-      <ChartCard title="why attempts failed" className="md:col-span-3">
-        <BarChart data={reasons} layout="vertical" margin={{ left: 20 }}>
-          <XAxis type="number" allowDecimals={false} tick={{ fill: '#71717a', fontSize: 11 }} />
-          <YAxis type="category" dataKey="reason" tick={{ fill: '#d4d4d8', fontSize: 11 }} width={90} />
-          <Tooltip {...TOOLTIP} cursor={{ fill: '#27272a' }} />
-          <Bar dataKey="n" name="attempts" radius={[0, 4, 4, 0]}>
-            {reasons.map((r) => <Cell key={r.reason} fill="#ef4444" />)}
-          </Bar>
-        </BarChart>
-      </ChartCard>
-      <ChartCard title="model latency (ms)" className="md:col-span-3">
-        <LineChart data={latency}>
-          <CartesianGrid stroke="#27272a" vertical={false} />
-          <XAxis dataKey="name" hide />
-          <YAxis tick={{ fill: '#71717a', fontSize: 11 }} width={36} />
-          <Tooltip {...TOOLTIP} />
-          <ReferenceLine y={700} stroke="#f59e0b" strokeDasharray="4 4" />
-          <Line dataKey="mean" stroke="#60a5fa" dot={false} strokeWidth={2} />
-          <Line dataKey="p95" stroke="#a78bfa" dot={false} strokeWidth={1.5} />
-        </LineChart>
-      </ChartCard>
-    </div>
-  )
-}
-
-function ChartCard({ title, className, children }: { title: string; className?: string; children: React.ReactElement }) {
-  return (
-    <Card className={clsx('col-span-12 p-3', className)}>
-      <div className="mb-1 flex items-center gap-1.5 px-1 text-xs uppercase tracking-wide text-zinc-500">
-        <BarChart3 className="h-3.5 w-3.5" /> {title}
-      </div>
-      <div className="h-36">
-        <ResponsiveContainer width="100%" height="100%">{children}</ResponsiveContainer>
-      </div>
-    </Card>
-  )
-}
-
-function RunDetail({ id, initialEpisode, onBack }: { id: string; initialEpisode: number | null; onBack: () => void }) {
+function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: number | null; onBack: () => void; onOpen: (id: string, ep?: number) => void }) {
   const run = useQuery({ queryKey: ['run', id], queryFn: () => api.run(id), refetchInterval: (q) => (q.state.data?.live ? 3000 : false) })
   const episodes = run.data?.episodes ?? []
-  const [selected, setSelected] = useState<number | null>(initialEpisode)
-  useEffect(() => {
-    if (selected == null && episodes.length) {
-      setSelected((episodes.find((e) => e.success === false) ?? episodes[0]).episode)
-    }
-  }, [episodes, selected])
+  const selected = initial ?? (episodes.find((e) => e.success === false) ?? episodes[0])?.episode ?? null
   const ep = episodes.find((e) => e.episode === selected) ?? null
-  if (!run.data) return <div className="text-zinc-500">Loading…</div>
-  const r = run.data
+  if (!run.data) return <p className="text-dim">Loading the run…</p>
+  const r: RunInfo = run.data
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" onClick={onBack}><ArrowLeft className="h-4 w-4" /> Runs</Button>
-        <div>
-          <div className="text-lg font-semibold">{r.task}</div>
-          <div className="text-xs text-zinc-500">{r.id} · {r.mock ? 'mock' : r.model} · {formatTime(r.started)} · <StatusBadge status={r.status} /></div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button variant="quiet" onClick={onBack}><ArrowLeft className="h-4 w-4" /> All runs</Button>
+        <div className="min-w-0">
+          <h1 className="text-[18px] font-semibold">{r.task}</h1>
+          <p className="text-[12px] text-dim">{when(r.started)}, {r.mock ? 'mock policy' : r.model}, {r.summary.successes} of {r.summary.attempts} attempts worked</p>
         </div>
-        <div className="ml-auto flex items-center gap-3">
-          <div className="text-right">
-            <div className="text-2xl font-semibold">{r.summary.successes}/{r.summary.attempts}</div>
-            <div className="text-xs text-zinc-500">attempts · {r.summary.scene_successes}/{r.summary.scenes} scenes</div>
-          </div>
-          {r.report && (
-            <a href={`/media/${id}/report.html`} target="_blank" rel="noreferrer">
-              <Button variant="outline"><FileText className="h-4 w-4" /> Report</Button>
-            </a>
-          )}
+        <div className="ml-auto flex gap-2">
+          <Button onClick={() => api.reveal(id)} title={r.path}><FolderOpen className="h-4 w-4" /> Open folder</Button>
+          {r.report && <a href={`/media/${id}/report.html`} target="_blank" rel="noreferrer"><Button><FileText className="h-4 w-4" /> Report</Button></a>}
         </div>
       </div>
-      <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-12 lg:col-span-3">
-          <CardHeader title="Attempts" />
-          <div className="max-h-[70vh] space-y-1 overflow-y-auto p-2">
+      {r.recap?.text && (
+        <Panel className="flex gap-3 px-4 py-3">
+          <Clapperboard className="mt-0.5 h-4 w-4 shrink-0 text-signal" strokeWidth={1.75} />
+          <p className="text-[14px] leading-relaxed">{r.recap.text}</p>
+        </Panel>
+      )}
+      <div className="grid gap-4 lg:grid-cols-[250px_minmax(0,1fr)]">
+        <Panel className="self-start">
+          <PanelTitle>Attempts</PanelTitle>
+          <ul className="border-t border-line pb-1">
             {episodes.map((e) => (
-              <button key={e.episode} onClick={() => setSelected(e.episode)}
-                className={clsx('w-full rounded-lg px-3 py-2 text-left text-sm transition', selected === e.episode ? 'bg-zinc-800' : 'hover:bg-zinc-800/50')}>
-                <div className="flex items-center gap-2">
-                  <ResultMark success={e.success} />
-                  <span className="text-zinc-300">#{e.episode}</span>
-                  <span className="text-xs text-zinc-500">scene {e.scene + 1} · try {e.attempt}</span>
-                  <span className="ml-auto font-mono text-xs text-zinc-500">{e.duration_s.toFixed(1)}s</span>
-                </div>
-                {e.success === false && (
-                  <div className="mt-0.5 text-xs text-red-300">{e.message ?? REASON_LABEL[e.reason ?? 'unknown']}{e.at != null && ` · ${e.at.toFixed(1)} s`}</div>
-                )}
-              </button>
+              <li key={e.episode}>
+                <button onClick={() => onOpen(id, e.episode)} className={clsx('w-full px-4 py-2 text-left', selected === e.episode ? 'bg-raised' : 'hover:bg-raised/50')}>
+                  <div className="flex items-center gap-2 text-[13px]">
+                    <Outcome success={e.success} />
+                    <span>Scene {e.scene + 1}{e.attempt > 1 ? `, retry ${e.attempt - 1}` : ''}</span>
+                    <span className="ml-auto text-[12px] text-faint">{e.duration_s.toFixed(0)} s</span>
+                  </div>
+                  {e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason}{e.at != null && ` at ${e.at.toFixed(1)} s`}</p>}
+                </button>
+              </li>
             ))}
-          </div>
-        </Card>
-        <div className="col-span-12 space-y-4 lg:col-span-9">{ep && <EpisodeView runId={id} ep={ep} key={ep.episode} />}</div>
+          </ul>
+          {r.path && <p className="break-all border-t border-line px-4 py-2 font-mono text-[11px] text-faint">{r.path}</p>}
+        </Panel>
+        {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} /> : <p className="text-faint">This run has no finished attempts.</p>}
       </div>
     </div>
   )
 }
 
-function EpisodeView({ runId, ep }: { runId: string; ep: EpisodeResult }) {
-  const cams = ep.videos.map((v) => v.split('/').pop()!.replace('.mp4', ''))
+function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult; seconds: number }) {
+  const cams = ep.videos.map((v) => v.split('/').pop()!.replace('.mp4', '')).filter((c) => c !== 'recap')
   const [cam, setCam] = useState(cams.includes('top') ? 'top' : cams[0])
+  const [mode, setMode] = useState<'full' | 'recap'>('full')
   const video = useRef<HTMLVideoElement>(null)
   const [now, setNow] = useState(0)
-  const seekTo = ep.success === false && ep.at != null ? Math.max(0, ep.at - 1) : 0
+  const failed = ep.success === false && ep.at != null
+  const start = failed ? Math.max(0, ep.at! - 1) : 0
   const trace = useQuery({ queryKey: ['trace', runId, ep.episode], queryFn: () => api.trace(runId, ep.episode), retry: false })
 
+  const marks: Mark[] = (ep.timeline ?? []).map((m) => ({ t: m.t, label: m.message, tone: BAD_KINDS.has(m.kind) ? 'warn' : 'info' }))
+  if (ep.success) marks.push({ t: ep.duration_s, label: 'task done', tone: 'ok' })
   const seek = (t: number) => {
-    if (video.current) {
-      video.current.currentTime = t
-      void video.current.play().catch(() => undefined)
-    }
+    setMode('full')
+    const v = video.current
+    if (!v) return
+    v.currentTime = t
+    void v.play().catch(() => undefined)
   }
-  const onLoaded = () => {
-    if (video.current) {
-      video.current.currentTime = now || seekTo
-      if (seekTo || now) void video.current.play().catch(() => undefined)
-    }
-  }
+  const src = mode === 'recap' && ep.recap?.video ? `/media/${runId}/${ep.recap.video}` : cam ? `/media/${runId}/ep${ep.episode}/${cam}.mp4` : null
+
+  useEffect(() => {
+    // follow the video with a cheap timer instead of re-rendering on every timeupdate
+    const id = setInterval(() => video.current && setNow(video.current.currentTime), 200)
+    return () => clearInterval(id)
+  }, [])
 
   return (
-    <>
-      <Card>
-        <CardHeader
-          icon={<Video className="h-4 w-4" />}
-          title={ep.success === false ? (
-            <span className="text-red-300">{ep.message ?? ep.reason}{ep.at != null && <> at <span className="font-mono">{ep.at.toFixed(1)} s</span></>}</span>
-          ) : ep.success ? <span className="text-emerald-300">success</span> : 'attempt'}
-          right={
-            <div className="flex gap-1">
-              {cams.map((c) => (
-                <button key={c} onClick={() => { setNow(video.current?.currentTime ?? 0); setCam(c) }}
-                  className={clsx('rounded-md px-2 py-0.5 text-xs', cam === c ? 'bg-zinc-200 text-zinc-900' : 'bg-zinc-800 text-zinc-400')}>{c}</button>
-              ))}
-            </div>
-          }
-        />
-        {cam ? (
-          <div className="relative bg-black">
-            <video ref={video} src={`/media/${runId}/ep${ep.episode}/${cam}.mp4`} controls muted onLoadedMetadata={onLoaded}
-              onTimeUpdate={(e) => setNow(e.currentTarget.currentTime)} className="mx-auto max-h-[52vh] w-full" />
-            {ep.success === false && ep.at != null && (
-              <button onClick={() => seek(Math.max(0, ep.at! - 1))}
-                className="absolute right-3 top-3 rounded-md bg-red-500/90 px-2 py-1 text-xs font-medium text-white shadow">
-                ⏮ jump to {ep.at.toFixed(1)} s
-              </button>
+    <div className="min-w-0 space-y-4">
+      <Panel>
+        <div className="flex flex-wrap items-center gap-3 px-4 pt-3 pb-2">
+          <h2 className={clsx('text-[15px] font-medium', failed ? 'text-bad' : ep.success ? 'text-ok' : 'text-ink')}>
+            {failed ? `${ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']} at ${ep.at!.toFixed(1)} s` : ep.success ? `Done in ${ep.duration_s.toFixed(1)} s` : 'Attempt'}
+          </h2>
+          <div className="ml-auto flex items-center gap-1 rounded-md bg-base p-0.5 text-[12px]">
+            {ep.recap?.video && (
+              <button onClick={() => setMode(mode === 'recap' ? 'full' : 'recap')} className={clsx('rounded px-2 py-0.5', mode === 'recap' ? 'bg-signal text-base' : 'text-dim')}>Recap</button>
             )}
-          </div>
-        ) : (
-          <div className="p-8 text-center text-sm text-zinc-600">No video — enable the recorder plugin.</div>
-        )}
-        {ep.timeline && ep.timeline.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 border-t border-zinc-800 px-4 py-3">
-            {ep.timeline.map((m, i) => (
-              <button key={i} onClick={() => seek(m.t)}
-                className={clsx('rounded-md px-2 py-1 text-xs hover:brightness-125',
-                  ['separated', 'fell', 'collision', 'stalled'].includes(m.kind) ? 'bg-amber-500/15 text-amber-300' : 'bg-zinc-800 text-zinc-300')}>
-                <span className="font-mono text-zinc-500">{m.t.toFixed(1)}s</span> {m.message}
-              </button>
+            {cams.map((c) => (
+              <button key={c} onClick={() => { setMode('full'); setCam(c) }} className={clsx('rounded px-2 py-0.5', mode === 'full' && cam === c ? 'bg-raised text-ink' : 'text-dim')}>{c}</button>
             ))}
           </div>
+        </div>
+        {src ? (
+          <video key={src} ref={video} src={src} controls muted playsInline className="max-h-[54vh] w-full bg-black"
+            onLoadedMetadata={(e) => {
+              if (mode === 'full') e.currentTarget.currentTime = now || start
+              if (mode === 'recap' || start) void e.currentTarget.play().catch(() => undefined)
+            }} />
+        ) : (
+          <p className="px-4 py-10 text-center text-[13px] text-faint">No video for this attempt. Switch on the recorder plugin.</p>
         )}
-      </Card>
-      {trace.data && trace.data.rows.length > 0 && (
-        <Card className="p-3">
-          <div className="mb-1 px-1 text-xs uppercase tracking-wide text-zinc-500">
-            what failure-monitor measured · {trace.data.object} → {trace.data.target} · click to seek
+        {mode === 'full' && (
+          <div className="px-4 pt-4 pb-2">
+            <AttemptStrip duration={Math.max(ep.duration_s, Math.min(seconds, ep.duration_s + 2))} marks={marks}
+              verdict={failed ? { t: ep.at!, label: ep.reason ?? '' } : null} playhead={now} onSeek={seek} />
           </div>
-          <div className="h-48">
+        )}
+        {ep.recap?.headline && <p className="border-t border-line px-4 py-3 text-[13px] text-dim">{ep.recap.headline}</p>}
+      </Panel>
+
+      {(ep.timeline?.length ?? 0) > 0 && (
+        <Panel>
+          <PanelTitle>Moments</PanelTitle>
+          <ol className="border-t border-line">
+            {(ep.timeline ?? []).map((m, i) => (
+              <li key={i}>
+                <button onClick={() => seek(Math.max(0, m.t - 0.5))} className="flex w-full gap-3 px-4 py-1.5 text-left text-[13px] hover:bg-raised/50">
+                  <span className="w-12 shrink-0 text-right text-faint">{m.t.toFixed(1)} s</span>
+                  <span className={BAD_KINDS.has(m.kind) ? 'text-signal' : 'text-ink'}>{m.message}</span>
+                </button>
+              </li>
+            ))}
+            {failed && (
+              <li><button onClick={() => seek(start)} className="flex w-full gap-3 bg-bad/8 px-4 py-1.5 text-left text-[13px] hover:bg-bad/15">
+                <span className="w-12 shrink-0 text-right text-bad">{ep.at!.toFixed(1)} s</span>
+                <span className="font-medium text-bad">Verdict: {ep.message ?? ep.reason}</span>
+              </button></li>
+            )}
+          </ol>
+        </Panel>
+      )}
+
+      {trace.data && trace.data.rows.length > 1 && (
+        <Panel>
+          <PanelTitle>What failure-monitor measured</PanelTitle>
+          <div className="h-44 px-2 pb-3">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trace.data.rows} onClick={(s) => { const t = Number(s?.activeLabel); if (Number.isFinite(t)) seek(t) }}>
-                <CartesianGrid stroke="#27272a" vertical={false} />
-                <XAxis dataKey="t" type="number" domain={[0, 'dataMax']} tick={{ fill: '#71717a', fontSize: 11 }} unit="s" />
-                <YAxis tick={{ fill: '#71717a', fontSize: 11 }} width={40} />
-                <Tooltip {...TOOLTIP} labelFormatter={(t) => `${Number(t).toFixed(2)} s`} formatter={(v) => Number(v).toFixed(3)} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-                {ep.at != null && ep.success === false && <ReferenceLine x={ep.at} stroke="#ef4444" strokeWidth={2} label={{ value: ep.reason ?? '', fill: '#fca5a5', fontSize: 11, position: 'top' }} />}
-                <ReferenceLine x={Number(now.toFixed(2))} stroke="#e4e4e7" strokeDasharray="2 2" />
-                <Line dataKey="z" name="object height (m)" stroke="#22c55e" dot={false} strokeWidth={2} isAnimationActive={false} />
-                <Line dataKey="d" name="hand → object (m)" stroke="#60a5fa" dot={false} strokeWidth={1.5} isAnimationActive={false} />
-                <Line dataKey="dt" name="object → target (m)" stroke="#f59e0b" dot={false} strokeWidth={1.5} isAnimationActive={false} />
+                <CartesianGrid stroke="#2c3540" vertical={false} />
+                <XAxis dataKey="t" type="number" domain={[0, 'dataMax']} tick={{ fill: '#5b6673', fontSize: 11 }} unit=" s" axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 'auto']} tickFormatter={(v) => `${Math.round(v * 100)}`} unit=" cm" tick={{ fill: '#5b6673', fontSize: 11 }} width={48} axisLine={false} tickLine={false} />
+                <Tooltip {...TIP} labelFormatter={(t) => `${Number(t).toFixed(1)} s`} formatter={(v) => `${(100 * Number(v)).toFixed(1)} cm`} />
+                {failed && <ReferenceLine x={ep.at} stroke="#ef6262" strokeWidth={2} />}
+                <ReferenceLine x={Number(now.toFixed(1))} stroke="#f0b43c" />
+                <Line dataKey="d" name="hand to object" stroke="#7fb2e5" dot={false} strokeWidth={1.75} isAnimationActive={false} />
+                <Line dataKey="z" name="object lifted" stroke="#4ade80" dot={false} strokeWidth={1.75} isAnimationActive={false} />
+                <Line dataKey="dt" name="object to target" stroke="#c4a7f5" dot={false} strokeWidth={1.5} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
-        </Card>
+          <p className="px-4 pb-3 text-[12px] text-faint">
+            <span className="text-steel">Blue</span> hand to object, <span className="text-ok">green</span> how high the object is, <span className="text-[#c4a7f5]">violet</span> object to target. Click the chart to jump the video there.
+          </p>
+        </Panel>
       )}
-      {ep.candidates && ep.candidates.length > 1 && (
-        <Card className="px-4 py-3 text-sm text-zinc-400">
-          Also seen: {ep.candidates.filter((c) => c.reason !== ep.reason).map((c) => `${REASON_LABEL[c.reason] ?? c.reason} @${c.at.toFixed(1)}s`).join(' · ')}
-          <span className="text-zinc-600"> — the first in time is reported</span>
-        </Card>
-      )}
-    </>
+    </div>
   )
 }

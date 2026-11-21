@@ -89,6 +89,7 @@ class Context:
     emitter: Emitter | None = None
     _plugin: str = "dreamkit"
     _retry: bool = False
+    _telemetry: dict[str, float] = field(default_factory=dict)
 
     @property
     def episode_dir(self):
@@ -100,6 +101,10 @@ class Context:
             level = "info"
         if self.emitter is not None:
             self.emitter.event(self._plugin, level, message, episode=self.episode, t=round(self.t, 2), **data)
+
+    def telemetry(self, **values: float) -> None:
+        """Live numbers for the panel's graphs (sent a few times a second, not stored)."""
+        self._telemetry.update(values)
 
     def stop(self, reason: str) -> None:
         """Stops the attempt as a failure."""

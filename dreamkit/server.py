@@ -104,6 +104,7 @@ def create_app(config_path: str | Path) -> FastAPI:
     def get_config():
         cfg, base = load_cfg()
         data = cfg.model_dump()
+        data["runs_path"] = str(runs_root())
         data["config_path"] = str(config_path)
         data["sim_found"] = (cfg.sim_dir(base) / "yam_env.py").is_file()
         return data
@@ -179,6 +180,21 @@ def create_app(config_path: str | Path) -> FastAPI:
         if result.returncode != 0:
             raise HTTPException(500, (result.stdout + result.stderr)[-3000:])
         return {"ok": True, "output": (result.stdout + result.stderr)[-3000:]}
+
+    @app.delete("/api/plugins/{name}")
+    async def remove_plugin(name: str):
+        _, base = load_cfg()
+        found, _ = discover([base / "plugins"])
+        result = await asyncio.to_thread(registry.uninstall, name, found)
+        if result.returncode != 0:
+            raise HTTPException(400, (result.stdout + result.stderr)[-2000:])
+
+        def update(raw):
+            specs = config_mod.Config.model_validate({"plugins": raw.get("plugins") or []}).plugins
+            raw["plugins"] = config_mod.dump_plugins([s for s in specs if s.name != name])
+
+        save_raw(update)
+        return {"ok": True, "output": (result.stdout + result.stderr)[-2000:]}
 
     # -- runs --------------------------------------------------------------------------------------------------
     async def pump(run: LiveRun) -> None:
@@ -267,8 +283,31 @@ def create_app(config_path: str | Path) -> FastAPI:
             raise HTTPException(404, "no such run")
         info["events"] = [e for e in storage.read_events(folder) if e.get("type") != "frame"]
         info["report"] = (folder / "report.html").is_file()
+        info["path"] = str(folder)
+        try:
+            info["recap"] = json.loads((folder / "recap.json").read_text())
+        except (OSError, ValueError):
+            info["recap"] = None
         info["live"] = run_id in live and not live[run_id].done.is_set()
         return info
+
+    @app.post("/api/runs/{run_id}/reveal")
+    def reveal(run_id: str, episode: int | None = None):
+        """Opens the run's folder (or an attempt's) in Finder / the file manager of the machine running dreamkit."""
+        import platform
+        import subprocess
+
+        folder = runs_root() / run_id
+        if episode is not None:
+            folder = folder / f"ep{episode}"
+        if not folder.is_dir():
+            raise HTTPException(404, "no such folder")
+        opener = {"Darwin": ["open"], "Windows": ["explorer"]}.get(platform.system(), ["xdg-open"])
+        try:
+            subprocess.Popen([*opener, str(folder)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError as error:
+            raise HTTPException(500, f"cannot open a file manager here: {error}") from error
+        return {"path": str(folder)}
 
     @app.get("/api/runs/{run_id}/trace/{episode}")
     def get_trace(run_id: str, episode: int):

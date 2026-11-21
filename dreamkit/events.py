@@ -52,6 +52,7 @@ class Emitter:
             self._console = Console(highlight=False)
         self.frame_period = 1.0 / frame_fps if frame_fps > 0 else float("inf")
         self._last_frame = 0.0
+        self._last_telemetry = 0.0
 
     def open_file(self, path: Path) -> None:
         self._file = path.open("a", buffering=1)
@@ -115,6 +116,16 @@ class Emitter:
                  "jpeg": base64.b64encode(buffer.getvalue()).decode("ascii")},
                 keep=False,
             )
+
+    def telemetry(self, values: dict[str, float], episode: int, t: float, period: float = 0.2) -> None:
+        """Live graph points for the panel, throttled; only in --json-events mode, never written to disk."""
+        if not self.json_events or not values:
+            return
+        now = time.monotonic()
+        if now - self._last_telemetry < period:
+            return
+        self._last_telemetry = now
+        self._write({"type": "telemetry", "episode": episode, "t": round(t, 2), "v": values}, keep=False)
 
     def _print_other(self, type_: str, payload: dict[str, Any]) -> None:
         c = self._console

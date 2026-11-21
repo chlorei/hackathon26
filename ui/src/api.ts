@@ -31,6 +31,8 @@ export interface EpisodeResult {
   requests: number
   videos: string[]
   latency?: { mean_ms: number; p95_ms: number; max_ms: number; n: number }
+  recap?: { headline: string; moments: { t: number; text: string; tone: 'bad' | 'good' | 'info'; verdict?: boolean }[]; video: string | null }
+  gripper?: { t: number; side: string; kind: string }[]
 }
 
 export interface RunInfo {
@@ -49,6 +51,9 @@ export interface RunInfo {
   events?: StreamRecord[]
   report?: boolean
   live?: boolean
+  path?: string
+  light?: boolean
+  recap?: { text: string; attempts: string[] } | null
 }
 
 export interface PluginInfo {
@@ -77,12 +82,15 @@ export interface Config {
   seconds: number
   sim_found: boolean
   config_path: string
+  runs_path: string
+  light: boolean
   mock: { behaviors: string[]; latency_ms: number }
 }
 
 export type StreamRecord =
   | EventRecord
   | { type: 'frame'; cam: string; jpeg: string; episode: number; t: number }
+  | { type: 'telemetry'; episode: number; t: number; v: Record<string, number> }
   | { type: 'run_start'; run_id: string; task: string; model: string; mock: boolean; episodes: number; plugins: string[] }
   | { type: 'episode_start'; episode: number; scene: number; attempt: number; seed: number; behavior?: string }
   | { type: 'episode_end'; episode: number; scene: number; attempt: number; duration_s: number; result: EpisodeResult }
@@ -119,6 +127,9 @@ export const api = {
     call<{ object: string; target: string; rows: TraceRow[]; milestones: { t: number; kind: string; message: string }[] }>(
       `/api/runs/${id}/trace/${episode}`,
     ),
+  removePlugin: (name: string) => call<{ ok: boolean; output: string }>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  reveal: (id: string, episode?: number) =>
+    call<{ path: string }>(`/api/runs/${id}/reveal${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
   startRun: (body: { task: string; model: string; episodes: number; seconds: number; mock: boolean; overrides?: Record<string, unknown> }) =>
     call<{ id: string }>('/api/runs', { method: 'POST', body: JSON.stringify(body) }),
   stopRun: (id: string) => call<{ ok: boolean }>(`/api/runs/${id}/stop`, { method: 'POST' }),
