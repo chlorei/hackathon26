@@ -4,16 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DreamGym</title>
+<link rel="stylesheet" href="/theme.css">
 <style>
 :root{
-  --bg:#f6f5f2; --panel:#ffffff; --ink:#17181a; --muted:#6b6f76; --line:#e4e2dc; --soft:#efede8;
-  --ok:#1f8a5b; --ok-soft:#e3f2ea; --bad:#c8402f; --bad-soft:#fbe9e6; --run:#2f5bd3; --run-soft:#e6ecfb;
-  --warn:#b7791f; --radius:12px;
-  --c1:#c8402f; --c2:#d9822b; --c3:#8a5cc2; --c4:#2f8fb3; --c5:#7a7f87; --c6:#b34b8a; --c7:#5d8a2f; --c8:#3c4a5c;
+  /* dreamkit's theme (/theme.css): DreamGym's names mapped onto the panel's variables, no colours of its own */
+  --bg:var(--dk-bg); --panel:var(--dk-panel); --ink:var(--dk-ink); --muted:var(--dk-dim); --line:var(--dk-line);
+  --soft:var(--dk-raised); --ok:var(--dk-ok); --ok-soft:var(--dk-ok-soft); --bad:var(--dk-bad); --bad-soft:var(--dk-bad-soft);
+  --run:var(--dk-signal); --run-soft:var(--dk-signal-soft); --warn:var(--dk-warn); --radius:var(--dk-radius);
+  --c1:var(--dk-cat-1); --c2:var(--dk-cat-2); --c3:var(--dk-cat-3); --c4:var(--dk-cat-4); --c5:var(--dk-cat-5);
+  --c6:var(--dk-cat-6); --c7:var(--dk-cat-7); --c8:var(--dk-cat-8);
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
-body{font:14px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
+body{font:15px/1.5 var(--dk-font);background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
 button,input,select,textarea{font:inherit;color:inherit}
 header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
 .brand{font-weight:700;font-size:18px;letter-spacing:-.01em}
@@ -22,14 +25,14 @@ header{display:flex;align-items:center;gap:16px;padding:14px 22px;border-bottom:
 .spend{color:var(--muted);font-variant-numeric:tabular-nums}
 .btn{border:1px solid var(--line);background:var(--panel);border-radius:9px;padding:8px 14px;cursor:pointer;font-weight:600}
 .btn:hover{background:var(--soft)}
-.btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn.primary{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 .btn.primary:hover{opacity:.9}
-.btn.danger{color:var(--bad);border-color:#f0c9c2}
+.btn.danger{color:var(--bad);border-color:var(--bad-soft)}
 .btn:disabled{opacity:.5;cursor:default}
 main{flex:1;display:grid;grid-template-columns:330px 1fr;min-height:0}
 aside{border-right:1px solid var(--line);overflow:auto;padding:12px;background:var(--bg)}
 .run{display:block;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;cursor:pointer}
-.run:hover{border-color:#cfccc4}
+.run:hover{border-color:var(--dk-faint)}
 .run.sel{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
 .run .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .run .task{font-weight:650}
@@ -86,7 +89,7 @@ h1{font-size:24px;margin:0;letter-spacing:-.015em}
 .fails-row .lab{font-size:12.5px;color:var(--muted);margin-bottom:5px}
 .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
 .tab{border:1px solid var(--line);background:var(--panel);border-radius:20px;padding:4px 12px;cursor:pointer;font-size:13px}
-.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.tab.on{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
 .shot{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--panel)}
 .shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#111}
@@ -97,7 +100,7 @@ table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:ta
 th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--soft)}
 th{color:var(--muted);font-weight:600;font-size:12px}
 td.err{color:var(--bad);max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-pre.log{background:#16181c;color:#d6d8dc;border-radius:10px;padding:14px;max-height:320px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;margin:0}
+pre.log{background:var(--dk-log);color:var(--dk-line);border-radius:10px;padding:14px;max-height:320px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;margin:0}
 details summary{cursor:pointer;color:var(--muted);font-weight:600}
 dialog{border:0;border-radius:16px;padding:0;width:min(640px,94vw);box-shadow:0 20px 60px rgba(0,0,0,.25)}
 dialog::backdrop{background:rgba(20,20,20,.35)}
@@ -106,12 +109,12 @@ dialog::backdrop{background:rgba(20,20,20,.35)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
 label{display:block;font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:4px}
-input,select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff}
+input,select,textarea{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--panel)}
 textarea{resize:vertical;min-height:62px}
 .field{margin-bottom:12px}
 .seg{display:inline-flex;background:var(--soft);border-radius:9px;padding:3px;margin-bottom:14px}
 .seg button{border:0;background:transparent;padding:6px 14px;border-radius:7px;cursor:pointer;font-weight:600;color:var(--muted)}
-.seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .hint{color:var(--muted);font-size:12.5px}
 .actions{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;padding-top:14px;border-top:1px solid var(--soft)}
 .estimate{font-variant-numeric:tabular-nums}
@@ -149,21 +152,22 @@ code.model{background:var(--soft);padding:2px 6px;border-radius:5px;font-size:12
 .tele{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;align-items:start}
 .screen{background:#111;border-radius:12px;overflow:hidden;position:relative;aspect-ratio:640/540}
 .screen img{width:100%;height:100%;object-fit:contain;display:block}
-.screen .rec{position:absolute;top:12px;left:12px;background:var(--bad);color:#fff;font-weight:700;padding:3px 10px;border-radius:20px;font-size:13px}
-.screen .ok{position:absolute;top:12px;right:12px;background:var(--ok);color:#fff;font-weight:700;padding:3px 10px;border-radius:20px;font-size:13px}
+.screen .rec{position:absolute;top:12px;left:12px;background:var(--bad);color:var(--panel);font-weight:700;padding:3px 10px;border-radius:20px;font-size:13px}
+.screen .ok{position:absolute;top:12px;right:12px;background:var(--ok);color:var(--panel);font-weight:700;padding:3px 10px;border-radius:20px;font-size:13px}
 .screen .off{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#aaa;text-align:center;padding:30px}
 .keys{display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:13px}
-kbd{display:inline-block;min-width:24px;text-align:center;padding:1px 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:#fff;font:12px ui-monospace,Menlo,monospace}
+kbd{display:inline-block;min-width:24px;text-align:center;padding:1px 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:var(--panel);font:12px ui-monospace,Menlo,monospace}
 .bigbtns{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .bigbtns .btn{padding:10px}
-.btn.rec{background:var(--bad);color:#fff;border-color:var(--bad)}
-.btn.save{background:var(--ok);color:#fff;border-color:var(--ok)}
+.btn.rec{background:var(--bad);color:var(--panel);border-color:var(--bad)}
+.btn.save{background:var(--ok);color:var(--panel);border-color:var(--ok)}
+.field.check{display:flex;align-items:center;gap:8px;font-weight:500;margin:6px 0}
 .focusnote{font-size:12.5px;color:var(--muted);margin-top:8px}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand">DreamGym<span>reliability gym for Dream-1</span></div>
+  <div class="brand">Gym<span>Arena, Compare, datasets: every episode runs through dreamkit's plugins</span></div>
   <nav class="tabsnav" id="nav">
     <button data-view="runs" class="on">Runs</button>
     <button data-view="data">Data &amp; fine-tune</button>
@@ -171,7 +175,6 @@ kbd{display:inline-block;min-width:24px;text-align:center;padding:1px 6px;border
   </nav>
   <div class="spacer"></div>
   <div class="spend" id="spend"></div>
-  <a class="btn" href="http://127.0.0.1:8800" target="_blank" rel="noopener" title="dreamkit's panel (dreamkit ui)">dreamkit panel ↗</a>
   <button class="btn primary" id="newBtn">New run</button>
 </header>
 <main id="runsView">
@@ -269,6 +272,8 @@ kbd{display:inline-block;min-width:24px;text-align:center;padding:1px 6px;border
     <div class="field"><label>GIFs</label>
       <select id="fGifs"><option value="failures">Failures only</option><option value="all">All episodes</option><option value="none">None</option></select>
     </div>
+    <label class="field check" title="Each variant twice on the same seeds: dreamkit's recovery plugin off (the baseline), then on; McNemar says whether recovery helps or it is luck">
+      <input type="checkbox" id="fRecAB"> Recovery on vs off <span class="hint">(same seeds, McNemar)</span></label>
     <div class="error" id="formErr"></div>
     <div class="actions">
       <div class="estimate hint" id="estimate"></div>
@@ -282,15 +287,27 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pct = x => (x == null ? "–" : Math.round(x * 100) + "%");
 const money = x => (x == null ? "–" : "$" + (x < 1 ? x.toFixed(3) : x.toFixed(2)));
-const REASON_COLORS = {misplaced:"var(--c1)", untouched:"var(--c2)", still_held:"var(--c3)", not_settled:"var(--c4)",
-  fell_off_table:"var(--c6)", api_error:"var(--c8)", invalid_action:"var(--c5)", ik_error:"var(--c7)", error:"var(--c5)"};
+const REASON_COLORS = {released_off_target:"var(--c1)", not_reached:"var(--c2)", still_held:"var(--c3)", timeout:"var(--c4)",
+  dropped:"var(--c7)", grasped_air:"var(--c8)", fell_off_table:"var(--c6)", model_error:"var(--c8)", camera_failure:"var(--c5)",
+  error:"var(--c5)",
+  // runs from before the shared codes (dreamkit.reasons LEGACY)
+  misplaced:"var(--c1)", untouched:"var(--c2)", not_settled:"var(--c4)", api_error:"var(--c8)", invalid_action:"var(--c5)", ik_error:"var(--c5)"};
 const color = r => REASON_COLORS[r] || "var(--c5)";
 let runs = [], selected = null, detail = null, galleryFilter = "failures", mode = "arena", tasks = [];
 
+// Every DreamGym episode is a dreamkit attempt: open its run in the panel's History (the parent page).
+function historyLinks(d) {
+  const runs = (d.dreamkit_runs || []).filter(r => r.id);
+  if (!runs.length) return "";
+  const open = id => `href="/#/history/${encodeURIComponent(id)}" target="_top"`;
+  return `<div class="hint" style="margin-top:6px">In History: ${runs.map(r =>
+    `<a ${open(r.id)}>${esc(runs.length > 1 ? r.label : "the dreamkit run")}</a>`).join(" · ")}</div>`;
+}
+
 async function api(path, body) {
   const res = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  const data = res.status === 204 ? null : await res.json();
+  if (!res.ok) throw new Error((data && (data.detail || data.error)) || res.statusText);
   return data;
 }
 
@@ -373,7 +390,7 @@ function gallery(d) {
   const shown = shots.filter(e => galleryFilter === "all" || (galleryFilter === "failures" ? !e.success : e.success));
   const tabs = ["failures", "successes", "all"].map(t => `<button class="tab ${t === galleryFilter ? "on" : ""}" data-f="${t}">${t}</button>`).join("");
   const body = shown.length ? `<div class="gallery">${shown.map(e => `<div class="shot">
-      <img loading="lazy" src="/files/${encodeURI(e.dir)}/${encodeURI(e.gif)}" alt="seed ${e.seed}">
+      <img loading="lazy" src="api/files/${encodeURI(e.dir)}/${encodeURI(e.gif)}" alt="seed ${e.seed}">
       <div class="cap"><span>seed ${e.seed}${d.variants.length > 1 ? " · " + esc(e.label) : ""}</span>
       <span class="tag ${e.success ? "ok" : "bad"}">${esc(e.reason)}</span></div></div>`).join("")}</div>`
     : `<div class="hint">No GIFs here. Runs save failure GIFs by default; choose “All episodes” to keep successes too.</div>`;
@@ -429,7 +446,8 @@ function renderDetail() {
   $("#detail").innerHTML = `
     <div class="headrow"><div style="flex:1"><h1>${esc(d.task)}</h1>
       <div class="prompt">${esc(d.mode === "tune" ? `Prompt Tuner · ${d.summaries.length} prompts · ${(s0.policy || "").split(" | ")[0]}` : (one ? s0.prompt : d.summaries.map(s => s.policy).join("  ·  ")))}</div>
-      <div class="chips">${chips}</div></div>
+      <div class="chips">${chips}</div>
+      ${historyLinks(d)}</div>
       <div><span class="pill ${esc(d.status)}">${esc(d.status)}</span>
       ${running ? `<button class="btn danger" id="stopBtn" style="margin-left:8px">Stop</button>` : ""}</div></div>
     ${progress}
@@ -442,26 +460,26 @@ function renderDetail() {
     ${d.log ? `<div class="card"><details ${running ? "open" : ""}><summary>Run log</summary><pre class="log" id="log">${esc(d.log)}</pre></details></div>` : ""}`;
   document.querySelectorAll(".tab").forEach(t => t.onclick = () => { galleryFilter = t.dataset.f; renderDetail(); });
   const stop = $("#stopBtn");
-  if (stop) stop.onclick = async () => { stop.disabled = true; await api("/api/stop/" + encodeURIComponent(d.id), {}); refresh(); };
+  if (stop) stop.onclick = async () => { stop.disabled = true; await api("api/stop/" + encodeURIComponent(d.id), {}); refresh(); };
   const log = $("#log"); if (log) log.scrollTop = log.scrollHeight;
 }
 
 async function select(id) {
   selected = id;
   renderList();
-  detail = await api("/api/run/" + encodeURIComponent(id));
+  detail = await api("api/run/" + encodeURIComponent(id));
   renderDetail();
 }
 
 async function refresh() {
   try {
-    runs = await api("/api/runs");
+    runs = await api("api/runs");
     renderList();
     if (selected) {
       const r = runs.find(x => x.id === selected);
       if (r && (r.status === "running" || (detail && detail.status === "running"))) {
         const y = $("#detail").scrollTop;
-        detail = await api("/api/run/" + encodeURIComponent(selected));
+        detail = await api("api/run/" + encodeURIComponent(selected));
         renderDetail();
         $("#detail").scrollTop = y;
       }
@@ -474,16 +492,17 @@ function lines(id) { return $(id).value.split("\n").map(s => s.trim()).filter(Bo
 function estimate() {
   const pols = lines("#fPolicies"), prompts = lines("#fPrompts");
   const n = +$("#fN").value || 0, maxs = +$("#fMax").value || 60;
-  const variants = mode === "arena" ? 1 : (mode === "tune" ? Math.max(1, prompts.length) : pols.length * Math.max(1, prompts.length));
+  const ab = $("#fRecAB").checked && mode !== "tune" ? 2 : 1;
+  const variants = ab * (mode === "arena" ? 1 : (mode === "tune" ? Math.max(1, prompts.length) : pols.length * Math.max(1, prompts.length)));
   const perEp = maxs / 2.4 / 2250; // calls per episode / calls per hour
   const used = mode === "compare" ? pols : [pols[0] || "dream-1"];
   const usd = used.reduce((a, p) =>
-    a + (p.startsWith("scripted") ? 0 : (p.includes("flash") ? 2 : 3)) * perEp * n * (mode === "arena" ? 1 : Math.max(1, prompts.length)), 0);
+    a + ab * (p.startsWith("scripted") ? 0 : (p.includes("flash") ? 2 : 3)) * perEp * n * (mode === "arena" ? 1 : Math.max(1, prompts.length)), 0);
   const mins = Math.round(variants * n * (maxs / 60) * 1.5);
   $("#estimate").textContent = `${variants * n} episodes · at most ~${money(usd)} · roughly ${mins} min`;
 }
 async function fillPrompts() {
-  const list = await api("/api/prompts?task=" + encodeURIComponent($("#fTask").value));
+  const list = await api("api/prompts?task=" + encodeURIComponent($("#fTask").value));
   $("#fPrompts").value = list.join("\n");
   estimate();
 }
@@ -497,17 +516,17 @@ function setMode(m) {
 }
 $("#fTask").addEventListener("change", () => { if (mode === "tune") fillPrompts(); });
 document.querySelectorAll("#modeSeg button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
-["#fPolicies", "#fPrompts", "#fN", "#fMax"].forEach(id => $(id).addEventListener("input", estimate));
+["#fPolicies", "#fPrompts", "#fN", "#fMax", "#fRecAB"].forEach(id => $(id).addEventListener("input", estimate));
 $("#newBtn").onclick = () => { $("#formErr").textContent = ""; estimate(); $("#dlg").showModal(); };
 $("#cancelBtn").onclick = () => $("#dlg").close();
 $("#form").onsubmit = async ev => {
   ev.preventDefault();
   const body = {mode, task: $("#fTask").value, policies: lines("#fPolicies"), prompts: lines("#fPrompts"),
     n: +$("#fN").value, seed: $("#fSeed").value, jitter: $("#fJitter").value, lighting: $("#fLight").value,
-    max_seconds: $("#fMax").value, gifs: $("#fGifs").value};
+    max_seconds: $("#fMax").value, gifs: $("#fGifs").value, recovery_ab: $("#fRecAB").checked};
   try {
     $("#goBtn").disabled = true;
-    const {id} = await api("/api/launch", body);
+    const {id} = await api("api/launch", body);
     $("#dlg").close();
     await refresh();
     await select(id);
@@ -596,14 +615,14 @@ async function dataAction(act, ds, model) {
   } catch (e) { $("#dataErr").textContent = e.message; }
 }
 async function refreshData() {
-  try { datasets = await api("/api/datasets"); if (view === "data") renderData(); } catch (e) { console.warn(e); }
+  try { datasets = await api("api/datasets"); if (view === "data") renderData(); } catch (e) { console.warn(e); }
 }
 async function startRecord(kind) {
   $("#dataErr").textContent = "";
   const p = kind === "scripted" ? "s" : "h";
   const body = {kind, task: $(`#${p}Task`).value, n: +$(`#${p}N`).value, name: $(`#${p}Name`).value.trim()};
   if (kind === "harvest") body.policy = $("#hPolicy").value.trim();
-  try { await api("/api/record", body); refreshData(); } catch (e) { $("#dataErr").textContent = e.message; }
+  try { await api("api/record", body); refreshData(); } catch (e) { $("#dataErr").textContent = e.message; }
 }
 $("#sGo").onclick = () => startRecord("scripted");
 $("#hGo").onclick = () => startRecord("harvest");
@@ -615,7 +634,7 @@ $("#hN").addEventListener("input", hEst);
 let tState = {status: "off"}, keysDown = new Set(), lastKeys = "", framePending = false;
 const TELE_KEYS = new Set(["KeyW","KeyA","KeyS","KeyD","KeyR","KeyF","KeyQ","KeyE","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","ShiftLeft","ShiftRight","PageUp","PageDown"]);
 const teleActive = () => view === "teleop" && tState.status === "running" && !["INPUT","SELECT","TEXTAREA"].includes(document.activeElement?.tagName);
-const tcmd = c => api("/api/teleop/cmd", {cmd: c}).catch(e => $("#tMsg").textContent = e.message);
+const tcmd = c => api("api/teleop/cmd", {cmd: c}).catch(e => $("#tMsg").textContent = e.message);
 window.addEventListener("keydown", e => {
   if (!teleActive()) return;
   if (TELE_KEYS.has(e.code)) { keysDown.add(e.code); e.preventDefault(); }
@@ -628,19 +647,19 @@ window.addEventListener("blur", () => keysDown.clear());
 setInterval(() => {
   if (tState.status !== "running") return;
   const k = [...keysDown].sort().join(",");
-  if (k !== lastKeys || k) { lastKeys = k; api("/api/teleop/keys", {keys: [...keysDown]}).catch(() => {}); }
+  if (k !== lastKeys || k) { lastKeys = k; api("api/teleop/keys", {keys: [...keysDown]}).catch(() => {}); }
 }, 100);
 function pullFrame() {
   if (view !== "teleop" || tState.status !== "running") { framePending = false; return; }
   framePending = true;
   const img = $("#frame");
   img.onload = img.onerror = () => setTimeout(pullFrame, 70);
-  img.src = "/api/teleop/frame?t=" + Date.now();
+  img.src = "api/teleop/frame?t=" + Date.now();
 }
 function renderTeleop() {
   const s = tState, on = s.status === "running";
   $("#screenOff").classList.toggle("hidden", on);
-  $("#screenOff").innerHTML = s.status === "error" ? `<div><b style="color:#ff8a7a">Teleop stopped</b><br>${esc(s.error)}</div>` :
+  $("#screenOff").innerHTML = s.status === "error" ? `<div><b style="color:var(--dk-bad-soft)">Teleop stopped</b><br>${esc(s.error)}</div>` :
     (s.status === "starting" ? "Loading the simulator…" : "Pick a task and press Start session.<br>The first start loads the simulator (a few seconds).");
   let badges = $("#screen").querySelectorAll(".rec,.ok"); badges.forEach(b => b.remove());
   if (on && s.recording) $("#screen").insertAdjacentHTML("beforeend", `<div class="rec">● REC ${s.record_seconds}s · ${s.frames} frames</div>`);
@@ -653,14 +672,14 @@ function renderTeleop() {
   if (on && !framePending) pullFrame();
 }
 async function pollTeleop() {
-  try { tState = await api("/api/teleop/state"); } catch (e) { tState = {status: "off"}; }
+  try { tState = await api("api/teleop/state"); } catch (e) { tState = {status: "off"}; }
   if (view === "teleop") renderTeleop();
 }
 $("#tStart").onclick = async () => {
-  try { await api("/api/teleop/start", {task: $("#tTask").value, dataset: $("#tName").value.trim()}); tState = {status: "starting"}; renderTeleop(); }
+  try { await api("api/teleop/start", {task: $("#tTask").value, dataset: $("#tName").value.trim()}); tState = {status: "starting"}; renderTeleop(); }
   catch (e) { $("#tMsg").textContent = e.message; }
 };
-$("#tStop").onclick = () => api("/api/teleop/stop", {}).then(pollTeleop);
+$("#tStop").onclick = () => api("api/teleop/stop", {}).then(pollTeleop);
 $("#tRec").onclick = () => tcmd("record");
 $("#tSave").onclick = () => tcmd("save");
 $("#tDiscard").onclick = () => tcmd("discard");
@@ -670,7 +689,7 @@ $("#tGrip").onclick = () => tcmd("grip");
 $("#screen").onclick = () => document.activeElement?.blur();
 
 (async () => {
-  tasks = await api("/api/tasks");
+  tasks = await api("api/tasks");
   const opts = tasks.map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.prompt)}</option>`).join("");
   document.querySelectorAll(".taskSel").forEach(sel => sel.innerHTML = opts);
   hEst(); renderTeleop();

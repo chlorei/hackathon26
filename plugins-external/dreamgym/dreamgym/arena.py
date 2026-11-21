@@ -50,8 +50,13 @@ def run_arena(
     gifs: str = "failures",  # "none" | "failures" | "all"
     resume: bool = True,
     env=None,
+    recovery: bool | None = None,
     log: Callable[[str], None] = print,
 ) -> dict:
+    """N seeded episodes, all in one dreamkit run (History: source gym). `recovery` forces dreamkit's recovery
+    plugin on or off for this run (None: as dreamkit.yaml has it)."""
+    from .kit import PolicyClient, open_kit
+
     out_dir = Path(out_dir)
     (out_dir / "gifs").mkdir(parents=True, exist_ok=True)
     done = {r["seed"] for r in load_results(out_dir)} if resume else set()
@@ -60,12 +65,16 @@ def run_arena(
     log_path = out_dir / "episodes.jsonl"
     if not resume and log_path.exists():
         log_path.unlink()
+    kit = open_kit(PolicyClient(policy), model=policy.name, recovery=recovery,
+                   info={"mode": "arena", "task": task.name, "policy": policy.name, "prompt": prompt or task.prompt,
+                         "seeds": [seed0, seed0 + n - 1], "recovery": recovery, "folder": out_dir.name})
     try:
         for i, seed in enumerate(range(seed0, seed0 + n)):
             if seed in done:
                 continue
             result, frames = run_episode(
-                env, task, policy, seed=seed, prompt=prompt, max_seconds=max_seconds, keep_frames=gifs != "none"
+                env, task, policy, seed=seed, prompt=prompt, max_seconds=max_seconds, keep_frames=gifs != "none",
+                kit=kit,
             )
             if gifs == "all" or (gifs == "failures" and not result.success):
                 gif = out_dir / "gifs" / f"seed{seed:04d}_{result.reason}.gif"
@@ -75,11 +84,13 @@ def run_arena(
                 f.write(json.dumps(result.to_dict()) + "\n")
             mark = "OK  " if result.success else "FAIL"
             log(
-                f"[{i + 1}/{n}] seed {seed}: {mark} {result.reason:<15} "
+                f"[{i + 1}/{n}] seed {seed}: {mark} {result.reason:<20} "
                 f"{result.sim_seconds:5.1f}s sim, {result.calls} calls, ${result.cost_usd:.3f}"
+                + (f", {result.recoveries} recover{'y' if result.recoveries == 1 else 'ies'}" if result.recoveries else "")
                 + (f"  ({result.error})" if result.error else "")
             )
     finally:
+        kit.close()
         policy.close()
         if own_env:
             env.close()
@@ -90,6 +101,8 @@ def run_arena(
         "prompt": prompt or task.prompt,
         "seeds": [seed0, seed0 + n - 1],
         "max_seconds": max_seconds,
+        "recovery": recovery,
+        "dreamkit_run": kit.run_id,
         **summarize(rows),
     }
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2))

@@ -32,6 +32,14 @@ class FakeEnv:
 
 
 @pytest.fixture(autouse=True)
+def dreamkit_run(tmp_path, monkeypatch):
+    """Episodes go through dreamkit.wrap: a dreamkit.yaml of our own, its runs in tmp (no plugins needed here)."""
+    cfg = tmp_path / "dreamkit.yaml"
+    cfg.write_text(f"runs_dir: {tmp_path / 'dreamkit-runs'}\nplugins: []\n")
+    monkeypatch.setenv("DREAMKIT_CONFIG", str(cfg))
+
+
+@pytest.fixture(autouse=True)
 def fake_sim(monkeypatch):
     yam_env = types.SimpleNamespace(HOME=np.r_[np.zeros(6), 1.0], YamEnv=FakeEnv)
 
@@ -42,8 +50,11 @@ def fake_sim(monkeypatch):
                 windows[name].append("jpeg")
         return images
 
+    def validate_chunk(env, actions, limit=48, *, verbose=True, adjustments=None):
+        return (np.asarray(actions["q_l_chunk"], float)[:limit], np.asarray(actions["q_r_chunk"], float)[:limit])
+
     dc = types.SimpleNamespace(FRAMES=9, FRAME_EVERY_STEPS=4, VIDEO_ROLES={"top": 0, "left": 0, "right": 0},
-                               capture=capture)
+                               capture=capture, validate_chunk=validate_chunk)
     monkeypatch.setattr(sim, "_MODULES", {"yam_env": yam_env, "dream_control": dc, "mock_pickups": None})
     monkeypatch.setattr("dreamgym.runner.scene.FREE_JOINTS", {})
 
@@ -58,7 +69,7 @@ class FakeTask:
         return self.ok_after is not None and env.steps > 56 + self.ok_after
 
     def failure_reason(self, env, start):
-        return "misplaced"
+        return "released_off_target"
 
 
 class FakePolicy:
@@ -91,7 +102,7 @@ def test_episode_success_and_failure():
             assert result.seconds_to_success is not None and result.sim_seconds < 10
         else:
             assert result.sim_seconds == pytest.approx(10, abs=0.05)
-    assert reasons == {"success", "misplaced"}
+    assert reasons == {"success", "released_off_target"}
 
 
 def test_arena_resume_and_report(tmp_path):

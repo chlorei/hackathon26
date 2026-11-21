@@ -9,7 +9,10 @@
   dreamgym record  --task banana_plate --n 20 --policy dream-1 --out data/harvest_banana   # Harvester
   dreamgym finetune data/banana --validate-only    |  dreamgym finetune data/banana  |  --status
   dreamgym report  runs/<folder>
-  dreamgym serve                       # web dashboard on http://127.0.0.1:8765
+  dreamgym serve                       # dreamkit's panel, Gym tab (= dreamkit ui)
+
+Also as `dreamkit gym <command>` once installed as a dreamkit app plugin (dreamkit install plugins-external/dreamgym).
+Every episode runs through dreamkit.wrap: the loop plugins of dreamkit.yaml run in it, History shows it (badge Gym).
 """
 
 from __future__ import annotations
@@ -64,6 +67,9 @@ def cmd_arena(args) -> int:
     from .policies import make_policy
     from .report import build
 
+    if args.recovery_ab:  # the same seeds with dreamkit's recovery off, then on; McNemar on the pairs
+        args.policy, args.prompt = [args.policy], [args.prompt] if args.prompt else None
+        return cmd_compare(args)
     task = _task(args)
     policy = make_policy(args.policy, action_limit=args.action_limit)
     out = args.out or RUNS / f"{time.strftime('%m%d-%H%M')}_{task.name}_{slug(args.policy)}"
@@ -81,8 +87,12 @@ def cmd_compare(args) -> int:
     task = _task(args)
     prompts = args.prompt or [None]
     variants = [Variant(p, q) for p in args.policy for q in prompts]
+    if getattr(args, "recovery_ab", False):
+        from .compare import with_recovery_ab
+
+        variants = with_recovery_ab(variants)
     if len(variants) < 2:
-        print("compare needs two variants: two --policy, or two --prompt", file=sys.stderr)
+        print("compare needs two variants: two --policy, two --prompt, or --recovery-ab", file=sys.stderr)
         return 2
     out = args.out or RUNS / f"{time.strftime('%m%d-%H%M')}_compare_{task.name}"
     report = run_compare(task, variants, n=args.n, out_dir=out, seed0=args.seed, max_seconds=args.max_seconds,
@@ -102,13 +112,17 @@ def cmd_record(args) -> int:
     out = args.out or DATA / task.name
     writer = LeRobotWriter(out, fps=args.fps)
     policy = make_policy(args.policy)
+    from .kit import PolicyClient, open_kit
+
     env = sim.make_env()
+    kit = open_kit(PolicyClient(policy), model=policy.name,
+                   info={"mode": "record", "task": task.name, "policy": policy.name, "dataset": str(out)})
     kept, tried, seed = 0, 0, args.seed
     try:
         while kept < args.n and tried < args.max_attempts:
             writer.begin(task.prompt)
             result, _ = run_episode(env, task, policy, seed=seed, max_seconds=args.max_seconds,
-                                    step_hook=writer.step_hook)
+                                    step_hook=writer.step_hook, kit=kit)
             ok = writer.end(keep=result.success)
             kept += ok
             tried += 1
@@ -116,6 +130,7 @@ def cmd_record(args) -> int:
             seed += 1
     finally:
         writer.end(keep=False)
+        kit.close()
         env.close()
     print(f"\n{kept} episodes, {writer.total_frames} frames at {args.fps} fps in {out}")
     print(f"next: dreamgym finetune {out} --validate-only")
@@ -136,10 +151,16 @@ def cmd_finetune(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    from .web.server import serve
+    """DreamGym lives in dreamkit's panel now (the Gym tab): start the panel and open the tab."""
+    import subprocess
+    import threading
+    import webbrowser
 
-    serve(args.runs, port=args.port, open_browser=not args.no_browser)
-    return 0
+    url = f"http://127.0.0.1:{args.port}/#/app/dreamgym"
+    print(f"DreamGym is the Gym tab of dreamkit's panel: {url}")
+    if not args.no_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+    return subprocess.call([sys.executable, "-m", "dreamkit.cli", "ui", "--port", str(args.port)])
 
 
 def cmd_report(args) -> int:
@@ -161,12 +182,15 @@ def main(argv=None) -> int:
     p.add_argument("--policy", default="dream-1", help="dream-1 | dream:<model id> | scripted")
     p.add_argument("--prompt", default=None, help="override the task's prompt")
     p.add_argument("--fresh", action="store_true", help="ignore episodes already in --out")
+    p.add_argument("--recovery-ab", action="store_true",
+                   help="the same seeds with dreamkit's recovery off and on, McNemar on the pairs")
     p.set_defaults(fn=cmd_arena)
 
     p = sub.add_parser("compare", help="variants on the same seeds + paired significance test")
     _common(p)
     p.add_argument("--policy", action="append", required=True, help="repeatable")
     p.add_argument("--prompt", action="append", default=None, help="repeatable; crossed with every --policy")
+    p.add_argument("--recovery-ab", action="store_true", help="every variant with dreamkit's recovery off and on")
     p.set_defaults(fn=cmd_compare)
 
     p = sub.add_parser("record", help="scripted demos -> LeRobot dataset for fine-tuning")
@@ -185,9 +209,8 @@ def main(argv=None) -> int:
     p.add_argument("--steps", type=int, default=None)
     p.set_defaults(fn=cmd_finetune)
 
-    p = sub.add_parser("serve", help="web dashboard: every run, live progress, start runs from the browser")
-    p.add_argument("--runs", type=Path, default=RUNS)
-    p.add_argument("--port", type=int, default=8765)
+    p = sub.add_parser("serve", help="dreamkit's panel with the Gym tab open (dreamkit ui)")
+    p.add_argument("--port", type=int, default=8800)
     p.add_argument("--no-browser", action="store_true")
     p.set_defaults(fn=cmd_serve)
 

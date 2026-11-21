@@ -1,10 +1,9 @@
-"""DreamGym dashboard: a local web app over the runs/ folder. Standard library only.
-
-  dreamgym serve                 # http://127.0.0.1:8765, opens the browser
+"""DreamGym's API inside dreamkit's panel (an app plugin, PLUGIN_STANDARD.md §13): /apps/dreamgym/api/...
 
 It lists every Arena and Compare run, computes live statistics from episodes.jsonl while a run is going, shows
-failure GIFs, and starts new runs as `dreamgym` subprocesses (so a crash in the sim never takes the page down).
-Bound to 127.0.0.1 only: nobody else on the hackathon Wi-Fi can start runs on your credits.
+failure GIFs, and starts new runs as `dreamgym` subprocesses (so a crash in the sim never takes the panel down).
+The runs go through dreamkit.wrap: DREAMKIT_CONFIG points them at the panel's dreamkit.yaml, so the loop plugins run
+in them and they appear in History. The panel binds 127.0.0.1: nobody else on the Wi-Fi can start runs on your credits.
 """
 
 from __future__ import annotations
@@ -17,21 +16,27 @@ import subprocess
 import sys
 import threading
 import time
-import webbrowser
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
 from ..arena import load_results, slug
 from ..stats import paired, summarize
 from ..tasks import TASKS, prompt_variants
 
-INDEX = Path(__file__).with_name("index.html")
+PAGE = Path(__file__).with_name("page")
 PROCS: dict[str, subprocess.Popen] = {}
 LOCK = threading.Lock()
 TELEOP = {"session": None}
 SAFE = __import__("re").compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+## The dreamkit.yaml the panel serves; handed to every run DreamGym starts (DREAMKIT_CONFIG).
+DREAMKIT = {"config": None}
+
+
+def _env() -> dict:
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    if DREAMKIT["config"]:
+        env["DREAMKIT_CONFIG"] = str(DREAMKIT["config"])
+    return env
 
 
 def _read_json(path: Path):
@@ -95,6 +100,9 @@ def describe(root: Path, folder: Path, full: bool = False) -> dict | None:
     variants = _sub_runs(folder) if is_compare else [(meta.get("policy") or "?", folder)]
     rows_by_variant = [(label, load_results(path), path) for label, path in variants]
     out["summaries"] = [_summary(rows, meta, label) for label, rows, _ in rows_by_variant]
+    # the dreamkit runs these episodes belong to (History), one per variant
+    out["dreamkit_runs"] = [{"label": label, "id": next((r["run_id"] for r in reversed(rows) if r.get("run_id")), None)}
+                            for label, rows, _ in rows_by_variant]
     out["done"] = sum(len(rows) for _, rows, _ in rows_by_variant)
     out["total"] = (meta.get("n") or 0) * max(1, len(variants)) or out["done"]
     out["cost_usd"] = round(sum(s["cost_usd"] for s in out["summaries"]), 4)
@@ -146,26 +154,35 @@ def launch(root: Path, body: dict) -> dict:
         if body.get(key) not in (None, ""):
             cmd += [flag, str(float(body[key]) if key != "seed" else int(body[key]))]
     cmd += ["--gifs", body.get("gifs", "failures")]
+    from ..compare import Variant, with_recovery_ab
+
+    recovery_ab = bool(body.get("recovery_ab"))
     if mode == "arena":
         cmd += ["--policy", policies[0]] + (["--prompt", prompts[0]] if prompts else [])
         variants = None
+        if recovery_ab:  # the same seeds with dreamkit's recovery off, then on (a compare underneath)
+            cmd.append("--recovery-ab")
+            variants = [v.label for v in with_recovery_ab([Variant(policies[0], prompts[0] if prompts else None)])]
     else:
         for p in policies:
             cmd += ["--policy", p]
         for q in prompts:
             cmd += ["--prompt", q]
-        variants = [p + (f" | {q}" if q else "") for p in policies for q in (prompts or [None])]
+        vs = [Variant(p, q) for p in policies for q in (prompts or [None])]
+        if recovery_ab:
+            cmd.append("--recovery-ab")
+            vs = with_recovery_ab(vs)
+        variants = [v.label for v in vs]
         if len(variants) < 2:
-            raise ValueError("compare needs two policies or two prompts")
+            raise ValueError("compare needs two policies, two prompts, or recovery on vs off")
     folder.mkdir(parents=True)
-    meta = {"mode": mode, "task": task, "policy": policies[0] if mode == "arena" else None,
+    meta = {"mode": "compare" if variants else mode, "recovery_ab": recovery_ab, "task": task, "policy": policies[0] if mode == "arena" else None,
             "prompt": prompts[0] if prompts else TASKS[task].prompt, "variants": variants, "n": n,
             "seed": body.get("seed"), "jitter": body.get("jitter"), "lighting": body.get("lighting"),
             "max_seconds": body.get("max_seconds"), "started": time.time(), "status": "running", "cmd": cmd}
     (folder / "meta.json").write_text(json.dumps(meta, indent=2))
     log = open(folder / "log.txt", "w")
-    env = dict(os.environ, PYTHONUNBUFFERED="1")
-    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=root.parent, env=env, start_new_session=True)
+    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=root.parent, env=_env(), start_new_session=True)
     with LOCK:
         PROCS[run_id] = proc
     threading.Thread(target=_watch, args=(folder, proc, log), daemon=True).start()
@@ -208,8 +225,7 @@ def _spawn_data_job(data: Path, name: str, kind: str, cmd: list[str]) -> dict:
     job_path = state / f"{kind}.job.json"
     job_path.write_text(json.dumps({"kind": kind, "status": "running", "started": time.time(), "cmd": cmd}, indent=2))
     log = open(state / f"{kind}.log", "w")
-    env = dict(os.environ, PYTHONUNBUFFERED="1")
-    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=data.parent, env=env, start_new_session=True)
+    proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=data.parent, env=_env(), start_new_session=True)
     with LOCK:
         PROCS[key] = proc
     threading.Thread(target=_watch_job, args=(job_path, proc, log), daemon=True).start()
@@ -331,111 +347,97 @@ def teleop_start(root: Path, body: dict) -> dict:
     return {"ok": True}
 
 
-def make_handler(root: Path):
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):  # quiet console
-            pass
+def make_router(root: Path, config_path: Path | None = None):
+    """DreamGym's API as a FastAPI router; the panel mounts it at /apps/dreamgym/api."""
+    from fastapi import APIRouter, Body, HTTPException
+    from fastapi.responses import FileResponse, Response
 
-        def _send(self, code: int, body: bytes, ctype: str) -> None:
-            self.send_response(code)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def _json(self, data, code: int = 200) -> None:
-            self._send(code, json.dumps(data, default=str).encode(), "application/json")
-
-        def do_GET(self):
-            path = unquote(urlparse(self.path).path)
-            try:
-                if path in ("/", "/index.html"):
-                    return self._send(200, INDEX.read_bytes(), "text/html; charset=utf-8")
-                if path == "/api/runs":
-                    return self._json(list_runs(root))
-                if path.startswith("/api/run/"):
-                    folder = (root / path.removeprefix("/api/run/")).resolve()
-                    if folder.parent != root.resolve() or not folder.is_dir():
-                        return self._json({"error": "not found"}, 404)
-                    return self._json(describe(root, folder, full=True))
-                if path == "/api/datasets":
-                    return self._json(list_datasets(data_root(root)))
-                if path == "/api/prompts":
-                    task = TASKS.get(urlparse(self.path).query.removeprefix("task="))
-                    return self._json(prompt_variants(task) if task else [])
-                if path == "/api/teleop/state":
-                    session = TELEOP["session"]
-                    return self._json(session.state if session else {"status": "off"})
-                if path == "/api/teleop/frame":
-                    session = TELEOP["session"]
-                    if session is None or not session.jpeg:
-                        return self._send(204, b"", "image/jpeg")
-                    return self._send(200, session.jpeg, "image/jpeg")
-                if path == "/api/tasks":
-                    return self._json([{"name": t.name, "prompt": t.prompt, "jitter": t.jitter_m,
-                                        "lighting": t.lighting} for t in TASKS.values()])
-                if path.startswith("/files/"):
-                    file = (root / path.removeprefix("/files/")).resolve()
-                    if root.resolve() not in file.parents or not file.is_file():
-                        return self._json({"error": "not found"}, 404)
-                    ctype = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
-                    return self._send(200, file.read_bytes(), ctype)
-                self._json({"error": "not found"}, 404)
-            except Exception as exc:  # keep the dashboard up whatever one folder holds
-                self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
-
-        def do_POST(self):
-            path = urlparse(self.path).path
-            try:
-                length = int(self.headers.get("Content-Length") or 0)
-                body = json.loads(self.rfile.read(length) or b"{}")
-                if path == "/api/launch":
-                    return self._json(launch(root, body))
-                if path == "/api/record":
-                    return self._json(launch_record(root, body))
-                if path.startswith("/api/dataset/"):
-                    name, _, action = path.removeprefix("/api/dataset/").partition("/")
-                    return self._json(dataset_action(root, name, action, body))
-                if path == "/api/teleop/start":
-                    return self._json(teleop_start(root, body))
-                if path.startswith("/api/teleop/"):
-                    session = TELEOP["session"]
-                    if session is None:
-                        raise ValueError("no teleop session: start one first")
-                    what = path.removeprefix("/api/teleop/")
-                    if what == "keys":
-                        session.set_keys(body.get("keys", []))
-                    elif what == "cmd":
-                        session.command(body.get("cmd", ""))
-                    elif what == "stop":
-                        session.stop()
-                    return self._json({"ok": True})
-                if path.startswith("/api/stop/"):
-                    stop(root, path.removeprefix("/api/stop/"))
-                    return self._json({"ok": True})
-                self._json({"error": "not found"}, 404)
-            except (ValueError, KeyError) as exc:
-                self._json({"error": str(exc)}, HTTPStatus.BAD_REQUEST)
-            except Exception as exc:
-                self._json({"error": f"{type(exc).__name__}: {exc}"}, 500)
-
-    return Handler
-
-
-def serve(runs: Path = Path("runs"), port: int = 8765, open_browser: bool = True) -> None:
-    root = Path(runs).resolve()
+    root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(root))
-    url = f"http://127.0.0.1:{port}"
-    print(f"DreamGym dashboard: {url}   (runs: {root})   Ctrl-C to stop")
-    if open_browser:
-        threading.Timer(0.5, lambda: webbrowser.open(url)).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        if TELEOP["session"] is not None:
-            TELEOP["session"].stop()
-        server.server_close()
+    DREAMKIT["config"] = config_path
+    r = APIRouter()
+
+    def guard(fn, *args):
+        try:
+            return fn(*args)
+        except (ValueError, KeyError) as exc:
+            raise HTTPException(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+
+    @r.get("/runs")
+    def runs():
+        return list_runs(root)
+
+    @r.get("/run/{run_id}")
+    def run(run_id: str):
+        folder = (root / run_id).resolve()
+        if folder.parent != root or not folder.is_dir():
+            raise HTTPException(404, "not found")
+        return describe(root, folder, full=True)
+
+    @r.get("/datasets")
+    def datasets():
+        return list_datasets(data_root(root))
+
+    @r.get("/prompts")
+    def prompts(task: str = ""):
+        t = TASKS.get(task)
+        return prompt_variants(t) if t else []
+
+    @r.get("/tasks")
+    def tasks():
+        return [{"name": t.name, "prompt": t.prompt, "jitter": t.jitter_m, "lighting": t.lighting} for t in TASKS.values()]
+
+    @r.get("/files/{path:path}")
+    def files(path: str):
+        file = (root / path).resolve()
+        if root not in file.parents or not file.is_file():
+            raise HTTPException(404, "not found")
+        return FileResponse(file, media_type=mimetypes.guess_type(file.name)[0] or "application/octet-stream")
+
+    @r.get("/teleop/state")
+    def teleop_state():
+        session = TELEOP["session"]
+        return session.state if session else {"status": "off"}
+
+    @r.get("/teleop/frame")
+    def teleop_frame():
+        session = TELEOP["session"]
+        if session is None or not session.jpeg:
+            return Response(status_code=204)
+        return Response(session.jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @r.post("/launch")
+    def post_launch(body: dict = Body(default_factory=dict)):
+        return guard(launch, root, body)
+
+    @r.post("/record")
+    def post_record(body: dict = Body(default_factory=dict)):
+        return guard(launch_record, root, body)
+
+    @r.post("/dataset/{name}/{action}")
+    def post_dataset(name: str, action: str, body: dict = Body(default_factory=dict)):
+        return guard(dataset_action, root, name, action, body)
+
+    @r.post("/teleop/start")
+    def post_teleop_start(body: dict = Body(default_factory=dict)):
+        return guard(teleop_start, root, body)
+
+    @r.post("/teleop/{what}")
+    def post_teleop(what: str, body: dict = Body(default_factory=dict)):
+        session = TELEOP["session"]
+        if session is None:
+            raise HTTPException(HTTPStatus.BAD_REQUEST, "no teleop session: start one first")
+        if what == "keys":
+            session.set_keys(body.get("keys", []))
+        elif what == "cmd":
+            session.command(body.get("cmd", ""))
+        elif what == "stop":
+            session.stop()
+        return {"ok": True}
+
+    @r.post("/stop/{run_id}")
+    def post_stop(run_id: str):
+        stop(root, run_id)
+        return {"ok": True}
+
+    return r

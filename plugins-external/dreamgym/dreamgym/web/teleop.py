@@ -38,6 +38,26 @@ def _down(yaw: float) -> np.ndarray:
     return np.array([[c, s, 0], [s, -c, 0], [0, 0, -1.0]])
 
 
+class TeleopClient:
+    """Teleop has no model: dreamkit.wrap stands around this, so a person's recorded episodes are dreamkit attempts
+    (the loop plugins watch them, History shows them). It never answers get_action: the keyboard drives."""
+
+    mock = False
+    last_timing = None
+
+    def policy(self, config):
+        return None
+
+    def set_observation(self, *a, **k):
+        return None
+
+    def reset_episode(self, **_):
+        return None
+
+    def close(self):
+        return None
+
+
 class TeleopSession:
     def __init__(self, task: str, dataset: Path, seed: int = 0):
         self.task = get_task(task)
@@ -95,8 +115,25 @@ class TeleopSession:
         from ..lerobot_writer import LeRobotWriter
         from .. import ik
 
+        from dreamkit.plugin import EndEpisode, StopEpisode
+
+        from ..kit import open_kit
+
         yam_env, _, _ = sim.load()
         env = yam_env.YamEnv()
+        kit = open_kit(TeleopClient(), model="teleop (keyboard)",
+                       info={"mode": "teleop", "task": self.task.name, "dataset": str(self.dataset)})
+        attempt = None  # the dreamkit attempt of the episode being recorded
+
+        def finish(ok: bool | None, exc: BaseException | None = None) -> None:
+            nonlocal attempt
+            if attempt is None:
+                return
+            if ok:
+                kit.label(True)
+            cm, attempt = attempt, None
+            cm.__exit__(type(exc) if exc else None, exc, exc.__traceback__ if exc else None)
+
         writer = None
         arm = "left"
         self._reset_scene(env, yam_env)
@@ -118,9 +155,12 @@ class TeleopSession:
                         if not writer.recording:
                             writer.begin(self.task.prompt)
                             record_start, message = tick, "Recording…"
+                            attempt = kit.episode(self.task.prompt, env=env, source="gym", teleop=True)
+                            attempt.__enter__()
                     elif cmd in ("save", "discard") and writer is not None and writer.recording:
                         frames = writer.frames_in_episode
                         kept = writer.end(keep=cmd == "save")
+                        finish(bool(self.task.success(env)) if cmd == "save" else None)
                         if cmd == "save":
                             message = f"Saved episode {len(writer.episodes)} ({frames} frames)." if kept else \
                                 f"Not saved: {frames} frames, need at least 49 (about 5 s)."
@@ -131,6 +171,7 @@ class TeleopSession:
                         if writer is not None and writer.recording:
                             writer.end(keep=False)
                             record_start = None
+                        finish(None)
                         self._reset_scene(env, yam_env)
                         message = "New scene."
                     elif cmd == "home":
@@ -163,6 +204,12 @@ class TeleopSession:
                     writer.step_hook(env, rows["left"], rows["right"], tick, images=images)
                 env.step(rows["left"], rows["right"])
                 tick += 1
+                if attempt is not None:  # the plugins see the recorded episode like any other attempt
+                    try:
+                        kit.step(env, images=images, command=(rows["left"], rows["right"]))
+                    except (EndEpisode, StopEpisode) as end:
+                        finish(None, end)
+                        message = f"dreamkit: {getattr(end, 'message', None) or end.reason}"
                 if images is not None:
                     top = Image.fromarray(images["top"])
                     canvas = Image.new("RGB", (640, 540))
@@ -189,6 +236,8 @@ class TeleopSession:
         finally:
             if writer is not None and writer.recording:
                 writer.end(keep=False)
+            finish(None)
+            kit.close()
             env.close()
             self.state = {**self.state, "status": "stopped", "recording": False}
 

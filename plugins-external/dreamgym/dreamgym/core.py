@@ -86,7 +86,7 @@ class EpisodeResult:
     policy: str
     prompt: str
     success: bool
-    reason: str  # "success" or a failure label
+    reason: str  # "success" or a shared failure code (dreamkit.reasons)
     sim_seconds: float
     seconds_to_success: float | None
     calls: int
@@ -94,6 +94,9 @@ class EpisodeResult:
     wall_seconds: float
     error: str | None = None
     gif: str | None = None
+    run_id: str | None = None  # the dreamkit run (History)
+    episode: int | None = None  # the attempt in it
+    recoveries: int = 0  # how many times dreamkit's recovery stepped in
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

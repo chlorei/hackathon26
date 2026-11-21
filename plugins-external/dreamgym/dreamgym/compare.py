@@ -21,10 +21,17 @@ from .stats import paired
 class Variant:
     policy: str
     prompt: str | None = None
+    recovery: bool | None = None  # dreamkit's recovery forced off / on; None = as dreamkit.yaml has it
 
     @property
     def label(self) -> str:
-        return self.policy + (f" | {self.prompt}" if self.prompt else "")
+        return (self.policy + (f" | {self.prompt}" if self.prompt else "")
+                + ("" if self.recovery is None else f" | recovery {'on' if self.recovery else 'off'}"))
+
+
+def with_recovery_ab(variants: list["Variant"]) -> list["Variant"]:
+    """Each variant twice, recovery off first (the baseline McNemar compares against), then on."""
+    return [Variant(v.policy, v.prompt, r) for v in variants for r in (False, True)]
 
 
 def run_compare(
@@ -51,7 +58,7 @@ def run_compare(
             policy.name = v.label
             summaries.append(
                 run_arena(task, policy, n=n, out_dir=d, seed0=seed0, prompt=v.prompt, max_seconds=max_seconds,
-                          gifs=gifs, env=env, log=log)
+                          gifs=gifs, env=env, recovery=v.recovery, log=log)
             )
     finally:
         env.close()

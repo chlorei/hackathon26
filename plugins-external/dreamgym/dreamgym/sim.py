@@ -6,7 +6,7 @@ solver the scripted policy uses), so it stays in step with whatever Dream Labs s
 
 Where the example is looked up, first match wins:
 1. `DREAMGYM_SIM_DIR` (the folder that holds `yam_env.py`);
-2. `sim_path` of ./dreamkit.yaml (the same simulator dreamkit drives);
+2. `sim_path` of $DREAMKIT_CONFIG or ./dreamkit.yaml (the same simulator dreamkit drives);
 3. the `dream_examples` package that `pip install dreamlabs` installs (`dream_examples/yam_mujoco/`);
 4. a `dreamlabs` checkout next to this repository (`../dreamlabs/dream_library/examples/yam_mujoco`).
 """
@@ -27,8 +27,10 @@ def _candidates() -> Iterator[Path]:
     env = os.environ.get("DREAMGYM_SIM_DIR")
     if env:
         yield Path(env).expanduser()
-    config = Path("dreamkit.yaml")
-    if config.is_file():
+    for config in filter(None, [os.environ.get("DREAMKIT_CONFIG"), "dreamkit.yaml"]):
+        config = Path(config).expanduser()
+        if not config.is_file():
+            continue
         try:
             import yaml
 
@@ -45,7 +47,7 @@ def _candidates() -> Iterator[Path]:
         for base in getattr(module, "__path__", []):
             yield Path(base) / "yam_mujoco"
     here = Path(__file__).resolve()
-    for parent in here.parents[1:4]:
+    for parent in here.parents[1:6]:  # a checkout of this repo: plugins-external/dreamgym/dreamgym/
         yield parent / "dreamlabs" / "dream_library" / "examples" / "yam_mujoco"
 
 

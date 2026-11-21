@@ -175,13 +175,20 @@ path and an *Open folder* button):
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
 cameras and graphs outside React and pauses when its tab is hidden.
 
-## DreamGym (in this repo)
+## Gym (an app plugin)
 
-`dreamgym serve` opens a second app on http://127.0.0.1:8765 that drives the simulator itself: **Arena** (success rate
-with a 95% interval over seeded, randomised scenes, failure GIFs), **Compare** and **Prompt Tuner** (same seeds,
-McNemar's test), **Data & fine-tune** (scripted demos, Harvester, `validate_dataset`, upload + train, job status) and
-**Teleop** (keyboard control in the browser, recorded as LeRobot v2.1). See [dreamgym/README.md](dreamgym/README.md).
-Its numbers per run also come to dreamkit runs through the `reliability` plugin.
+DreamGym is a dreamkit **app plugin** in [plugins-external/dreamgym](plugins-external/dreamgym/README.md): a tab in
+the panel with **Arena** (success rate with a 95% interval over seeded, randomised scenes, failure GIFs), **Compare**
+and **Prompt Tuner** (same seeds, McNemar's test), **Data & fine-tune** and **Teleop**. Every episode runs through
+`dreamkit.wrap`, so the plugins of dreamkit.yaml work in it, and every run shows in History with a **Gym** badge.
+Tick **Recovery on vs off** to measure recovery itself: the same seeds without and with it, McNemar on the pairs.
+
+```bash
+dreamkit install ./plugins-external/dreamgym     # check + tests, then pip; restart dreamkit ui -> tab "Gym"
+dreamkit gym arena --task banana_plate --policy scripted --n 10 --recovery-ab
+```
+
+App plugins (a page, an API and commands of their own) are in [PLUGIN_STANDARD.md §13](docs/PLUGIN_STANDARD.md).
 
 ## Add plugins from GitHub
 

@@ -67,16 +67,17 @@ class PickPlace:
         return self.placed(env) and scene.at_rest(env, self.obj) and scene.released(env, self.obj)
 
     def failure_reason(self, env, start: dict[str, np.ndarray]) -> str:
+        """Why it failed, in dreamkit's shared codes (dreamkit.reasons): the same words as History and the monitor."""
         if scene.off_table(env, self.obj):
             return "fell_off_table"
         if self.placed(env):
-            return "still_held" if not scene.released(env, self.obj) else "not_settled"
+            return "still_held" if not scene.released(env, self.obj) else "timeout"  # in place, still rolling
         if not scene.released(env, self.obj):
             return "still_held"
         moved = float(np.linalg.norm(scene.pos(env, self.obj) - start[self.obj]))
         if moved < 0.015:
-            return "untouched"
-        return "misplaced"
+            return "not_reached"
+        return "released_off_target"
 
 
 ## How each scene thing may be named in a prompt (the sim's plate is blue-glazed).
