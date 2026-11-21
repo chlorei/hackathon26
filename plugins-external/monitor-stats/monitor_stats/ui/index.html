@@ -7,6 +7,7 @@
 <!-- PLUGIN_STANDARD §7a: the server links the theme; this page reads only /media/<run>/monitor-stats/ -->
 <style>
   body { padding: 16px; }
+  #ns { display: none; }
   main { display: grid; gap: 14px; }
   .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .head h1 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
@@ -82,7 +83,7 @@ function summary() {
   $('s-ok').textContent = j.length ? String(ok) : '–'
   $('s-rate').textContent = j.length ? `${pct(ok, j.length)} of judged` : ''
   $('s-agree').textContent = pct(agree, both.length)
-  $('s-agree-n').textContent = both.length ? `${agree} of ${both.length}` : 'success-check is off'
+  $('s-agree-n').textContent = both.length ? `${agree} of ${both.length}` : j.length ? 'success-check is off' : ''
 }
 
 // 1. one bar per attempt: height = score, colour = the verdict

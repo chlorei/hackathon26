@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Download, GitBranch, Loader2, Trash2 } from 'lucide-react'
 import { api, type PluginInfo, type SchemaProp } from '../api'
-import { Button, ICON_BY_PLUGIN, Input, Panel, PanelTitle, PluginIcon, StatusDot, Tag, Toggle } from '../ui'
+import { Button, ICON_BY_PLUGIN, Input, Panel, PanelTitle, PluginIcon, PluginPageDrawer, StatusDot, Tag, Toggle, type PluginPage } from '../ui'
 
 /** Plugins grouped by what they are for, in the order a failure goes through them: Detect → Recover → Learn. */
 const STAGES: { key: 'detect' | 'recover' | 'learn'; n: number; title: string; hint: string; lead: string }[] = [
@@ -23,6 +23,9 @@ function stageOf(p: PluginInfo): 'detect' | 'recover' | 'learn' {
 export default function PluginsPage() {
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   const [open, setOpen] = useState<string | null>(null)
+  const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs })
+  const lastRun = runs.data?.runs[0]?.id ?? null  // newest first
+  const [page, setPage] = useState<PluginPage | null>(null)
   const list = useMemo(() => (plugins.data?.plugins ?? []).slice().sort((a, b) => a.order - b.order), [plugins.data])
   useEffect(() => {
     for (const p of list) ICON_BY_PLUGIN[p.name] = p.icon
@@ -53,7 +56,8 @@ export default function PluginsPage() {
               </div>
               <Panel>
                 {items.map((p) => (
-                  <PluginRow key={p.name} plugin={p} lead={p.name === stage.lead} open={open === p.name} onOpen={() => toggle(p.name)} />
+                  <PluginRow key={p.name} plugin={p} lead={p.name === stage.lead} open={open === p.name} onOpen={() => toggle(p.name)}
+                    lastRun={lastRun} onPage={() => lastRun && setPage({ plugin: p.name, runId: lastRun, episode: null })} />
                 ))}
               </Panel>
             </section>
@@ -72,6 +76,7 @@ export default function PluginsPage() {
         <AddFromGitHub />
         <Catalogue />
       </div>
+      <PluginPageDrawer page={page} onClose={() => setPage(null)} />
     </div>
   )
 }
@@ -101,7 +106,10 @@ function StatusLine({ plugin, className }: { plugin: PluginInfo; className?: str
   )
 }
 
-function PluginRow({ plugin, open, onOpen, lead }: { plugin: PluginInfo; open: boolean; onOpen: () => void; lead?: boolean }) {
+function PluginRow({ plugin, open, onOpen, lead, lastRun, onPage }: {
+  plugin: PluginInfo; open: boolean; onOpen: () => void; lead?: boolean
+  lastRun: string | null; onPage: () => void  // the plugin's own page (§7a), for the newest run
+}) {
   const set = useSetPlugins()
   const queryClient = useQueryClient()
   const [values, setValues] = useState<Record<string, unknown>>(plugin.params)
@@ -141,6 +149,10 @@ function PluginRow({ plugin, open, onOpen, lead }: { plugin: PluginInfo; open: b
           )}
         </button>
         <StatusLine plugin={plugin} className="hidden w-60 shrink-0 lg:flex" />
+        {plugin.manifest.ui && (
+          <Button variant="quiet" onClick={onPage} disabled={!lastRun} className="!px-2.5"
+            title={lastRun ? `Open ${plugin.name}'s page for the last run (${lastRun})` : 'No runs yet'}>Open page</Button>
+        )}
         <Button variant="quiet" onClick={onOpen} className="!px-2.5">{open ? 'Close' : 'Settings'}</Button>
         <Toggle checked={plugin.enabled} disabled={!plugin.installed || update.isPending} onChange={(v) => update.mutate({ enabled: v })} />
       </div>
