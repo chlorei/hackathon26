@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CameraOff, FolderOpen } from 'lucide-react'
 import { api, atOf, REASON_LABEL, tOf, type EpisodeResult, type EventRecord } from '../api'
 import { useLive, useRunStream, type LiveStore } from '../useRunStream'
-import { AttemptStrip, Button, ICON_BY_PLUGIN, LEVEL_TONE, Outcome, pagesOf, Panel, PanelTitle, PluginIcon, PluginPageDrawer, Sparkline, Tag, type Mark, type PluginPage } from '../ui'
+import Feed from './LiveFeed'
+import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginPageDrawer, Sparkline, Tag, type Mark, type PluginPage } from '../ui'
 
 const CAMS: Record<string, string> = { top: 'Overhead', left: 'Left wrist', right: 'Right wrist' }
 
@@ -44,7 +45,11 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
   if (!runId) return <Waiting />
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
+    <div className="space-y-4">
+    <StatusBar task={stream.task || live.data?.task || 'Run'} mode={stream.mode} running={running} mock={Boolean(live.data?.mock)}
+      model={live.data?.model} current={current} episodes={stream.episodes} events={stream.events} live={stream.live}
+      onFolder={() => api.reveal(runId)} onHistory={() => onOpenRun(runId)} />
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0 space-y-4">
         <NowCard events={stream.events} episodes={stream.episodes} current={current} running={running} live={stream.live} />
         <Panel>
@@ -88,28 +93,58 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
       </div>
 
       <div className="space-y-4 xl:sticky xl:top-[68px] xl:self-start">
-        <Panel>
-          <div className="flex items-start gap-3 px-4 py-3">
-            <span className={clsx('mt-1.5 h-2 w-2 shrink-0 rounded-full', running ? 'animate-pulse bg-signal' : 'bg-faint')} />
-            <div className="min-w-0 flex-1">
-              <p className="text-[14px]">{stream.task || live.data?.task || 'Run'}</p>
-              {stream.mode && <p className="text-[12px] text-dim">{stream.mode}</p>}
-              <p className="text-[12px] text-dim">
-                {running ? 'Your loop is running' : 'Finished'}{live.data?.mock ? ', mock policy' : live.data?.model ? `, ${live.data.model}` : ''}
-              </p>
-            </div>
-            {live.data?.mock && <Tag tone="warn" title="The mock policy fails on purpose so the plugins can be tested; no model is called">mock: scripted failures</Tag>}
-          </div>
-          <div className="flex gap-2 border-t border-line px-4 py-2.5">
-            <Button variant="quiet" onClick={() => api.reveal(runId)}><FolderOpen className="h-4 w-4" /> Open folder</Button>
-            <Button variant="quiet" onClick={() => onOpenRun(runId)}>Open in History</Button>
-          </div>
-        </Panel>
-        <Feed events={stream.events} onWatch={(ep) => onOpenRun(runId, ep)} pages={pages}
-          onPage={(plugin, episode) => setPage({ plugin, runId, episode })} />
+        <Feed events={stream.events} episodes={stream.episodes} current={current?.episode ?? null} running={running}
+          onWatch={(ep) => onOpenRun(runId, ep)} pages={pages} onPage={(plugin, episode) => setPage({ plugin, runId, episode })} />
         <PluginPageDrawer page={page} onClose={() => setPage(null)} />
       </div>
     </div>
+    </div>
+  )
+}
+
+/** The run in one line: task, attempt, clock, successes, the model's mean round trip, money spent when known. */
+function StatusBar({ task, mode, running, mock, model, current, episodes, events, live, onFolder, onHistory }: {
+  task: string; mode?: string; running: boolean; mock: boolean; model?: string
+  current: { episode: number; scene: number; attempt: number } | null
+  episodes: EpisodeResult[]; events: EventRecord[]; live: LiveStore
+  onFolder: () => void; onHistory: () => void
+}) {
+  const ok = episodes.filter((e) => e.success).length
+  const lat = episodes.map((e) => ((e as unknown as Record<string, unknown>)['failure-monitor'] as { latency?: { mean_ms?: number; calls?: number } } | undefined)?.latency)
+    .filter((l): l is { mean_ms: number; calls: number } => Boolean(l && l.mean_ms != null && l.calls))
+  const calls = lat.reduce((a, l) => a + l.calls, 0)
+  const meanMs = calls ? lat.reduce((a, l) => a + l.mean_ms * l.calls, 0) / calls : null
+  // money: what a plugin that counts it reported last (reliability at the end of a run; a budget plugin as it goes)
+  const spent = [...events].reverse().find((e) => typeof e.data?.spent_usd === 'number' || typeof e.data?.cost_cents === 'number')
+  const usd = spent ? (typeof spent.data.spent_usd === 'number' ? Number(spent.data.spent_usd) : Number(spent.data.cost_cents) / 100) : null
+  const item = (label: string, value: ReactNode, title?: string) => (
+    <div className="min-w-0" title={title}>
+      <p className="text-[11px] tracking-wide text-faint uppercase">{label}</p>
+      <p className="truncate text-[15px] font-semibold tabular-nums">{value}</p>
+    </div>
+  )
+  return (
+    <Panel>
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-5 py-3">
+        <div className="flex min-w-[220px] flex-1 items-start gap-2.5">
+          <span className={clsx('mt-2 h-2 w-2 shrink-0 rounded-full', running ? 'animate-pulse bg-signal' : 'bg-faint')} />
+          <div className="min-w-0">
+            <p className="truncate text-[15px] font-semibold">{task}</p>
+            <p className="text-[12px] text-dim">{running ? 'running' : 'finished'}{mock ? ' · mock policy' : model ? ` · ${model}` : ''}{mode ? ` · ${mode}` : ''}</p>
+          </div>
+          {mock && <Tag tone="warn" title="The mock policy fails on purpose so the plugins can be tested; no model is called">mock</Tag>}
+        </div>
+        {item('Attempt', current ? `${current.episode}${current.attempt > 1 ? ` (retry ${current.attempt - 1})` : ''} · scene ${current.scene + 1}` : '–')}
+        {item('Time', running && current ? <LiveClock live={live} /> : '–')}
+        {item('Succeeded', `${ok} / ${episodes.length}`)}
+        {item('Model round trip', meanMs == null ? (mock ? 'mock' : '–') : meanMs >= 1000 ? `${(meanMs / 1000).toFixed(1)} s avg` : `${Math.round(meanMs)} ms avg`, calls ? `${calls} calls` : undefined)}
+        {usd != null && item('Spent', `$${usd.toFixed(2)}`, `reported by ${spent!.plugin}`)}
+        <div className="ml-auto flex gap-1">
+          <Button variant="quiet" onClick={onFolder}><FolderOpen className="h-4 w-4" /> Folder</Button>
+          <Button variant="quiet" onClick={onHistory}>History</Button>
+        </div>
+      </div>
+    </Panel>
   )
 }
 
@@ -282,59 +317,6 @@ function Attempts({ episodes, current, onOpen }: {
           </li>
         )}
       </ul>
-    </Panel>
-  )
-}
-
-function Feed({ events, onWatch, pages, onPage }: {
-  events: EventRecord[]
-  onWatch: (episode: number) => void
-  pages: Set<string>  // plugins with a page of their own (§7a): their lines open it
-  onPage: (plugin: string, episode: number | null) => void
-}) {
-  const [only, setOnly] = useState<'all' | 'problems'>('all')
-  const box = useRef<HTMLDivElement>(null)
-  const shown = useMemo(() => (only === 'problems' ? events.filter((e) => e.level === 'warn' || e.level === 'error') : events).slice(-150), [events, only])
-  useEffect(() => {
-    const el = box.current
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 120) el.scrollTop = el.scrollHeight
-  }, [shown.length])
-  return (
-    <Panel className="flex h-[calc(100vh-460px)] min-h-[320px] flex-col">
-      <PanelTitle right={
-        <div className="flex rounded-md bg-base p-0.5 text-[12px]">
-          {(['all', 'problems'] as const).map((k) => (
-            <button key={k} onClick={() => setOnly(k)} className={clsx('rounded px-2 py-0.5', only === k ? 'bg-raised text-ink' : 'text-faint')}>
-              {k === 'all' ? 'All' : 'Problems'}
-            </button>
-          ))}
-        </div>
-      }>What the plugins say</PanelTitle>
-      <div ref={box} className="flex-1 overflow-y-auto border-t border-line">
-        {shown.length === 0 && <p className="px-4 py-8 text-center text-[13px] text-faint">Plugins report here as they see things happen.</p>}
-        {shown.map((e, i) => {
-          const verdict = e.plugin === 'failure-monitor' && e.level === 'error' && Boolean(e.data.reason)
-          return (
-            <div key={`${e.ts}-${i}`} className={clsx('flex gap-2.5 border-b border-line/60 px-4 py-2', verdict && 'bg-bad-soft',
-              pages.has(e.plugin) && 'cursor-pointer hover:bg-raised/50')}
-              {...(pages.has(e.plugin) ? {
-                role: 'button', tabIndex: 0, title: `Open ${e.plugin}'s page`,
-                onClick: () => onPage(e.plugin, e.episode ?? null),
-                onKeyDown: (k: KeyboardEvent) => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); onPage(e.plugin, e.episode ?? null) } },
-              } : {})}>
-              <PluginIcon name={e.plugin} className={clsx('mt-0.5', LEVEL_TONE[e.level])} />
-              <div className="min-w-0 flex-1">
-                <p className={clsx('text-[13px]', verdict ? 'font-medium text-bad' : e.level === 'info' ? 'text-ink' : LEVEL_TONE[e.level])}>{e.message}</p>
-                <p className="text-[11px] text-faint">{e.plugin}{tOf(e) != null ? `, ${tOf(e)!.toFixed(1)} s` : ''}{e.episode ? ` in attempt ${e.episode}` : ''}</p>
-                {verdict && e.episode != null && (
-                  <button onClick={() => onWatch(e.episode!)} className="mt-1 text-[12px] text-signal hover:underline">Watch from {Math.max(0, Number(e.data.at_s ?? e.data.at) - 1).toFixed(1)} s</button>
-                )}
-              </div>
-              {pages.has(e.plugin) && <span className="self-center text-[16px] text-faint" aria-hidden>›</span>}
-            </div>
-          )
-        })}
-      </div>
     </Panel>
   )
 }
