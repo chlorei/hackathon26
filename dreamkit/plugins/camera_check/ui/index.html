@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>camera-check</title></head>
+<body>
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// What camera-check looked at in this run: how many pictures each camera passed, and any black/uniform/frozen one.
+dk.page('camera-check', 'Cameras', async ({ episodes }) => {
+  const files = await Promise.all(episodes.map((e) => dk.json(`camera-check/ep${String(e.episode).padStart(3, '0')}_checks.json`)))
+  const rows = episodes.map((e, i) => {
+    const f = files[i] || {}
+    const cams = f.cameras || {}
+    const verdict = (e.verdicts || []).find((v) => v.by === 'camera-check')
+    return { attempt: e.episode, cameras: Object.keys(cams).join(', '), checks: Object.values(cams).reduce((a, c) => a + c.checks, 0),
+      problems: (f.problems && f.problems.length ? f.problems : verdict ? [verdict.message] : []).join('; '),
+      at_s: verdict ? verdict.at_s : null, per_camera: cams, _here: e._here }
+  })
+  const per = {}
+  for (const r of rows) for (const [c, d] of Object.entries(r.per_camera)) {
+    const p = (per[c] = per[c] || { checks: 0, min_mean: Infinity, min_std: Infinity, max_same: 0, bad: 0 })
+    p.checks += d.checks; p.min_mean = Math.min(p.min_mean, d.min_mean); p.min_std = Math.min(p.min_std, d.min_std)
+    p.max_same = Math.max(p.max_same, d.max_same); if (r.problems.includes(`camera ${c} `)) p.bad++
+  }
+  const total = rows.reduce((a, r) => a + r.checks, 0), bad = rows.filter((r) => r.problems)
+  if (!total && !bad.length) return [dk.empty('No camera records in this run (runs before this page keep none). Run again to see them.')]
+  return [
+    dk.stats([
+      { label: 'pictures checked', value: String(total), sub: `${Object.keys(per).length} cameras, before each model call` },
+      { label: 'camera failures', value: String(bad.length), sub: bad.length ? 'black, uniform or frozen' : 'every picture looked alive', tone: bad.length ? 'bad' : 'ok' },
+      { label: 'darkest picture', value: Object.keys(per).length ? dk.fmt(Math.min(...Object.values(per).map((p) => p.min_mean)), 0) : '–', sub: 'mean brightness, 0–255 (black below the threshold)' },
+    ]),
+    dk.card('Pictures checked per camera', dk.hbars(Object.entries(per).map(([c, p]) => ({ label: c, value: p.checks, tone: p.bad ? 'bad' : 'ok' }))),
+      dk.table([{ key: 'camera', label: 'camera' }, { key: 'min_mean', label: 'darkest', fmt: (v) => dk.fmt(v, 0) },
+        { key: 'min_std', label: 'least contrast', fmt: (v) => dk.fmt(v, 1) }, { key: 'max_same', label: 'longest frozen run' },
+        { key: 'bad', label: 'failures' }], Object.entries(per).map(([camera, p]) => ({ camera, ...p })))),
+    dk.card('Attempts', dk.row(dk.downloadButton('camera-check', () => rows.map(({ _here, ...r }) => r))),
+      dk.table([{ key: 'attempt', label: 'attempt' }, { key: 'cameras', label: 'cameras' }, { key: 'checks', label: 'pictures' },
+        { key: 'problems', label: 'problem', fmt: (v) => v || 'none' }, { key: 'at_s', label: 'at', fmt: (v) => (v == null ? '–' : `${dk.fmt(v)} s`) }], rows)),
+  ]
+})
+</script>
+</body>
+</html>

@@ -4,6 +4,8 @@ Observe-only: it calls a `camera_failure` verdict; the control plugin (recovery)
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 from pydantic import BaseModel, Field
 
@@ -28,13 +30,14 @@ class CameraCheck(Plugin):
     name = "camera-check"
     Params = Params
     manifest = Manifest(group="safety", icon="Camera", capability="observe", needs_frames=True,
-                        hooks=["on_episode_start", "before_model"])
+                        hooks=["on_episode_start", "before_model", "on_episode_end"], ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.previous: dict[str, np.ndarray] = {}
         self.same: dict[str, int] = {}
         self.reported = False
         self.last_q: dict[str, np.ndarray] | None = None
+        self.seen: dict[str, dict[str, float]] = {}  # per camera, for the page only (run_dir/camera-check/)
 
     def before_model(self, ctx: PluginContext) -> None:
         if self.reported:
@@ -47,6 +50,9 @@ class CameraCheck(Plugin):
         self.last_q = q
         for cam, rgb in ctx.frames.items():
             mean, std = float(rgb.mean()), float(rgb.std())
+            seen = self.seen.setdefault(cam, {"checks": 0, "min_mean": mean, "min_std": std, "max_same": 0})
+            seen["checks"] += 1
+            seen["min_mean"], seen["min_std"] = min(seen["min_mean"], mean), min(seen["min_std"], std)
             if mean < p.min_mean:
                 problems.append(f"camera {cam} is black (mean {mean:.1f})")
             elif std < p.min_std:
@@ -61,6 +67,7 @@ class CameraCheck(Plugin):
                 else:
                     self.same[cam] = 0
                 self.previous[cam] = rgb.copy()
+                seen["max_same"] = max(seen["max_same"], self.same[cam])
                 if self.same[cam] >= p.frozen_calls:
                     problems.append(f"camera {cam} is frozen ({self.same[cam]} identical pictures)")
         if problems:
@@ -68,3 +75,11 @@ class CameraCheck(Plugin):
             ctx.result["camera-check"] = {"problems": problems}
             ctx.ui.badge("camera failure", "error")
             ctx.verdict("camera_failure", ctx.t, "; ".join(problems), source="robot")  # cameras are the robot's
+
+    def on_episode_end(self, ctx: PluginContext) -> None:
+        if ctx.run_dir is None or not self.seen:
+            return
+        name = f"ep{ctx.episode:03d}_checks.json"  # what the page shows: how many pictures each camera passed
+        record = {"episode": ctx.episode, "cameras": {c: {k: round(v, 2) for k, v in d.items()} for c, d in self.seen.items()},
+                  "problems": (ctx.result.get("camera-check") or {}).get("problems", [])}
+        ctx.defer(lambda: ctx.files.path(name).write_text(json.dumps(record)))

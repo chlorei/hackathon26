@@ -127,7 +127,7 @@
       try {
         body = !on ? [empty(`${plugin} was off in this run. Switch it on on the Plugins page and run again.`)]
           : !episodes.length ? [empty('This run has no finished attempts yet.')]
-          : build({ run, episodes, events, mine: events.filter((e) => e.plugin === plugin) })
+          : await build({ run, episodes, events, mine: events.filter((e) => e.plugin === plugin) })
       } catch (err) { body = [empty(`Could not draw this page: ${err.message}`)] }
       root.replaceChildren(head, ...[body].flat())
       const here = document.querySelector('.dk-here')
@@ -138,5 +138,8 @@
     tick()
   }
 
-  window.dk = { h, s, media, fmt, pct, stats, card, empty, row, bars, hbars, timeline, table, downloadButton, page, RUN, ATTEMPT }
+  /** A file of this run (the plugin's own folder, or run.json/events.jsonl); null when missing. */
+  const json = (path) => getJson(path).catch(() => null)
+
+  window.dk = { h, s, media, json, fmt, pct, stats, card, empty, row, bars, hbars, timeline, table, downloadButton, page, RUN, ATTEMPT }
 })()
