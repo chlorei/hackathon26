@@ -1,7 +1,8 @@
-# dreamkit plugin standard (v1.4)
+# dreamkit plugin standard (v1.5)
 
-Every plugin — built-in or from GitHub — follows this document. `dreamkit check <plugin>` enforces the rules
-marked **[check]**. If code and this document disagree, this document wins.
+Every plugin — built-in or from GitHub — follows this document. There are two kinds: **loop plugins** (§1–§12:
+hooks inside your control loop; one page each, §7a) and **app plugins** (§13: a whole tab — a page, an API and
+commands of their own). `dreamkit check <plugin>` enforces the rules marked **[check]**. If code and this document disagree, this document wins.
 
 ---
 
@@ -371,6 +372,68 @@ Error messages always name the rule, the file and line when known, and the fix:
 
 ---
 
+## 13. App plugins  **[check]**
+
+A loop plugin runs inside your control loop, one hook at a time, and may show one page about its results (§7a).
+An **app plugin** is a tool around the robot —
+DreamGym (Arena, Compare, datasets, Teleop) is the first. It gets a tab in the panel, an API, and commands.
+
+Layout and entry point:
+
+```
+dreamkit-<name>/
+  pyproject.toml          [project.entry-points."dreamkit.apps"]  <name> = "<package>.app:app"
+                          [tool.dreamkit] kind = "app", title, icon, needs   (the same values as the manifest)
+  <package>/app.py        app = dreamkit.sdk.App(...)
+  <package>/web/…/index.html
+  README.md
+  tests/test_*.py
+```
+
+```python
+from dreamkit.sdk import App, AppContext, Manifest
+
+def router(ctx: AppContext) -> APIRouter: ...          # ctx: config_path, base, runs_dir, world
+app = App(name="dreamgym",
+          manifest=Manifest(kind="app", title="Gym", icon="Dumbbell", needs=["robot", "world"]),
+          router=router,                               # mounted at /apps/<name>/api
+          page=Path(__file__).parent / "web" / "page", # served at /apps/<name>/, shown in the tab's frame
+          commands=cli.main,                           # dreamkit <name> … (and dreamkit <title> … when one word)
+          description="…")
+```
+
+| | |
+|---|---|
+| `manifest.kind` | `"app"` (a `Plugin` class may not say `app`) |
+| `manifest.title` | the tab's label, e.g. `Gym`; a one-word title is also a command alias |
+| `manifest.icon` | a lucide icon name |
+| `manifest.needs` | `["robot"]`, or `["robot", "world"]`: without Dream Labs' simulator the tab carries **sim only** and shows the reason instead of the page |
+| name | 1–3 kebab-case words, not a dreamkit command or route (`ui`, `run`, `history`, `api`, …) |
+
+**May**
+- have its own page (any HTML/JS), its own API under `/apps/<name>/api`, its own commands, its own data folders;
+- start long jobs as subprocesses (so a crash never takes the panel down);
+- link into the panel (`/#/history/<run>`), read dreamkit's `runs/` through the panel's API.
+
+**May not**
+- **drive a robot or the simulator past `dreamkit.wrap`.** Every episode an app runs goes through
+  `client = dreamkit.wrap(…)`, `with client.episode(…)`, `client.get_action()` and `client.step(…)`, so the loop
+  plugins of dreamkit.yaml run in it and it lands in History (`kit.info["source"]` names the app). DreamGym's
+  Arena, Compare, Record and Teleop all do this; a policy without a DreamClient (a scripted expert, a keyboard) is
+  wrapped in a small client object.
+- **use its own colours.** The page loads the same theme as plugin pages (§7a),
+  `<link rel="stylesheet" href="/theme/dreamkit-theme.css">`, and colours only with its variables (`--dk-base`,
+  `--dk-panel`, `--dk-ink`, `--dk-dim`, `--dk-ok`, `--dk-bad`, `--dk-signal`, `--dk-cat-1…8`, `--dk-font-sans`, …).
+  `dreamkit check` refuses a page without the theme.
+- add loop hooks (`manifest.hooks`): per-step work belongs in a loop plugin.
+- name failures itself: reasons are dreamkit's shared codes (§7, `dreamkit.reasons`).
+
+**PDK.** `dreamkit check | test | install` work for apps: check = the rules above + pyproject + README + tests;
+test = the package's `tests/`; no per-step bench (an app has no hooks). After `dreamkit install`, restart
+`dreamkit ui` for the tab.
+
+---
+
 ## Changelog
 
 **v1.1** (decisions taken while implementing v1)
@@ -383,6 +446,12 @@ Error messages always name the rule, the file and line when known, and the fix:
 - `contacts(with_force=True)` returns `(a, b, force_n)`.
 - Bundled fixtures: `collision_table` (the mock hits the table, not the bowl) instead of `collision_bowl`; also
   `released_near_target`.
+
+**v1.5** (app plugins)
+- Second kind of plugin: `kind="app"` (§13), entry point group `dreamkit.apps`, `dreamkit.sdk.App`. DreamGym moved
+  to `plugins-external/dreamgym` as the first; its episodes run through `dreamkit.wrap` (source `gym`).
+- Shared reasons: DreamGym's `untouched` → `not_reached`, `misplaced` → `released_off_target`; new `still_held`
+  (the object never let go). Old runs still read (`reasons.LEGACY`).
 
 **v1.4** (plugin pages)
 - A plugin may ship one page in the panel (§7a): manifest `ui`, sandboxed iframe (`allow-scripts allow-downloads`),

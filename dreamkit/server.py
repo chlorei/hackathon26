@@ -448,6 +448,32 @@ def create_app(config_path: str | Path) -> FastAPI:
         html = html[: at + 6] + head + html[at + 6 :] if at >= 0 else head + html
         return Response(html, media_type="text/html")
 
+    # -- app plugins (§13): their API, their page, the shared theme -----------------------------------------
+    from . import apps as apps_mod
+
+    found_apps, app_problems = apps_mod.discover()
+    cfg0, base0 = load_cfg()
+    world = apps_mod.world_available(cfg0, base0)
+    for name, plugin_app in found_apps.items():
+        ctx = apps_mod.AppContext(config_path=config_path, base=base0, runs_dir=runs_root(), world=world, config=cfg0)
+        try:
+            if plugin_app.router is not None:
+                app.include_router(plugin_app.router(ctx), prefix=f"/apps/{name}/api")
+            if plugin_app.page is not None:
+                app.mount(f"/apps/{name}", StaticFiles(directory=plugin_app.page, html=True), name=f"app-{name}")
+        except Exception as error:  # noqa: BLE001 - one broken app never takes the panel down
+            app_problems.append(f"app {name}: could not mount: {type(error).__name__}: {error}")
+
+    @app.get("/api/apps")
+    def list_apps():
+        out = []
+        for name, a in found_apps.items():
+            d = a.describe()
+            d["inactive"] = ("needs Dream Labs' simulator (set sim_path in dreamkit.yaml, or pip install dreamlabs)"
+                             if "world" in a.manifest.needs and not world else None)
+            out.append(d)
+        return {"apps": out, "problems": app_problems, "world": world}
+
     if (UI_DIST / "index.html").is_file():
         app.mount("/", StaticFiles(directory=UI_DIST, html=True), name="ui")
     else:

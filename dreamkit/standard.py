@@ -47,6 +47,10 @@ class Manifest(BaseModel):
     pyproject.toml [tool.dreamkit] (same fields)."""
 
     api: str = API_VERSION
+    ## "loop": hooks inside your control loop (§2). "app": a page, an API and commands of its own (§13).
+    kind: Literal["loop", "app"] = "loop"
+    ## The tab's label of an app plugin ("Gym"); loop plugins show their name.
+    title: str | None = None
     group: Literal["core", "diagnosis", "safety", "output"] = "diagnosis"
     icon: str = "Plug"  # a lucide-react icon name
     capability: Literal["observe", "modify_actions", "control"] = "observe"
@@ -134,6 +138,10 @@ def check_class(cls: type) -> list[Problem]:
 
     out: list[Problem] = []
     name = getattr(cls, "name", None)
+    m0 = getattr(cls, "manifest", None)
+    if isinstance(m0, Manifest) and m0.kind != "loop":
+        out.append(Problem("§13", _where(cls, "manifest"), 'a Plugin class with kind="app"',
+                           "App plugins are dreamkit.sdk.App objects under the dreamkit.apps entry point."))
     if not isinstance(name, str) or not NAME_RE.match(name):
         out.append(Problem("§1", _where(cls, "name"), f"name {name!r} is not 1-3 kebab-case words",
                            'Set name = "gripper-check" (lowercase words joined by "-").'))

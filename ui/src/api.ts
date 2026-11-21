@@ -52,8 +52,21 @@ export interface EpisodeResult {
 export const recoveriesOf = (e: EpisodeResult) => e.recovery?.count ?? e.recoveries ?? 0
 export const latencyOf = (e: EpisodeResult) => e['latency-monitor'] ?? e.latency
 
+export interface AppInfo {
+  name: string
+  title: string
+  icon: string
+  needs: ('robot' | 'world')[]
+  description: string
+  page: boolean
+  api: boolean
+  commands: string[]
+  inactive: string | null
+}
+
 export interface RunInfo {
   id: string
+  source?: string
   task: string
   model: string
   mock: boolean
@@ -178,6 +191,7 @@ export const api = {
   removePlugin: (name: string) => call<{ ok: boolean; output: string }>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   reveal: (id: string, episode?: number) =>
     call<{ path: string }>(`/api/runs/${id}/reveal${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
+  apps: () => call<{ apps: AppInfo[]; problems: string[]; world: boolean }>('/api/apps'),
   live: () => call<{ id: string | null; task?: string; model?: string; mock?: boolean }>('/api/live'),
   harvest: (id: string) => call<{ success: number; failed: number; validation: Validation | null }>(`/api/runs/${id}/harvest`),
   validateHarvest: (id: string) => call<Validation>(`/api/runs/${id}/harvest/validate`, { method: 'POST' }),
@@ -220,6 +234,9 @@ export const REASON_LABEL: Record<string, string> = {
   grasped_air: 'grasped air',
   collision: 'collision',
   stalled: 'stalled',
+  still_held: 'still held at the end',
+  untouched: 'not reached',  // DreamGym runs before the shared codes
+  misplaced: 'released off target',
   not_reached: 'not reached',
   slow_model: 'slow model',
   timeout: 'timeout',

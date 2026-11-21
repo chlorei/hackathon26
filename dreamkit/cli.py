@@ -344,7 +344,30 @@ def cmd_harvest(args) -> int:
     return 1
 
 
+_BUILTIN_COMMANDS = {"ui", "sim", "run", "list", "search", "check", "test", "bench", "install", "publish", "new",
+                     "record", "review", "accuracy", "harvest"}
+
+
+def _app_command(argv: list[str]) -> int | None:
+    """`dreamkit <app> ...` -> the app plugin's own commands (§13); None when argv[0] is no app."""
+    if not argv or argv[0].startswith("-"):
+        return None
+    from . import apps
+
+    found, _ = apps.discover()
+    for a in found.values():
+        if argv[0] in a.aliases and a.commands is not None:
+            return int(a.commands(argv[1:]) or 0)
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    head = [a for a in argv if not a.startswith("-")][:1]
+    if head and head[0] not in _BUILTIN_COMMANDS:
+        code = _app_command(argv)
+        if code is not None:
+            return code
     parser = argparse.ArgumentParser(prog="dreamkit", description="Plugins and a monitor for Dream-1. In your loop: client = dreamkit.wrap(dream.DreamClient()); demo loop: python examples/sim_loop.py --mock")
     parser.add_argument("-c", "--config", help="dreamkit.yaml (default: ./dreamkit.yaml)")
     sub = parser.add_subparsers(dest="cmd", required=True)

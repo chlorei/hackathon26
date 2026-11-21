@@ -12,6 +12,7 @@ REASONS: dict[str, str] = {
     "collision": "collision",
     "fell_off_table": "fell off table",
     "stalled": "stalled",
+    "still_held": "still held at the end",
     "slow_model": "slow model",
     "camera_failure": "camera failure",
     "timeout": "timeout",
@@ -23,9 +24,19 @@ REASONS: dict[str, str] = {
 }
 ## Codes for a failure of the task itself (what failure-monitor diagnoses and recovery can act on).
 FAILURES = ("dropped", "released_off_target", "grasped_air", "not_reached", "collision",
-            "fell_off_table", "stalled", "slow_model", "camera_failure", "timeout")
+            "fell_off_table", "stalled", "still_held", "slow_model", "camera_failure", "timeout")
 ## Codes written by runs before the standard, still read by the panel.
-LEGACY = {"stopped_by_plugin": "camera_failure", "missed_target": "released_off_target"}
+LEGACY = {"stopped_by_plugin": "camera_failure", "missed_target": "released_off_target",
+          # DreamGym's labels before it used these codes
+          "untouched": "not_reached", "misplaced": "released_off_target", "not_settled": "timeout",
+          "api_error": "model_error", "ik_error": "error", "invalid_action": "error"}
+
+
+def code(value: str | None) -> str | None:
+    """The shared code for a value that may be an old label (LEGACY)."""
+    if value is None:
+        return None
+    return value if value in REASONS else LEGACY.get(value, value)
 
 
 def label(code: str | None) -> str:

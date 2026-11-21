@@ -63,7 +63,7 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
               <tr key={r.id} tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)}
                 className="cursor-pointer border-b border-line/60 hover:bg-raised/50">
                 <td className="whitespace-nowrap px-4 py-2.5 text-dim">{when(r.started)}{r.status === 'running' && <Tag tone="signal">running</Tag>}</td>
-                <td className="px-4 py-2.5">{r.task}</td>
+                <td className="px-4 py-2.5">{r.source === 'gym' && <span className="mr-1.5"><Tag tone="steel" title="Run by the Gym app (Arena, Compare, Record or Teleop)">Gym</Tag></span>}{r.task}</td>
                 <td className="px-4 py-2.5"><span className="tracking-[2px]">{(r.episodes ?? []).map((e) => <Outcome key={e.episode} success={e.success} />)}</span></td>
                 <td className="px-4 py-2.5"><div className="flex flex-wrap gap-1">{Object.entries(r.summary?.reasons ?? {}).map(([k, n]) => <Tag key={k} tone="bad">{REASON_LABEL[k] ?? k}{n > 1 ? ` ×${n}` : ''}</Tag>)}</div></td>
                 <td className="px-4 py-2.5 text-dim">{r.mock ? <Tag tone="warn">mock: scripted failures</Tag> : r.model}</td>
@@ -94,6 +94,7 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
         <Button variant="quiet" onClick={onBack}><ArrowLeft className="h-4 w-4" /> All runs</Button>
         <div className="min-w-0">
           <h1 className="text-[18px] font-semibold">{r.task}</h1>
+          {r.source === 'gym' && <div className="mb-1"><Tag tone="steel" title="Run by the Gym app: open the Gym tab for its statistics">Gym</Tag></div>}
           {r.mock && <div className="mb-1"><Tag tone="warn" title="The mock policy fails on purpose so the plugins can be tested; no model is called">mock: scripted failures</Tag></div>}
           <p className="text-[12px] text-dim">{when(r.started)}, {r.mock ? 'mock policy' : r.model}, {r.summary.successes} of {r.summary.attempts} attempts worked</p>
         </div>

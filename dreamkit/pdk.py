@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import re
 import shutil
@@ -30,6 +31,7 @@ class Target:
     source: str  # builtin | pip | local | source
     src: Path | None = None  # a source folder (external package)
     problems: list[str] = field(default_factory=list)
+    app: Any = None  # an app plugin (§13) instead of a loop plugin class
 
     @property
     def module(self) -> str | None:
@@ -52,9 +54,62 @@ def plugin_path(src: Path | None) -> Iterator[None]:
                 os.environ["DREAMKIT_PLUGIN_PATH"] = old
 
 
+def _resolve_app(target: str) -> Target | None:
+    """An app plugin (§13): a source folder with a dreamkit.apps entry point, or an installed app's name."""
+    from . import apps  # noqa: PLC0415
+
+    path = Path(target).expanduser()
+    if path.is_dir() and (path / "pyproject.toml").is_file():
+        src = path.resolve()
+        entries = apps._source_entries(src)
+        if not entries:
+            return None
+        found, problems = apps.discover(extra=[src])
+        name = next(iter(entries))
+        mine = found.get(name)
+        if mine is None or str(src) not in mine.origin:
+            own = [p for p in problems if name in p] or [f"{src}: app {name} did not load"]
+            return Target(name, None, "source", src, own)
+        return Target(name, None, "source", src, [], app=mine)
+    found, problems = apps.discover()
+    for a in found.values():
+        if target in a.aliases:
+            return Target(a.name, None, a.origin.split()[0], None, [], app=a)
+    return None
+
+
+def _check_app(t: Target) -> tuple[bool, list[str]]:
+    from .apps import check_app  # noqa: PLC0415
+
+    problems: list[Problem] = check_app(t.app)
+    if t.src is not None:
+        problems += [p for p in check_pyproject(t.src) if "dreamkit.plugins" not in p.what]
+        import tomllib  # noqa: PLC0415
+
+        tool = tomllib.loads((t.src / "pyproject.toml").read_text()).get("tool", {}).get("dreamkit", {})
+        declared = t.app.manifest.model_dump()
+        for key, value in tool.items():
+            if key in declared and declared[key] != value:
+                problems.append(Problem("§13", str(t.src / "pyproject.toml"), f"[tool.dreamkit] {key}={value!r} "
+                                        f"disagrees with the app's manifest ({declared[key]!r})", "Make them the same."))
+    m = t.app.manifest
+    lines = [f"{t.name} (app, {t.source}) — {t.app.description or t.app.title}",
+             f"  manifest: kind=app title={m.title!r} icon={m.icon} needs={m.needs}",
+             f"  page={'yes' if t.app.page else 'no'} api={'yes' if t.app.router else 'no'} "
+             f"commands={' | '.join('dreamkit ' + a for a in t.app.aliases) if t.app.commands else 'none'}"]
+    lines += [f"✗ {p}" for p in problems]
+    if not problems:
+        lines.append("✓ name, manifest (kind, title, icon, needs), page + theme, router, commands" +
+                     (", pyproject, README, tests" if t.src else ""))
+    return not problems, lines
+
+
 def resolve(target: str) -> Target:
     from .manager import discover  # noqa: PLC0415
 
+    app = _resolve_app(target)
+    if app is not None:
+        return app
     path = Path(target).expanduser()
     if path.is_dir() and (path / "pyproject.toml").is_file():
         src = path.resolve()
@@ -78,6 +133,8 @@ def resolve(target: str) -> Target:
 def check(target: str, readme: bool = False) -> tuple[bool, list[str]]:
     t = resolve(target)
     lines: list[str] = []
+    if t.app is not None:
+        return _check_app(t)
     if t.cls is None:
         return False, [f"✗ {p}" for p in t.problems]
     problems: list[Problem] = check_class(t.cls)
@@ -135,8 +192,10 @@ def _write_readme_table(t: Target) -> None:
 # -- test ------------------------------------------------------------------------------------------------------------
 def test(target: str, replay_fixture: str | None = None) -> tuple[bool, str]:
     t = resolve(target)
-    if t.cls is None:
+    if t.cls is None and t.app is None:
         return False, "\n".join(t.problems)
+    if replay_fixture and t.app is not None:
+        return False, "replay fixtures are for loop plugins; an app's tests are its tests/ folder"
     if replay_fixture:
         from .testing import replay  # noqa: PLC0415
 
@@ -147,6 +206,8 @@ def test(target: str, replay_fixture: str | None = None) -> tuple[bool, str]:
         out.append(f"  result: success={r.result.get('success')} reason={r.result.get('reason')}")
         return not r.errors(t.name), "\n".join(out)
     tests = (t.src / "tests") if t.src else (BUILTIN_TESTS / f"test_{t.module}.py" if t.module else None)
+    if t.app is not None and t.src is None:
+        return True, f"{t.name}: installed app; run its tests from its source folder"
     if tests is None or not tests.exists():
         return False, f"no tests for {t.name} (§9)"
     env = dict(os.environ)
@@ -162,6 +223,8 @@ def bench(target: str, accuracy: bool = False) -> tuple[bool, list[str]]:
     from .testing import fixtures, replay  # noqa: PLC0415
 
     t = resolve(target)
+    if t.app is not None:
+        return True, [f"{t.name}: app plugin, no per-step bench (it has no loop hooks; §13)"]
     if t.cls is None:
         return False, t.problems
     names = fixtures()
@@ -252,9 +315,24 @@ def install(target: str) -> tuple[bool, str]:
         log += ["-- pip install", (proc.stdout + proc.stderr).strip()[-1500:]]
         if proc.returncode != 0:
             return False, _save_log(log + ["✗ pip install failed"], False)
-        name = resolve(str(src)).name
+        target_info = resolve(str(src))
+        name = target_info.name
         from .manager import discover  # noqa: PLC0415
 
+        if target_info.app is not None:
+            from . import apps  # noqa: PLC0415
+
+            importlib.invalidate_caches()
+            found_apps, app_problems = apps.discover()
+            if name not in found_apps or not found_apps[name].origin.startswith("pip"):
+                dist = _dist_name(src)
+                subprocess.run(registry.pip_command("uninstall", *(["-y"] if "uv" not in registry.pip_command()[0] else []),
+                                                    dist), capture_output=True, text=True)
+                return False, _save_log(log + [f"✗ installed but the app did not load ({app_problems}); rolled back"], False)
+            ok = True
+            log.append(f"✓ {name} installed and checked — restart `dreamkit ui` for its tab "
+                       f"({found_apps[name].title}); commands: dreamkit {found_apps[name].aliases[-1]} --help")
+            return True, _save_log(log, True)
         found, problems = discover()
         if name not in found or found[name]["source"] != "pip":
             dist = _dist_name(src)
