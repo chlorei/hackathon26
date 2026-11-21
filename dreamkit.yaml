@@ -1,0 +1,25 @@
+# dreamkit: the whole configuration. Copy to dreamkit.yaml.
+sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator (relative to this file)
+model: dreamlabs/dream-1-beta
+task: put apple into the bowl
+episodes: 5
+seconds: 60              # simulated time per attempt
+actions_per_chunk: 24    # rows executed per model reply, 1..48
+seed: 42                 # scenes are reproducible
+randomize:
+  objects: [apple, orange, banana]
+  xy_jitter: 0.02        # metres
+plugins:
+  - camera-check
+  - latency-monitor: {warn_ms: 700}
+  - safety
+  - success-check
+  - failure-monitor
+  - retry: {attempts: 2, on: [not_reached, grasped_air, dropped, missed_target]}
+  - recorder: {fps: 10}
+  - report
+# --mock: a scripted policy instead of Dream-1 (no credits). Behaviours cycle per attempt:
+# success, dropped, not_reached, grasped_air, missed_target, stalled, collision
+mock:
+  behaviors: [dropped, success]
+  latency_ms: 250

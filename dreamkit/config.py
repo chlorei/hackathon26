@@ -56,10 +56,14 @@ class Config(BaseModel):
             if isinstance(item, str):
                 out.append({"name": item})
             elif isinstance(item, dict) and "name" in item:
+                item = dict(item)
+                item["params"] = {("on" if k is True else "off" if k is False else k): v
+                                  for k, v in (item.get("params") or {}).items()}
                 out.append(item)
             elif isinstance(item, dict) and len(item) == 1:
                 (name, params), = item.items()
-                params = dict(params or {})
+                # YAML 1.1 reads a bare `on:` key as True (retry's `on: [...]`): give it its name back.
+                params = {("on" if k is True else "off" if k is False else k): v for k, v in (params or {}).items()}
                 enabled = params.pop("enabled", True)
                 out.append({"name": name, "enabled": enabled, "params": params})
             else:
