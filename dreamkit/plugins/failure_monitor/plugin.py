@@ -133,7 +133,7 @@ class FailureMonitor(Plugin):
         row: dict[str, Any] = {"t": round(ctx.t, 3)}
         cmd = ctx.command
         for i, s in enumerate(SIDES):
-            row[f"cmd_{s}"] = float(cmd[i][6]) if cmd is not None else w.grip(s)
+            row[f"cmd_{s}"] = float(cmd[i][6]) if cmd is not None else float(ctx.state[s][6]) if ctx.state else w.grip(s)
             row[f"tcp_{s}"] = w.tcp(s)
         if self.obj:
             pos = w.pos(self.obj)
@@ -222,7 +222,7 @@ class FailureMonitor(Plugin):
     def _contacts(self, ctx: PluginContext) -> None:
         p = self.params
         now: dict[tuple[str, str], float] = {}
-        for a, b, f in ctx.world.contacts(with_force=True):
+        for a, b, f in ctx.world.contacts(with_force=True, prefixes=("left_", "right_")):
             if not (_robot(a) or _robot(b)):
                 continue
             if _robot(a) and _robot(b) and a.split("_")[0] == b.split("_")[0]:

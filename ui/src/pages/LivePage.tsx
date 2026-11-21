@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CameraOff, FolderOpen } from 'lucide-react'
-import { api, REASON_LABEL, type EpisodeResult, type EventRecord } from '../api'
+import { api, atOf, REASON_LABEL, tOf, type EpisodeResult, type EventRecord } from '../api'
 import { useLive, useRunStream, type LiveStore } from '../useRunStream'
-import { AttemptStrip, Button, LEVEL_TONE, Outcome, Panel, PanelTitle, PluginIcon, Sparkline, Tag, type Mark } from '../ui'
+import { AttemptStrip, Button, ICON_BY_PLUGIN, LEVEL_TONE, Outcome, Panel, PanelTitle, PluginIcon, Sparkline, Tag, type Mark } from '../ui'
 
 const CAMS: Record<string, string> = { top: 'Overhead', left: 'Left wrist', right: 'Right wrist' }
 
@@ -24,6 +24,8 @@ with client.episode("put apple into the bowl", env=env):
 /** Watches whatever run the user's loop is writing. It never starts anything. */
 export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episode?: number) => void }) {
   const live = useQuery({ queryKey: ['live'], queryFn: api.live, refetchInterval: 2000 })
+  const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
+  for (const p of plugins.data?.plugins ?? []) ICON_BY_PLUGIN[p.name] = p.icon
   const [runId, setRunId] = useState<string | null>(null)
   useEffect(() => {
     const id = live.data?.id
@@ -51,12 +53,12 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
             )}
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-line px-4 py-3 md:grid-cols-4">
-            <Sparkline live={stream.live} field="d" label="Hand to object" unit="cm" scale={100} color="#7fb2e5" />
-            <Sparkline live={stream.live} field="z" label="Object lifted" unit="cm" scale={100} color="#4ade80" max={20} />
-            <Sparkline live={stream.live} field="dt" label="Object to target" unit="cm" scale={100} color="#c4a7f5" />
+            <Sparkline live={stream.live} field="d" label="Hand to object" unit="cm" scale={100} color="#2f8fb3" />
+            <Sparkline live={stream.live} field="z" label="Object lifted" unit="cm" scale={100} color="#1f8a5b" max={20} />
+            <Sparkline live={stream.live} field="dt" label="Object to target" unit="cm" scale={100} color="#8a5cc2" />
             {live.data?.mock ? (
               <div className="text-[12px]"><span className="text-dim">Model round trip</span><p className="mt-2 text-faint">Mock: no model calls</p></div>
-            ) : <Sparkline live={stream.live} field="rtt" label="Model round trip" unit="ms" color="#f0b43c" warnAbove={700} />}
+            ) : <Sparkline live={stream.live} field="rtt" label="Model round trip" unit="ms" color="#d9822b" warnAbove={700} />}
           </div>
         </Panel>
         <Attempts episodes={stream.episodes} current={current} onOpen={(ep) => onOpenRun(runId, ep)} />
@@ -114,9 +116,9 @@ function Waiting() {
 
 function marksFrom(events: EventRecord[], episode: number): Mark[] {
   return events
-    .filter((e) => e.episode === episode && e.t != null && e.plugin !== 'dreamkit')
+    .filter((e) => e.episode === episode && tOf(e) != null && e.plugin !== 'dreamkit')
     .filter((e) => e.plugin !== 'failure-monitor' || e.data.kind)
-    .map((e) => ({ t: e.t!, label: `${e.plugin}: ${e.message}`, tone: e.level === 'error' ? 'bad' : e.level === 'warn' ? 'warn' : e.level === 'success' ? 'ok' : 'info' }))
+    .map((e) => ({ t: tOf(e)!, label: `${e.plugin}: ${e.message}`, tone: e.level === 'error' ? 'bad' : e.level === 'warn' ? 'warn' : e.level === 'success' ? 'ok' : 'info' }))
 }
 
 /** One big camera and two small ones; click a small one to swap. Frames are written straight into <img>. */
@@ -159,7 +161,7 @@ function CameraView({ live, cam, running, large }: { live: LiveStore; cam: strin
           <span className="text-[12px]">{running ? 'Waiting for frames' : 'Cameras show here during a run'}</span>
         </div>
       )}
-      <span className={clsx('absolute left-2 top-2 flex items-center gap-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[12px] text-ink', large && 'text-[13px]')}>
+      <span className={clsx('absolute left-2 top-2 flex items-center gap-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[12px] text-white', large && 'text-[13px]')}>
         {running && has && <span className="h-1.5 w-1.5 rounded-full bg-signal" />}
         {CAMS[cam]}
       </span>
@@ -197,7 +199,7 @@ function Attempts({ episodes, current, onOpen }: {
               <Outcome success={e.success} />
               <span className="w-24 shrink-0 text-[13px] text-dim">Scene {e.scene + 1}{e.attempt > 1 ? `, retry ${e.attempt - 1}` : ''}</span>
               <span className={clsx('min-w-0 flex-1 truncate text-[13px]', e.success ? 'text-ink' : 'text-bad')}>
-                {e.success ? `Done in ${e.duration_s.toFixed(1)} s` : e.recap?.headline?.replace(/^Attempt \d+: /, '') ?? `${e.message ?? REASON_LABEL[e.reason ?? 'unknown']}${e.at != null ? ` at ${e.at.toFixed(1)} s` : ''}`}
+                {e.success ? `Done in ${e.duration_s.toFixed(1)} s` : e.recap?.headline?.replace(/^Attempt \d+: /, '') ?? `${e.message ?? REASON_LABEL[e.reason ?? 'unknown']}${atOf(e) != null ? ` at ${atOf(e)!.toFixed(1)} s` : ''}`}
               </span>
               <span className="shrink-0 text-[12px] text-steel">{e.success ? 'Replay' : 'Watch the failure'}</span>
             </button>
@@ -238,13 +240,13 @@ function Feed({ events, onWatch }: { events: EventRecord[]; onWatch: (episode: n
         {shown.map((e, i) => {
           const verdict = e.plugin === 'failure-monitor' && e.level === 'error' && Boolean(e.data.reason)
           return (
-            <div key={`${e.ts}-${i}`} className={clsx('flex gap-2.5 border-b border-line/60 px-4 py-2', verdict && 'bg-bad/8')}>
+            <div key={`${e.ts}-${i}`} className={clsx('flex gap-2.5 border-b border-line/60 px-4 py-2', verdict && 'bg-bad-soft')}>
               <PluginIcon name={e.plugin} className={clsx('mt-0.5', LEVEL_TONE[e.level])} />
               <div className="min-w-0 flex-1">
                 <p className={clsx('text-[13px]', verdict ? 'font-medium text-bad' : e.level === 'info' ? 'text-ink' : LEVEL_TONE[e.level])}>{e.message}</p>
-                <p className="text-[11px] text-faint">{e.plugin}{e.t != null ? `, ${e.t.toFixed(1)} s` : ''}{e.episode ? ` in attempt ${e.episode}` : ''}</p>
+                <p className="text-[11px] text-faint">{e.plugin}{tOf(e) != null ? `, ${tOf(e)!.toFixed(1)} s` : ''}{e.episode ? ` in attempt ${e.episode}` : ''}</p>
                 {verdict && e.episode != null && (
-                  <button onClick={() => onWatch(e.episode!)} className="mt-1 text-[12px] text-steel hover:underline">Watch from {Math.max(0, Number(e.data.at) - 1).toFixed(1)} s</button>
+                  <button onClick={() => onWatch(e.episode!)} className="mt-1 text-[12px] text-signal hover:underline">Watch from {Math.max(0, Number(e.data.at_s ?? e.data.at) - 1).toFixed(1)} s</button>
                 )}
               </div>
             </div>

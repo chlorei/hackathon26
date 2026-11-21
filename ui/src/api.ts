@@ -9,9 +9,15 @@ export interface EventRecord {
   level: Level
   message: string
   episode: number | null
-  t: number | null
+  t_s?: number | null
+  t?: number | null  // runs before the standard
   data: Record<string, unknown>
 }
+
+/** An event's time, for runs written before and after the plugin standard. */
+export const tOf = (e: { t_s?: number | null; t?: number | null }) => e.t_s ?? e.t ?? null
+/** An attempt's failure time, before and after the standard. */
+export const atOf = (e: { at_s?: number; at?: number }) => e.at_s ?? e.at
 
 export interface EpisodeResult {
   episode: number
@@ -23,6 +29,8 @@ export interface EpisodeResult {
   success: boolean | null
   reason: string | null
   at?: number
+  at_s?: number
+  stopped_by?: string
   message?: string
   details?: Record<string, unknown>
   candidates?: { reason: string; at: number }[]
@@ -34,7 +42,14 @@ export interface EpisodeResult {
   recap?: { headline: string; moments: { t: number; text: string; tone: 'bad' | 'good' | 'info'; verdict?: boolean }[]; video: string | null }
   gripper?: { t: number; side: string; kind: string }[]
   recoveries?: number
+  recovery?: { count: number; actions: string[]; worked: boolean }
+  'latency-monitor'?: { mean_ms?: number; p95_ms?: number; max_ms?: number; calls?: number; mock?: boolean }
+  harvester?: { split: string; path: string; frames: number }
+  ui?: Record<string, { metrics: Record<string, { value: number; unit: string }>; marks: { t_s: number; label: string; level: string }[]; badges: { text: string; level: string }[] }>
 }
+
+export const recoveriesOf = (e: EpisodeResult) => e.recovery?.count ?? e.recoveries ?? 0
+export const latencyOf = (e: EpisodeResult) => e['latency-monitor'] ?? e.latency
 
 export interface RunInfo {
   id: string
@@ -50,11 +65,21 @@ export interface RunInfo {
   episodes: EpisodeResult[]
   summary: { attempts: number; successes: number; scenes: number; scene_successes: number; reasons: Record<string, number> }
   events?: StreamRecord[]
-  report?: boolean
+  report?: string | null
   live?: boolean
   path?: string
   light?: boolean
   recap?: { text: string; attempts: string[] } | null
+}
+
+export interface PluginStats {
+  ms_per_step: number
+  on_step_p95_ms?: number
+  errors: number
+  last_error: string | null
+  disabled: string | null
+  suppressed_events: number
+  hooks: Record<string, { calls: number; avg_ms: number; max_ms: number }>
 }
 
 export interface PluginInfo {
@@ -62,12 +87,32 @@ export interface PluginInfo {
   installed: boolean
   enabled: boolean
   in_config: boolean
+  order: number
   description: string
   source: string | null
-  group: string
-  order: number
+  group: 'core' | 'diagnosis' | 'safety' | 'output' | string
+  icon: string
+  capability: 'observe' | 'modify_actions' | 'control'
+  manifest: { hooks?: string[]; step_rate_hz?: number; needs_frames?: boolean; requires?: string[]; conflicts?: string[] }
+  schema: { properties?: Record<string, SchemaProp>; required?: string[] }
   params: Record<string, unknown>
   defaults: Record<string, unknown>
+  stats: PluginStats | null
+  refused: string | null
+  conflicts: string[]
+}
+
+export interface SchemaProp {
+  type?: string
+  title?: string
+  description?: string
+  unit?: string
+  choices?: string[]
+  minimum?: number
+  maximum?: number
+  exclusiveMinimum?: number
+  items?: { type?: string }
+  anyOf?: { type?: string }[]
 }
 
 export interface RegistryEntry {
@@ -119,7 +164,7 @@ export const api = {
   updatePlugin: (name: string, body: { enabled?: boolean; params?: Record<string, unknown> }) =>
     call<{ plugins: PluginInfo[] }>(`/api/plugins/${encodeURIComponent(name)}`, { method: 'POST', body: JSON.stringify(body) }),
   registry: () => call<{ source: string; plugins: RegistryEntry[] }>('/api/registry'),
-  install: (name: string) => call<{ ok: boolean; output?: string }>('/api/install', { method: 'POST', body: JSON.stringify({ name }) }),
+  install: (name: string) => call<{ ok: boolean; log: string }>('/api/install', { method: 'POST', body: JSON.stringify({ name }) }),
   runs: () => call<{ runs: RunInfo[] }>('/api/runs'),
   run: (id: string) => call<RunInfo>(`/api/runs/${id}`),
   trace: (id: string, episode: number) =>
@@ -166,6 +211,8 @@ export const REASON_LABEL: Record<string, string> = {
   dropped: 'dropped',
   missed_target: 'missed target',
   released_off_target: 'released off target',
+  camera_failure: 'camera failure',
+  stopped_by_plugin: 'camera failure',
   grasped_air: 'grasped air',
   collision: 'collision',
   stalled: 'stalled',
@@ -173,7 +220,6 @@ export const REASON_LABEL: Record<string, string> = {
   slow_model: 'slow model',
   timeout: 'timeout',
   stopped: 'stopped',
-  stopped_by_plugin: 'stopped by plugin',
   model_error: 'model error',
   error: 'error',
   unknown: 'unknown',

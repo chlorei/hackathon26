@@ -1,19 +1,17 @@
 import clsx from 'clsx'
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
-import {
-  Activity, Camera, CircleCheck, Clapperboard, Film, FileText, Gauge, Hand, Plug, RefreshCcw, ScanSearch, ShieldCheck,
-} from 'lucide-react'
+import { icons, Plug } from 'lucide-react'
 import type { Level } from './api'
 import type { LiveStore } from './useRunStream'
 
 export function Panel({ className, children }: { className?: string; children: ReactNode }) {
-  return <section className={clsx('rounded-lg border border-line bg-panel', className)}>{children}</section>
+  return <section className={clsx('rounded-xl border border-line bg-panel', className)}>{children}</section>
 }
 
 export function PanelTitle({ children, right, className }: { children: ReactNode; right?: ReactNode; className?: string }) {
   return (
-    <div className={clsx('flex items-center justify-between gap-3 px-4 pt-3 pb-2', className)}>
-      <h2 className="text-[13px] font-medium text-dim">{children}</h2>
+    <div className={clsx('flex items-center justify-between gap-3 px-5 pt-4 pb-2.5', className)}>
+      <h2 className="text-[13px] font-semibold uppercase tracking-[.06em] text-dim">{children}</h2>
       {right}
     </div>
   )
@@ -25,11 +23,11 @@ export function Button({ variant = 'line', className, ...props }: ButtonHTMLAttr
     <button
       {...props}
       className={clsx(
-        'inline-flex items-center justify-center gap-2 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40',
-        variant === 'go' && 'bg-signal text-base hover:brightness-110',
-        variant === 'stop' && 'bg-bad text-white hover:brightness-110',
+        'inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-1.5 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40',
+        variant === 'go' && 'bg-ink text-white hover:bg-black',
+        variant === 'stop' && 'border border-line bg-panel text-bad hover:bg-bad-soft',
         variant === 'quiet' && 'text-dim hover:bg-raised hover:text-ink',
-        variant === 'line' && 'border border-line text-ink hover:bg-raised',
+        variant === 'line' && 'border border-line bg-panel text-ink hover:bg-raised',
         className,
       )}
     />
@@ -51,7 +49,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={clsx(
-        'w-full rounded-md border border-line bg-base px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-faint focus:border-dim disabled:opacity-60',
+        'w-full rounded-lg border border-line bg-panel px-2.5 py-1.5 text-[13px] text-ink outline-none placeholder:text-faint focus:border-dim disabled:opacity-60',
         props.className,
       )}
     />
@@ -62,34 +60,38 @@ export function Toggle({ checked, onChange, disabled, label }: { checked: boolea
   return (
     <button type="button" role="switch" aria-checked={checked} disabled={disabled} onClick={() => onChange(!checked)}
       className="group inline-flex items-center gap-2 text-[13px] text-dim disabled:opacity-40">
-      <span className={clsx('relative h-[18px] w-8 shrink-0 rounded-full transition-colors', checked ? 'bg-signal' : 'bg-line')}>
-        <span className={clsx('absolute top-[2px] h-[14px] w-[14px] rounded-full bg-base transition-all', checked ? 'left-[16px]' : 'left-[2px]')} />
+      <span className={clsx('relative h-[18px] w-8 shrink-0 rounded-full transition-colors', checked ? 'bg-ok' : 'bg-line')}>
+        <span className={clsx('absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-all', checked ? 'left-[16px]' : 'left-[2px]')} />
       </span>
       {label}
     </button>
   )
 }
 
-export function Tag({ tone = 'plain', children, title }: { tone?: 'plain' | 'ok' | 'bad' | 'signal' | 'steel'; children: ReactNode; title?: string }) {
+export function Tag({ tone = 'plain', children, title }: { tone?: 'plain' | 'ok' | 'bad' | 'signal' | 'steel' | 'warn'; children: ReactNode; title?: string }) {
   return (
-    <span title={title} className={clsx('inline-flex items-center gap-1 rounded px-1.5 py-px text-[12px]',
+    <span title={title} className={clsx('inline-flex items-center gap-1 rounded-[20px] px-2 py-px text-[12px] font-semibold',
       tone === 'plain' && 'bg-raised text-dim',
-      tone === 'ok' && 'bg-ok/12 text-ok',
-      tone === 'bad' && 'bg-bad/12 text-bad',
-      tone === 'signal' && 'bg-signal/15 text-signal',
-      tone === 'steel' && 'bg-steel/12 text-steel')}>{children}</span>
+      tone === 'ok' && 'bg-ok-soft text-ok',
+      tone === 'bad' && 'bg-bad-soft text-bad',
+      tone === 'signal' && 'bg-signal-soft text-signal',
+      tone === 'warn' && 'bg-[#f6ecdc] text-warn',
+      tone === 'steel' && 'bg-[#e3f0f5] text-steel')}>{children}</span>
   )
 }
 
-export const LEVEL_TONE: Record<Level, string> = { info: 'text-dim', warn: 'text-signal', error: 'text-bad', success: 'text-ok' }
-
-const PLUGIN_ICONS: Record<string, typeof Plug> = {
-  'success-check': CircleCheck, 'failure-monitor': ScanSearch, 'camera-check': Camera, retry: RefreshCcw,
-  'latency-monitor': Gauge, recorder: Film, safety: ShieldCheck, report: FileText, recap: Clapperboard,
-  'gripper-check': Hand, dreamkit: Activity,
+export function StatusDot({ tone, pulse }: { tone: 'ok' | 'bad' | 'run' | 'off' | 'warn'; pulse?: boolean }) {
+  return <span className={clsx('inline-block h-[9px] w-[9px] shrink-0 rounded-full',
+    tone === 'ok' && 'bg-ok', tone === 'bad' && 'bg-bad', tone === 'run' && 'bg-signal', tone === 'warn' && 'bg-warn',
+    tone === 'off' && 'bg-[#cfccc5]', pulse && 'dk-pulse')} />
 }
-export function PluginIcon({ name, className }: { name: string; className?: string }) {
-  const Icon = PLUGIN_ICONS[name] ?? Plug
+
+export const LEVEL_TONE: Record<Level, string> = { info: 'text-dim', warn: 'text-warn', error: 'text-bad', success: 'text-ok' }
+
+/** Plugin icons come from the plugin's manifest (a lucide icon name); the feed learns them from /api/plugins. */
+export const ICON_BY_PLUGIN: Record<string, string> = { dreamkit: 'Activity' }
+export function PluginIcon({ name, icon, className }: { name: string; icon?: string; className?: string }) {
+  const Icon = (icons as Record<string, typeof Plug>)[icon ?? ICON_BY_PLUGIN[name] ?? 'Plug'] ?? Plug
   return <Icon className={clsx('h-[15px] w-[15px] shrink-0', className)} strokeWidth={1.75} />
 }
 
@@ -124,7 +126,7 @@ export function AttemptStrip({ duration, marks, verdict, playhead, onSeek, live 
   return (
     <div className="select-none">
       <div
-        className={clsx('relative h-11 rounded-md border border-line bg-base', onSeek && 'cursor-pointer')}
+        className={clsx('relative h-11 rounded-lg border border-line bg-raised', onSeek && 'cursor-pointer')}
         onMouseMove={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
           setHover(((e.clientX - r.left) / r.width) * span)
@@ -137,12 +139,12 @@ export function AttemptStrip({ duration, marks, verdict, playhead, onSeek, live 
         }}
       >
         {playhead != null && (
-          <div className={clsx('absolute inset-y-0 left-0 rounded-l-md', live ? 'bg-signal/10' : 'bg-raised/60')} style={{ width: pct(playhead) }} />
+          <div className={clsx('absolute inset-y-0 left-0 rounded-l-lg', live ? 'bg-signal-soft' : 'bg-white/70')} style={{ width: pct(playhead) }} />
         )}
         {marks.map((m, i) => (
           <div key={i} title={`${m.t.toFixed(1)} s  ${m.label}`} className="group absolute inset-y-0" style={{ left: pct(m.t) }}>
             <div className={clsx('absolute top-2 bottom-2 w-[3px] -translate-x-1/2 rounded-full',
-              m.tone === 'bad' && 'bg-bad', m.tone === 'warn' && 'bg-signal', m.tone === 'ok' && 'bg-ok', m.tone === 'info' && 'bg-steel/80')} />
+              m.tone === 'bad' && 'bg-bad', m.tone === 'warn' && 'bg-warn', m.tone === 'ok' && 'bg-ok', m.tone === 'info' && 'bg-steel/80')} />
           </div>
         ))}
         {verdict && (
@@ -156,7 +158,7 @@ export function AttemptStrip({ duration, marks, verdict, playhead, onSeek, live 
         )}
         {hover != null && onSeek && (
           <div className="pointer-events-none absolute inset-y-0 w-px bg-ink/40" style={{ left: pct(hover) }}>
-            <span className="absolute -top-6 -translate-x-1/2 rounded bg-raised px-1.5 py-0.5 text-[11px] text-ink">{hover.toFixed(1)} s</span>
+            <span className="absolute -top-6 -translate-x-1/2 rounded-md bg-ink px-1.5 py-0.5 text-[11px] text-white">{hover.toFixed(1)} s</span>
           </div>
         )}
       </div>
@@ -206,7 +208,7 @@ export function Sparkline({ live, field, label, unit, color, scale = 1, max, war
       const x = (t: number) => ((t - t0) / window) * w
       const y = (v: number) => h - 4 * devicePixelRatio - (Math.max(0, v) / top) * (h - 8 * devicePixelRatio)
       if (warnAbove != null && warnAbove < top) {
-        ctx.strokeStyle = 'rgba(240,180,60,.45)'
+        ctx.strokeStyle = 'rgba(183,121,31,.5)'
         ctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio])
         ctx.beginPath(); ctx.moveTo(0, y(warnAbove)); ctx.lineTo(w, y(warnAbove)); ctx.stroke()
         ctx.setLineDash([])

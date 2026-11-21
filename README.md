@@ -62,7 +62,8 @@ If your `dreamlabs` checkout is somewhere else, set `sim_path` in `dreamkit.yaml
 ```bash
 python examples/sim_loop.py --mock --episodes 2   # a scripted arm drops the apple; recovery fixes it
 dreamkit ui                                       # in another terminal: http://127.0.0.1:8800, Live page
-pytest -q                                         # 20 passed
+pytest -q                                         # every test, no credits
+dreamkit check --all                              # every plugin against the standard
 ```
 
 **Dream-1 itself** needs an API key from [platform.dreamlabs.ai](https://platform.dreamlabs.ai/api-keys), either in
@@ -90,12 +91,12 @@ path and an *Open folder* button):
 
 | file | what |
 |---|---|
-| `ep<N>/top.mp4`, `left.mp4`, `right.mp4` | each camera, per attempt; video time = simulated time |
-| `ep<N>/recap.mp4` | the key moments of the attempt, captioned |
-| `ep<N>/trace.json` | what failure-monitor measured, step by step |
-| `dataset/success/ep<N>/`, `dataset/failed/ep<N>/` | harvester: one LeRobot v2.1 dataset per attempt, `dreamkit.json` has the outcome |
+| `recorder/ep003_top.mp4` … | each camera, per attempt; video time = simulated time |
+| `recap/ep003_recap.mp4`, `recap/summary.json` | the key moments, captioned; the run in plain words |
+| `failure-monitor/ep003_trace.json` | what failure-monitor measured, step by step |
+| `harvester/success/ep003/`, `harvester/failed/ep003/` | one LeRobot v2.1 dataset per attempt, `dreamkit.json` has the outcome |
 | `run.json`, `events.jsonl` | results and the full event feed |
-| `report.html`, `recap.json` | the run summary |
+| `report/report.html` | the run summary |
 
 **Less CPU.** Switch on *Light mode* in the panel (or `light: true` in `dreamkit.yaml`): cameras are rendered at
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
@@ -129,7 +130,7 @@ plugins:
   - latency-monitor: {warn_ms: 700}
   - success-check
   - failure-monitor
-  - retry: {attempts: 2, on: [not_reached, grasped_air]}
+  - recovery: {max_recoveries: 3, retry_attempts: 1}
   - recorder: {fps: 10}
   - recap
   - report
@@ -141,11 +142,10 @@ plugins:
 |---|---|
 | `success-check` | object in the bowl / on the plate with the gripper released → success; ends the attempt early |
 | `failure-monitor` | first cause in time: `fell_off_table`, `dropped` (gripper never opened), `released_off_target`, `missed_target`, `grasped_air`, `collision`, `stalled`, `not_reached`, `slow_model`, `timeout`; live verdicts mid-attempt |
-| `recovery` | on a live verdict: arms home (`yam_env.home_path`) + `reset_episode()` + same prompt; for grasped air, open and lift 5 cm and continue; at most `max_recoveries` |
+| `recovery` | the one control plugin. On a live verdict: arms home (`yam_env.home_path`) + `reset_episode()` + same prompt; grasped air: open, lift 5 cm, continue; `camera_failure`: stop; then retry the scene (`retry_attempts`) |
 | `harvester` | every attempt as LeRobot v2.1 (state/action: right arm, right gripper, left arm, left gripper; videos overhead / wrist_l / wrist_r) |
 | `recap` | per attempt a captioned highlights clip and one-sentence story; per run a plain-language summary |
-| `camera-check` | stops before the next model call when a camera is black / uniform / frozen (`simulate_failure: top` for a demo) |
-| `retry` | same scene again for chosen failure reasons |
+| `camera-check` | flags a black, uniform or frozen camera before the next model call; recovery stops the robot (`faults: {camera_black: top}` in dreamkit.yaml for a demo) |
 | `latency-monitor` | warns above `warn_ms`; mean and p95 per attempt and per run |
 | `recorder` | MP4 per camera per attempt; `top.mp4#t=9.3` is the moment |
 | `safety` | joint speed cap and a workspace box for the tool points, only ever *stricter* than the simulator |
@@ -155,23 +155,55 @@ Every threshold is a plugin setting: on the Plugins page, or `- failure-monitor:
 
 ## Write a plugin
 
-```python
-from dreamkit import Plugin
+Every plugin follows [docs/PLUGIN_STANDARD.md](docs/PLUGIN_STANDARD.md) — and cannot do otherwise: a plugin that
+breaks it does not import, and the error says the rule, the file:line and the fix.
 
-class GripperCheck(Plugin):
-    name = "gripper-check"
-    defaults = {"closed_below": 0.2}
-
-    def on_step(self, ctx):                       # 20 Hz, after every env.step
-        if ctx.state["right"][6] < self.params["closed_below"]:
-            ctx.emit("warn", "right gripper closed")
+```bash
+dreamkit new hand-distance --kind observe      # or modify / control: a package that already passes everything
+dreamkit check dreamkit-hand-distance          # manifest, Params (descriptions, units), docstring, names
+dreamkit test dreamkit-hand-distance           # replay tests: no simulator, no model, no credits
+dreamkit bench dreamkit-hand-distance          # ms/step on all 12 bundled fixtures, budget 1 ms
+dreamkit install ./dreamkit-hand-distance      # check + test + bench first, then pip install; refused otherwise
 ```
 
-Hooks: `on_run_start`, `on_episode_start`, `before_model`, `after_model` (edit `ctx.actions`), `on_step`,
-`on_episode_end` (write `ctx.result`), `on_run_end`. `ctx.stop(reason)` ends the attempt, `ctx.request_retry()` asks
-for another, `ctx.telemetry(name=value)` draws a live graph, `ctx.override(left_rows, right_rows)` answers a
-`get_action()` instead of the model and `ctx.reset_policy()` starts a new model session (what recovery uses). A plugin that raises never stops the run: the error shows
-up in the feed under its name.
+```python
+from pydantic import BaseModel, Field
+from dreamkit import Manifest, Plugin
+
+
+class Params(BaseModel):
+    closed_cmd: float = Field(0.3, ge=0, le=1, description="Gripper command below which it is shut",
+                              json_schema_extra={"unit": ""})
+    settle_s: float = Field(0.6, ge=0, description="How long the fingers get to close",
+                            json_schema_extra={"unit": "s"})
+
+
+class GripperCheck(Plugin):
+    """Catches a gripper closed on nothing and a grip that loosens mid-carry."""
+
+    name = "gripper-check"
+    Params = Params
+    manifest = Manifest(group="diagnosis", icon="Hand", capability="observe",
+                        hooks=["on_episode_start", "on_step"], step_rate_hz=10)
+
+    def on_episode_start(self, ctx):
+        self.closed_at = None
+
+    def on_step(self, ctx):
+        if ctx.world.grip("right") < 0.04:                      # ctx.world: pos, tcp, grip, contacts, table_z
+            ctx.emit("warn", "right gripper closed on nothing")   # checked: level, form, units, 1/s
+            ctx.ui.mark(ctx.t, "closed on nothing", "warn")      # the panel's timeline
+```
+
+What a plugin may do depends on its capability: `observe` reads (and reports failures with `ctx.verdict`),
+`modify_actions` may only make the chunk stricter (the manager rejects anything faster or outside joint limits),
+`control` may stop, retry or drive the arms — and only one control plugin (`recovery`) is on at a time. Files go to
+`run_dir/<plugin>/` through `ctx.files`, slow work through `ctx.defer`, the UI through `ctx.ui.*`. Every hook is timed;
+5 errors in a row or a plugin over its 1 ms/step budget three times is switched off, and the panel says why.
+
+Fixtures for tests: `dreamkit.testing.replay("dropped_mid_carry", plugins=["failure-monitor"])`; record new ones from
+the simulator with `dreamkit record my_case --mock --behavior grasped_air`.
+`dreamkit bench failure-monitor --accuracy` scores the verdicts on the whole fixture library (12/12 today).
 
 ## Rules we keep
 
@@ -184,7 +216,7 @@ every chunk goes through `dream_control.validate_chunk`, twice when a plugin edi
 ```
 your loop ⇄ dreamkit.wrap(DreamClient) ⇄ DreamAPI          dreamkit ui (FastAPI :8800) → React
               │ hooks → plugins                                ▲ reads the files, never the process
-              └→ runs/<id>/  run.json  events.jsonl  live/*.jpg  live.json  ep<N>/*.mp4  dataset/
+              └→ runs/<id>/  run.json  events.jsonl  live/*.jpg  live.json  <plugin>/…
 ```
 
 The panel follows the run folder (events, live frames, a heartbeat with telemetry), so your loop never depends on it:

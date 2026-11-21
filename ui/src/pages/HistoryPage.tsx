@@ -3,10 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ArrowLeft, Clapperboard, Database, FileText, FolderOpen, Trash2 } from 'lucide-react'
-import { api, REASON_LABEL, type EpisodeResult, type RunInfo } from '../api'
+import { api, atOf, recoveriesOf, REASON_LABEL, type EpisodeResult, type RunInfo } from '../api'
 import { AttemptStrip, Button, Outcome, Panel, PanelTitle, Tag, when, type Mark } from '../ui'
 
-const TIP = { contentStyle: { background: '#222a35', border: '1px solid #2c3540', borderRadius: 6, fontSize: 12, color: '#e6e9ed' } }
+const TIP = { contentStyle: { background: '#ffffff', border: '1px solid #e4e2dc', borderRadius: 8, fontSize: 12, color: '#17181a' } }
 const BAD_KINDS = new Set(['separated', 'fell', 'collision', 'stalled'])
 
 export default function HistoryPage({ runId, episode, onOpen, onBack }: {
@@ -42,10 +42,10 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
             {reasons.length ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={reasons} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <XAxis type="number" allowDecimals={false} tick={{ fill: '#5b6673', fontSize: 11 }} axisLine={false} tickLine={false} />
-                  <YAxis type="category" dataKey="reason" tick={{ fill: '#8b96a3', fontSize: 12 }} width={110} axisLine={false} tickLine={false} />
-                  <Tooltip {...TIP} cursor={{ fill: '#222a35' }} />
-                  <Bar dataKey="n" name="attempts" fill="#ef6262" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={14} />
+                  <XAxis type="number" allowDecimals={false} tick={{ fill: '#6b6f76', fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="reason" tick={{ fill: '#6b6f76', fontSize: 12 }} width={110} axisLine={false} tickLine={false} />
+                  <Tooltip {...TIP} cursor={{ fill: '#efede8' }} />
+                  <Bar dataKey="n" name="attempts" fill="#c8402f" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={14} />
                 </BarChart>
               </ResponsiveContainer>
             ) : <p className="px-2 pt-6 text-[13px] text-faint">No failures recorded yet.</p>}
@@ -95,13 +95,13 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
         <div className="ml-auto flex gap-2">
           <Button onClick={() => api.reveal(id)}><FolderOpen className="h-4 w-4" /> Open folder</Button>
           <DeleteRun id={id} live={Boolean(r.live)} onDone={onBack} />
-          {r.report && <a href={`/media/${id}/report.html`} target="_blank" rel="noreferrer"><Button><FileText className="h-4 w-4" /> Report</Button></a>}
+          {r.report && <a href={`/media/${id}/${r.report}`} target="_blank" rel="noreferrer"><Button><FileText className="h-4 w-4" /> Report</Button></a>}
         </div>
       </div>
       <Harvest id={id} />
       {r.recap?.text && (
         <Panel className="flex gap-3 px-4 py-3">
-          <Clapperboard className="mt-0.5 h-4 w-4 shrink-0 text-signal" strokeWidth={1.75} />
+          <Clapperboard className="mt-0.5 h-4 w-4 shrink-0 text-ink" strokeWidth={1.75} />
           <p className="text-[14px] leading-relaxed">{r.recap.text}</p>
         </Panel>
       )}
@@ -115,10 +115,10 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
                   <div className="flex items-center gap-2 text-[13px]">
                     <Outcome success={e.success} />
                     <span>Scene {e.scene + 1}{e.attempt > 1 ? `, retry ${e.attempt - 1}` : ''}</span>
-                    {(e.recoveries ?? 0) > 0 && <Tag tone="signal">recovered{e.recoveries! > 1 ? ` ×${e.recoveries}` : ''}</Tag>}
+                    {recoveriesOf(e) > 0 && <Tag tone="ok">recovered{recoveriesOf(e) > 1 ? ` ×${recoveriesOf(e)}` : ''}</Tag>}
                     <span className="ml-auto text-[12px] text-faint">{e.duration_s.toFixed(0)} s</span>
                   </div>
-                  {e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason}{e.at != null && ` at ${e.at.toFixed(1)} s`}</p>}
+                  {e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason}{atOf(e) != null && ` at ${atOf(e)!.toFixed(1)} s`}</p>}
                 </button>
               </li>
             ))}
@@ -182,13 +182,19 @@ function DeleteRun({ id, live, onDone }: { id: string; live: boolean; onDone: ()
 }
 
 function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult; seconds: number }) {
-  const cams = ep.videos.map((v) => v.split('/').pop()!.replace('.mp4', '')).filter((c) => c !== 'recap')
+  // recorder/ep003_top.mp4 (standard) or ep3/top.mp4 (older runs): camera name -> path in the run folder
+  const videoOf: Record<string, string> = Object.fromEntries(ep.videos.map((v) => {
+    const stem = v.split('/').pop()!.replace('.mp4', '')
+    return [stem.includes('_') ? stem.split('_').pop()! : stem, v]
+  }).filter(([c]) => c !== 'recap'))
+  const cams = Object.keys(videoOf)
   const [cam, setCam] = useState(cams.includes('top') ? 'top' : cams[0])
   const [mode, setMode] = useState<'full' | 'recap'>('full')
   const video = useRef<HTMLVideoElement>(null)
   const [now, setNow] = useState(0)
-  const failed = ep.success === false && ep.at != null
-  const start = failed ? Math.max(0, ep.at! - 1) : 0
+  const at = atOf(ep)
+  const failed = ep.success === false && at != null
+  const start = failed ? Math.max(0, at! - 1) : 0
   const trace = useQuery({ queryKey: ['trace', runId, ep.episode], queryFn: () => api.trace(runId, ep.episode), retry: false })
 
   const marks: Mark[] = (ep.timeline ?? []).map((m) => ({ t: m.t, label: m.message, tone: BAD_KINDS.has(m.kind) ? 'warn' : 'info' }))
@@ -200,7 +206,7 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
     v.currentTime = t
     void v.play().catch(() => undefined)
   }
-  const src = mode === 'recap' && ep.recap?.video ? `/media/${runId}/${ep.recap.video}` : cam ? `/media/${runId}/ep${ep.episode}/${cam}.mp4` : null
+  const src = mode === 'recap' && ep.recap?.video ? `/media/${runId}/${ep.recap.video}` : cam ? `/media/${runId}/${videoOf[cam]}` : null
 
   useEffect(() => {
     // follow the video with a cheap timer instead of re-rendering on every timeupdate
@@ -213,7 +219,7 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
       <Panel>
         <div className="flex flex-wrap items-center gap-3 px-4 pt-3 pb-2">
           <h2 className={clsx('text-[15px] font-medium', failed ? 'text-bad' : ep.success ? 'text-ok' : 'text-ink')}>
-            {failed ? `${ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']} at ${ep.at!.toFixed(1)} s` : ep.success ? `Done in ${ep.duration_s.toFixed(1)} s` : 'Attempt'}
+            {failed ? `${ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']} at ${at!.toFixed(1)} s` : ep.success ? `Done in ${ep.duration_s.toFixed(1)} s` : 'Attempt'}
           </h2>
           <div className="ml-auto flex items-center gap-1 rounded-md bg-base p-0.5 text-[12px]">
             {ep.recap?.video && (
@@ -236,7 +242,7 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
         {mode === 'full' && (
           <div className="px-4 pt-4 pb-2">
             <AttemptStrip duration={Math.max(ep.duration_s, Math.min(seconds, ep.duration_s + 2))} marks={marks}
-              verdict={failed ? { t: ep.at!, label: ep.reason ?? '' } : null} playhead={now} onSeek={seek} />
+              verdict={failed ? { t: at!, label: ep.reason ?? '' } : null} playhead={now} onSeek={seek} />
           </div>
         )}
         {ep.recap?.headline && <p className="border-t border-line px-4 py-3 text-[13px] text-dim">{ep.recap.headline}</p>}
@@ -246,8 +252,8 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
         <Panel>
           <PanelTitle>Moments</PanelTitle>
           {failed && (
-            <button onClick={() => seek(start)} className="flex w-full gap-3 border-y border-line bg-bad/8 px-4 py-2 text-left text-[13px] hover:bg-bad/15">
-              <span className="w-12 shrink-0 text-right text-bad">{ep.at!.toFixed(1)} s</span>
+            <button onClick={() => seek(start)} className="flex w-full gap-3 border-y border-line bg-bad-soft px-4 py-2 text-left text-[13px] hover:brightness-95">
+              <span className="w-12 shrink-0 text-right text-bad">{at!.toFixed(1)} s</span>
               <span className="font-medium text-bad">Verdict: {ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']}</span>
             </button>
           )}
@@ -256,7 +262,7 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
               <li key={i}>
                 <button onClick={() => seek(Math.max(0, m.t - 0.5))} className="flex w-full gap-3 px-4 py-1.5 text-left text-[13px] hover:bg-raised/50">
                   <span className="w-12 shrink-0 text-right text-faint">{m.t.toFixed(1)} s</span>
-                  <span className={BAD_KINDS.has(m.kind) ? 'text-signal' : 'text-ink'}>{m.message}</span>
+                  <span className={BAD_KINDS.has(m.kind) ? 'text-warn' : 'text-ink'}>{m.message}</span>
                 </button>
               </li>
             ))}
@@ -270,20 +276,20 @@ function EpisodeView({ runId, ep, seconds }: { runId: string; ep: EpisodeResult;
           <div className="h-44 px-2 pb-3">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trace.data.rows} onClick={(s) => { const t = Number(s?.activeLabel); if (Number.isFinite(t)) seek(t) }}>
-                <CartesianGrid stroke="#2c3540" vertical={false} />
-                <XAxis dataKey="t" type="number" domain={[0, 'dataMax']} tick={{ fill: '#5b6673', fontSize: 11 }} unit=" s" axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 'auto']} tickFormatter={(v) => `${Math.round(v * 100)}`} unit=" cm" tick={{ fill: '#5b6673', fontSize: 11 }} width={48} axisLine={false} tickLine={false} />
+                <CartesianGrid stroke="#e4e2dc" vertical={false} />
+                <XAxis dataKey="t" type="number" domain={[0, 'dataMax']} tick={{ fill: '#6b6f76', fontSize: 11 }} unit=" s" axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 'auto']} tickFormatter={(v) => `${Math.round(v * 100)}`} unit=" cm" tick={{ fill: '#6b6f76', fontSize: 11 }} width={48} axisLine={false} tickLine={false} />
                 <Tooltip {...TIP} labelFormatter={(t) => `${Number(t).toFixed(1)} s`} formatter={(v) => `${(100 * Number(v)).toFixed(1)} cm`} />
-                {failed && <ReferenceLine x={ep.at} stroke="#ef6262" strokeWidth={2} />}
-                <ReferenceLine x={Number(now.toFixed(1))} stroke="#f0b43c" />
-                <Line dataKey="d" name="hand to object" stroke="#7fb2e5" dot={false} strokeWidth={1.75} isAnimationActive={false} />
-                <Line dataKey="z" name="object lifted" stroke="#4ade80" dot={false} strokeWidth={1.75} isAnimationActive={false} />
-                <Line dataKey="dt" name="object to target" stroke="#c4a7f5" dot={false} strokeWidth={1.5} isAnimationActive={false} />
+                {failed && <ReferenceLine x={at} stroke="#c8402f" strokeWidth={2} />}
+                <ReferenceLine x={Number(now.toFixed(1))} stroke="#2f5bd3" />
+                <Line dataKey="d" name="hand to object" stroke="#2f8fb3" dot={false} strokeWidth={1.75} isAnimationActive={false} />
+                <Line dataKey="z" name="object lifted" stroke="#1f8a5b" dot={false} strokeWidth={1.75} isAnimationActive={false} />
+                <Line dataKey="dt" name="object to target" stroke="#8a5cc2" dot={false} strokeWidth={1.5} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
           <p className="px-4 pb-3 text-[12px] text-faint">
-            <span className="text-steel">Blue</span> hand to object, <span className="text-ok">green</span> how high the object is, <span className="text-[#c4a7f5]">violet</span> object to target. Click the chart to jump the video there.
+            <span className="text-steel">Blue</span> hand to object, <span className="text-ok">green</span> how high the object is, <span className="text-[#8a5cc2]">violet</span> object to target. Click the chart to jump the video there.
           </p>
         </Panel>
       )}

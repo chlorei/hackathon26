@@ -23,14 +23,26 @@ class World:
         self._bodies: list[str] | None = None
         self._force = np.zeros(6)
 
-    # -- positions --------------------------------------------------------------------------------------------------
+    # -- positions (ids cached: name lookups are the slow part) ------------------------------------------------
+    def _body_id(self, body: str) -> int:
+        cache = self.__dict__.setdefault("_bid", {})
+        if body not in cache:
+            cache[body] = self.env.model.body(body).id
+        return cache[body]
+
+    def _site_id(self, site: str) -> int:
+        cache = self.__dict__.setdefault("_sid", {})
+        if site not in cache:
+            cache[site] = self.env.model.site(site).id
+        return cache[site]
+
     def pos(self, body: str) -> np.ndarray:
         """A body's position, metres, world frame (Z up)."""
-        return np.array(self.env.data.body(body).xpos, dtype=float)
+        return self.env.data.xpos[self._body_id(body)].copy()
 
     def tcp(self, side: str) -> np.ndarray:
         """The tool point of a hand ("left" / "right")."""
-        return np.array(self.env.data.site(f"{side}_tcp").xpos, dtype=float)
+        return self.env.data.site_xpos[self._site_id(f"{side}_tcp")].copy()
 
     def grip(self, side: str) -> float:
         """Measured gripper opening, 0 closed … 1 open."""
@@ -38,7 +50,7 @@ class World:
 
     def has(self, body: str) -> bool:
         try:
-            self.env.data.body(body)
+            self._body_id(body)
             return True
         except Exception:
             return False
@@ -50,18 +62,34 @@ class World:
             self._bodies = [m.body(i).name for i in range(m.nbody)]
         return self._bodies
 
-    def contacts(self, with_force: bool = False) -> list[tuple[Any, ...]]:
-        """Body pairs in contact now: [(a, b)], or [(a, b, force_n)] with the normal force in newtons."""
+    def contacts(self, with_force: bool = False, prefixes: tuple[str, ...] | None = None) -> list[tuple[Any, ...]]:
+        """Body pairs in contact now: [(a, b)], or [(a, b, force_n)] with the normal force in newtons.
+
+        `prefixes` keeps only contacts where a body name starts with one of them (and computes forces only for
+        those): contacts(with_force=True, prefixes=("left_", "right_")) is every robot contact."""
         import mujoco  # noqa: PLC0415
 
         m, d = self.env.model, self.env.data
+        n = d.ncon
+        if n == 0:
+            return []
         names = self.bodies()
+        con = d.contact
+        b1 = m.geom_bodyid[con.geom1[:n]]
+        b2 = m.geom_bodyid[con.geom2[:n]]
+        if prefixes is not None:
+            robot = self.__dict__.get("_robot_mask")
+            if robot is None or self.__dict__.get("_robot_prefixes") != prefixes:
+                robot = np.array([nm.startswith(prefixes) for nm in names])
+                self._robot_mask, self._robot_prefixes = robot, prefixes
+            keep = np.nonzero(robot[b1] | robot[b2])[0]
+        else:
+            keep = range(n)
         out: list[tuple[Any, ...]] = []
-        for i in range(d.ncon):
-            c = d.contact[i]
-            a, b = names[m.geom_bodyid[c.geom1]], names[m.geom_bodyid[c.geom2]]
+        for i in keep:
+            a, b = names[b1[i]], names[b2[i]]
             if with_force:
-                mujoco.mj_contactForce(m, d, i, self._force)
+                mujoco.mj_contactForce(m, d, int(i), self._force)
                 out.append((a, b, abs(float(self._force[0]))))
             else:
                 out.append((a, b))
@@ -121,8 +149,10 @@ class ReplayWorld(World):
     def bodies(self) -> list[str]:
         return list(self._rec.get("bodies", []))
 
-    def contacts(self, with_force: bool = False) -> list[tuple[Any, ...]]:
+    def contacts(self, with_force: bool = False, prefixes: tuple[str, ...] | None = None) -> list[tuple[Any, ...]]:
         rows = self._rec["contacts"][self._i]
+        if prefixes is not None:
+            rows = [c for c in rows if c[0].startswith(prefixes) or c[1].startswith(prefixes)]
         return [tuple(c) if with_force else (c[0], c[1]) for c in rows]
 
     @property

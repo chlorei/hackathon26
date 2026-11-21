@@ -84,25 +84,49 @@ def create_app(config_path: str | Path) -> FastAPI:
         return {"config_file": config_path.name, "sim_found": (cfg.sim_dir(base) / "yam_env.py").is_file(),
                 "light": cfg.light, "runs_dir": cfg.runs_dir}
 
+    def latest_stats() -> tuple[dict[str, Any], dict[str, str], str | None]:
+        """Each plugin's timings/errors and refusals from the most recent run (what the monitor knows)."""
+        for info in storage.list_runs(runs_root()):
+            if info.get("plugin_stats") is not None:
+                return info.get("plugin_stats") or {}, info.get("refused") or {}, info.get("id")
+        return {}, {}, None
+
     def plugin_list():
         cfg, base = load_cfg()
         found, problems = discover([base / "plugins"])
         info = {p["name"]: p for p in describe(found)}
+        stats, refused, run_id = latest_stats()
+        enabled_control = [s.name for s in cfg.plugins if s.enabled and info.get(s.name, {}).get("capability") == "control"]
+        all_control = [n for n, e in info.items() if e["capability"] == "control"]
         out = []
-        for i, spec in enumerate(cfg.plugins):
-            entry = info.pop(spec.name, None)
-            out.append({
-                "name": spec.name, "installed": entry is not None, "enabled": spec.enabled, "in_config": True,
-                "order": i, "group": (entry or {}).get("group", "other"),
+        order = {s.name: i for i, s in enumerate(cfg.plugins)}
+        names = [s.name for s in cfg.plugins] + [n for n in sorted(info) if n not in order]
+        specs = {s.name: s for s in cfg.plugins}
+        for name in names:
+            entry = info.get(name)
+            spec = specs.get(name)
+            enabled = bool(spec and spec.enabled)
+            row: dict[str, Any] = {
+                "name": name, "installed": entry is not None, "enabled": enabled, "in_config": spec is not None,
+                "order": order.get(name, 999),
                 "description": entry["description"] if entry else "not installed",
                 "source": entry["source"] if entry else None,
-                "params": {**(entry["defaults"] if entry else {}), **spec.params},
+                "group": entry["group"] if entry else "diagnosis", "icon": entry["icon"] if entry else "Plug",
+                "capability": entry["capability"] if entry else "observe",
+                "manifest": entry["manifest"] if entry else {},
+                "schema": entry["schema"] if entry else {},
                 "defaults": entry["defaults"] if entry else {},
-            })
-        for name, entry in info.items():
-            out.append({"name": name, "installed": True, "enabled": False, "in_config": False, "order": 999,
-                        "group": entry.get("group", "other"), "description": entry["description"],
-                        "source": entry["source"], "params": dict(entry["defaults"]), "defaults": entry["defaults"]})
+                "params": {**(entry["defaults"] if entry else {}), **(spec.params if spec else {})},
+                "stats": stats.get(name), "refused": refused.get(name), "stats_run": run_id,
+            }
+            if row["capability"] == "control":
+                others = [n for n in all_control if n != name]
+                row["conflicts"] = sorted(set(others + row["manifest"].get("conflicts", [])))
+                if enabled and len(enabled_control) > 1 and enabled_control[0] != name:
+                    row["refused"] = f"conflicts with {enabled_control[0]} (only one control plugin may be on)"
+            else:
+                row["conflicts"] = row["manifest"].get("conflicts", [])
+            out.append(row)
         return {"plugins": out, "problems": problems}
 
     @app.get("/api/plugins")
@@ -160,15 +184,13 @@ def create_app(config_path: str | Path) -> FastAPI:
 
     @app.post("/api/install")
     async def install(body: InstallRequest):
-        cfg, _ = load_cfg()
-        entries, _ = registry.load(cfg.registry_url)
-        result = await asyncio.to_thread(registry.install, body.name, entries)
+        from . import pdk
+
+        ok, log = await asyncio.to_thread(pdk.install, body.name)
         import importlib
 
         importlib.invalidate_caches()
-        if result.returncode != 0:
-            raise HTTPException(500, (result.stdout + result.stderr)[-3000:])
-        return {"ok": True}
+        return {"ok": ok, "log": log}
 
     # -- runs (the monitor) ------------------------------------------------------------------------------------
     @app.get("/api/live")
@@ -280,8 +302,14 @@ def create_app(config_path: str | Path) -> FastAPI:
         frame_mtimes: dict[str, float] = {}
         beat_mtime = 0.0
         idle_since = time.time()
+        watching = folder / "live" / ".watching"
+        last_touch = 0.0
         try:
             while True:
+                if time.time() - last_touch > 1.0:  # the loop renders cameras only while someone watches (§5)
+                    watching.parent.mkdir(exist_ok=True)
+                    watching.touch()
+                    last_touch = time.time()
                 sent = False
                 events = folder / "events.jsonl"
                 if events.is_file():
