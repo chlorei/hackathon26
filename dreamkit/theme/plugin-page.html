@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>plugin</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// The standard page every plugin gets (its own description, settings and events), e.g. one made on the Create tab.
+dk.plugin({
+  how: (P, info) => {
+    const props = (info.schema && info.schema.properties) || {}
+    const keys = Object.keys(props)
+    return [dk.h('p', {}, keys.length ? 'With its current settings:' : 'It has no settings.'),
+      keys.length ? dk.h('ul', { class: 'dk-how' }, keys.map((k) => dk.h('li', {}, `${(props[k].description || k).replace(/\.$/, '')}: `,
+        dk.h('b', {}, `${Array.isArray(P[k]) ? P[k].join(', ') : P[k]}${props[k].unit ? ' ' + props[k].unit : ''}`)))) : null]
+  },
+  numbers: (c) => [{ label: 'things it noticed', value: String(c.mine.length), sub: `in ${c.episodes.length} attempts` }],
+})
+</script>
+</body>
+</html>

@@ -145,7 +145,7 @@ class Harvester(Plugin):
     name = "harvester"
     Params = Params
     manifest = Manifest(group="core", icon="Database", capability="observe", needs_frames=True,
-                        hooks=["on_episode_start", "on_step", "on_episode_end", "on_run_end"])
+                        hooks=["on_episode_start", "on_step", "on_episode_end", "on_run_end"], ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.states: list[np.ndarray] = []

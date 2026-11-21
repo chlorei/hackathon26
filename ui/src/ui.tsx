@@ -247,11 +247,19 @@ export function PluginPageDrawer({ page, onClose }: { page: PluginPage | null; o
   useEffect(() => {
     if (!page) return
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    // the page's "Change settings" (a sandboxed page cannot navigate the panel; it asks)
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'dreamkit:open-settings' && e.data.plugin === page.plugin) {
+        onClose()
+        window.location.hash = `/plugins/${encodeURIComponent(page.plugin)}`
+      }
+    }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    window.addEventListener('message', onMessage)
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('message', onMessage) }
   }, [page, onClose])
   if (!page) return null
-  const q = new URLSearchParams({ run_id: page.runId, ...(page.episode != null ? { attempt: String(page.episode) } : {}) })
+  const q = new URLSearchParams({ ...(page.runId ? { run_id: page.runId } : {}), ...(page.episode != null ? { attempt: String(page.episode) } : {}) })
   return (
     <aside className="fixed inset-y-0 right-0 z-40 flex w-[min(620px,100vw)] flex-col border-l border-line bg-base shadow-[0_0_40px_rgba(0,0,0,.12)]"
       role="dialog" aria-label={`${page.plugin} page`}>
@@ -263,13 +271,13 @@ export function PluginPageDrawer({ page, onClose }: { page: PluginPage | null; o
           Close <kbd>Esc</kbd>
         </button>
       </div>
-      <iframe key={`${page.plugin}-${q}`} title={`${page.plugin} page`} src={`/plugin-ui/${encodeURIComponent(page.plugin)}/?${q}`}
+      <iframe key={`${page.plugin}-${q}`} aria-label={`${page.plugin} page`} src={`/plugin-ui/${encodeURIComponent(page.plugin)}/?${q}`}
         sandbox="allow-scripts allow-downloads" className="w-full flex-1 border-0 bg-base" />
     </aside>
   )
 }
 
-/** The plugins that ship a page (manifest ui), from /api/plugins. */
-export function pagesOf(plugins: { name: string; manifest?: { ui?: string | null } }[] | undefined): Set<string> {
-  return new Set((plugins ?? []).filter((p) => p.manifest?.ui).map((p) => p.name))
+/** Every plugin has a page: its own (manifest ui) or the standard one the server gives it (§7a). */
+export function pagesOf(plugins: { name: string }[] | undefined): Set<string> {
+  return new Set((plugins ?? []).map((p) => p.name))
 }

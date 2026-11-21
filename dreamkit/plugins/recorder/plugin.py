@@ -57,7 +57,7 @@ class Recorder(Plugin):
     name = "recorder"
     Params = Params
     manifest = Manifest(group="output", icon="Film", capability="observe", needs_frames=True,
-                        hooks=["on_episode_start", "on_step", "on_episode_end"])
+                        hooks=["on_episode_start", "on_step", "on_episode_end"], ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.writers: dict[str, _Writer] = {}  # touched only on the defer worker

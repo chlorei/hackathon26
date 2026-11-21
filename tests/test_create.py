@@ -21,7 +21,7 @@ def package(name="grip-watch", **swap):
     files = {}
     for f in FILES:
         text = (ROOT / "plugins-external" / "gripper-check" / f).read_text()
-        text = text.replace("gripper-check", name).replace("gripper_check", module).replace("GripperCheck", cls)
+        text = create.strip_ui(text).replace("gripper-check", name).replace("gripper_check", module).replace("GripperCheck", cls)
         files[f.replace("gripper_check", module)] = text
     for f, (old, new) in swap.items():
         files[f] = files[f].replace(old, new)

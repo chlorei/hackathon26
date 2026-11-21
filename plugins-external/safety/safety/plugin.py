@@ -33,7 +33,7 @@ class Safety(Plugin):
     name = "safety"
     Params = Params
     manifest = Manifest(group="safety", icon="ShieldCheck", capability="modify_actions",
-                        hooks=["on_episode_start", "after_model", "on_episode_end"])
+                        hooks=["on_episode_start", "after_model", "on_episode_end"], ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.slowed = 0

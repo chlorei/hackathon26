@@ -31,7 +31,8 @@ class SuccessCheck(Plugin):
     name = "success-check"
     Params = Params
     manifest = Manifest(group="diagnosis", icon="CircleCheck", capability="observe",
-                        hooks=["on_episode_start", "on_step", "on_episode_end"], step_rate_hz=20)
+                        hooks=["on_episode_start", "on_step", "on_episode_end"], step_rate_hz=20,
+                        ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.obj, self.target = ctx.target["object"], ctx.target["target"]

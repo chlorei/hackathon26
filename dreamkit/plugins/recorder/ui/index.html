@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>recorder</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// recorder: the videos it wrote for each attempt.
+dk.plugin({
+  how: (P) => dk.h('p', {}, `It records ${P.cameras.join(', ')} to MP4 at ${P.video_fps} fps (quality crf ${P.crf}, ${P.preset} encoding), timed in simulated seconds, so History can replay every attempt.`),
+  numbers: (c) => {
+    const vids = c.episodes.flatMap((e) => (e.recorder && e.recorder.videos) || [])
+    return [
+      { label: 'videos recorded', value: String(vids.length), sub: `${c.episodes.length} attempts` },
+      { label: 'video length', value: `${dk.fmt(c.episodes.filter((e) => e.recorder).reduce((a, e) => a + (e.duration_s || 0), 0), 0)} s`, sub: 'per camera, in all' },
+    ]
+  },
+  context: (c, ep) => {
+    const vids = (ep.recorder && ep.recorder.videos) || []
+    return vids.length ? dk.h('div', { class: 'dk-videos' }, vids.map((v) => dk.h('figure', { style: 'margin:0' },
+      dk.h('video', { class: 'dk-video', src: dk.media(v), controls: true, preload: 'metadata', muted: true }),
+      dk.h('figcaption', {}, v.split('/').pop().replace(/^ep\d+_/, '').replace('.mp4', ''))))) : null
+  },
+  quiet: () => 'No videos in this run.',
+  download: (c) => c.episodes.map((e) => ({ attempt: e.episode, videos: (e.recorder && e.recorder.videos) || [] })),
+})
+</script>
+</body>
+</html>

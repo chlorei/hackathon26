@@ -27,6 +27,7 @@ from .manager import describe, discover
 UI_DIST = Path(__file__).resolve().parent / "ui_dist"
 THEME = Path(__file__).resolve().parent / "theme" / "dreamkit-theme.css"  # shared with plugin pages (§7a)
 THEME_LINK = '<link rel="stylesheet" href="/theme/dreamkit-theme.css">'
+DEFAULT_PAGE = THEME.parent / "plugin-page.html"  # every plugin without a page of its own gets this one (§7a)
 LIVE_FRESH_S = 10.0  # a run whose heartbeat is older than this is not live
 POLL_S = 0.12
 
@@ -525,35 +526,35 @@ def create_app(config_path: str | Path) -> FastAPI:
     def media(run_id: str, path: str, request: Request):
         root = run_folder(run_id)
         target = (root / path).resolve()
-        if root not in target.parents or not target.is_file():
-            raise HTTPException(404, "not found")
-        response = FileResponse(target)
         # §7a: a plugin page runs sandboxed (origin "null"); it may read its own plugin's files and the run's record
-        # (run.json, events.jsonl), nothing else.
+        # (run.json, events.jsonl), nothing else. A missing file of its own is a plain 404 it can read, too.
+        cors = {}
         if request.headers.get("origin") == "null":
             parts = Path(path).parts
             if parts in (("run.json",), ("events.jsonl",)) or (len(parts) > 1 and parts[0] in plugin_pages()):
-                response.headers["Access-Control-Allow-Origin"] = "null"
-        return response
+                cors = {"Access-Control-Allow-Origin": "null"}
+        if root not in target.parents or not target.is_file():
+            raise HTTPException(404, "not found", headers=cors or None)
+        return FileResponse(target, headers=cors or None)
 
     def plugin_pages() -> dict[str, Path]:
-        """§7a: plugin name -> its page (manifest ui), for the plugins that ship one."""
+        """§7a: plugin name -> its page: its own (manifest ui), or the standard one every plugin gets."""
         _, base = load_cfg()
         found, _ = discover([base / "plugins"])
         out = {}
         for name, entry in found.items():
             ui = getattr(entry["cls"].manifest, "ui", None)
-            if ui:
-                out[name] = (Path(inspect.getfile(entry["cls"])).resolve().parent / ui).resolve()
+            out[name] = (Path(inspect.getfile(entry["cls"])).resolve().parent / ui).resolve() if ui else DEFAULT_PAGE
         return out
 
-    @app.get("/theme/dreamkit-theme.css")
-    def theme():
-        return FileResponse(THEME, media_type="text/css")
-
-    @app.get("/theme/dreamkit-page.js")
-    def theme_page_js():
-        return FileResponse(THEME.parent / "dreamkit-page.js", media_type="text/javascript")
+    @app.get("/theme/{file}")
+    def theme(file: str):
+        types = {"dreamkit-theme.css": "text/css", "dreamkit-page.js": "text/javascript", "icons.json": "application/json"}
+        if file not in types:
+            raise HTTPException(404, "not found")
+        # no-cache: a browser that kept an older theme draws new pages unstyled (black charts, no margins)
+        return FileResponse(THEME.parent / file, media_type=types[file],
+                            headers={"Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*"})
 
     @app.get("/plugin-ui/{name}/{path:path}")
     def plugin_ui(name: str, path: str = ""):
@@ -568,11 +569,17 @@ def create_app(config_path: str | Path) -> FastAPI:
         if target.suffix.lower() not in (".html", ".htm"):
             return FileResponse(target)
         html = target.read_text(errors="replace")
-        head = f'<base href="/plugin-ui/{name}/">{THEME_LINK}'
+        # the plugin as the Plugins page knows it (description, icon, settings), for the page's header and Settings
+        try:
+            row = next((p for p in plugin_list()["plugins"] if p["name"] == name), {"name": name})
+        except Exception:  # noqa: BLE001 - the page still shows, with only its name
+            row = {"name": name}
+        info = json.dumps(row, default=str).replace("</", "<\\/")
+        head = f'<base href="/plugin-ui/{name}/">{THEME_LINK}<script>window.DK_PLUGIN = {info};</script>'
         lower = html.lower()
         at = lower.find("<head>")
         html = html[: at + 6] + head + html[at + 6 :] if at >= 0 else head + html
-        return Response(html, media_type="text/html")
+        return Response(html, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
     # -- app plugins (§13): their API and page under /apps/<name>/, found again after an install -----------------
     from . import apps as apps_mod

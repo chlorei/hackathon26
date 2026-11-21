@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>gripper-check</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// gripper-check: when a gripper closed on nothing or its grip loosened.
+dk.plugin({
+  how: (P) => [
+    dk.h('p', {}, `When the policy commands a gripper shut (below ${P.closed_cmd}) it waits ${P.settle_s} s for the fingers to stop, then: a measured opening below ${P.empty_below} means nothing is between the fingers (closed on nothing); opening more than ${P.loosen_by} while still shut means the grip is loosening.`),
+    dk.h('p', {}, 'It reads only the robot’s own signals, so it works on a real robot too.'),
+  ],
+  numbers: (c) => [{ label: 'gripper warnings', value: String(c.mine.length), tone: c.mine.length ? 'warn' : 'ok',
+    sub: c.mine.length ? `${c.mine.filter((e) => (e.data || {}).kind === 'empty').length} closed on nothing, ${c.mine.filter((e) => (e.data || {}).kind === 'loose').length} loosening` : 'every grip held' }],
+  quiet: (c) => `Nothing to report: every grip held in all ${c.episodes.length} attempts.`,
+})
+</script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>safety</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// safety: where it slowed a chunk or cut one short.
+dk.plugin({
+  how: (P) => [
+    dk.h('p', {}, `It caps every joint at ${P.max_speed_rad_s} rad/s, slowing the rows of a chunk that would move faster.${P.check_box ? ` It also cuts a chunk short where a tool point would leave the workspace box (${P.box_min_m.join(', ')} to ${P.box_max_m.join(', ')} m).` : ''}`),
+    dk.h('p', {}, `It only makes actions stricter, never faster. At most one warning of a kind every ${P.warn_every_s} s.`),
+  ],
+  numbers: (c) => {
+    const r = c.episodes.map((e) => e.safety || {})
+    return [
+      { label: 'rows slowed', value: String(r.reduce((a, x) => a + (x.rows_slowed || 0), 0)), tone: null },
+      { label: 'chunks cut', value: String(r.reduce((a, x) => a + (x.chunks_cut || 0), 0)), sub: 'a hand would have left the box' },
+    ]
+  },
+  quiet: (c) => `Nothing to report: no action needed slowing or cutting in ${c.episodes.length} attempts.`,
+})
+</script>
+</body>
+</html>

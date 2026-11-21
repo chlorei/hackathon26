@@ -1,217 +1,71 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>monitor-stats</title>
-<!-- PLUGIN_STANDARD §7a: the server links the theme; this page reads only /media/<run>/monitor-stats/ -->
-<style>
-  body { padding: 16px; }
-  #ns { display: none; }
-  main { display: grid; gap: 14px; }
-  .head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-  .head h1 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .stat { padding: 12px 16px; }
-  .stat .dk-big { font-size: 26px; }
-  .stat small { display: block; font-size: 12px; color: var(--dk-dim); }
-  svg { display: block; width: 100%; height: auto; overflow: visible; }
-  svg text { font-size: 11px; fill: var(--dk-dim); font-family: var(--dk-font-sans); }
-  .axis { stroke: var(--dk-line); }
-  .ok { fill: var(--dk-ok); } .bad { fill: var(--dk-bad); }
-  .cat { fill: var(--dk-cat-1); }
-  .att { padding: 12px 16px; border-top: 1px solid var(--dk-line); }
-  .att:first-of-type { border-top: 0; }
-  .att.here { background: var(--dk-signal-soft); }
-  .att-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13px; }
-  .att-head b { font-weight: 600; }
-  .att p { margin: 4px 0 0; font-size: 13px; }
-  .grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 8px; }
-  figure { margin: 0; }
-  figure img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px;
-               border: 2px solid var(--dk-line); background: var(--dk-raised); }
-  figure.error img { border-color: var(--dk-bad); }
-  figcaption { font-size: 11.5px; color: var(--dk-dim); line-height: 1.35; margin-top: 2px; }
-  figure.error figcaption { color: var(--dk-bad); }
-  .empty { margin: 0; padding: 12px 0; color: var(--dk-faint); font-size: 13px; }
-  #list .empty { padding: 12px 16px 16px; }
-</style>
-</head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>monitor-stats</title></head>
 <body>
-<svg id="ns" hidden></svg>
-<main>
-  <div class="head">
-    <h1>Camera verdicts <span class="dk-faint" id="run"></span></h1>
-    <button class="dk-btn" id="dl-json" disabled>Download JSON</button>
-    <button class="dk-btn" id="dl-csv" disabled>Download CSV</button>
-  </div>
-  <div class="stats">
-    <div class="dk-card stat"><small>attempts judged</small><div class="dk-big" id="s-n">–</div></div>
-    <div class="dk-card stat"><small>successes</small><div class="dk-big" id="s-ok">–</div><small id="s-rate"></small></div>
-    <div class="dk-card stat"><small>agrees with success-check</small><div class="dk-big" id="s-agree">–</div><small id="s-agree-n"></small></div>
-  </div>
-  <section class="dk-card"><h2 class="dk-title">Success by attempt</h2><div class="dk-body" id="c-attempts"></div></section>
-  <section class="dk-card"><h2 class="dk-title">Why attempts fail</h2><div class="dk-body" id="c-reasons"></div></section>
-  <section class="dk-card"><h2 class="dk-title">When it breaks</h2><div class="dk-body" id="c-when"></div></section>
-  <section class="dk-card"><h2 class="dk-title">Attempts</h2><div id="list"></div></section>
-</main>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
 <script>
-const q = new URLSearchParams(location.search)
-const RUN = q.get('run_id') || ''
-const HERE = q.get('attempt') == null ? null : Number(q.get('attempt'))
-const DIR = `/media/${encodeURIComponent(RUN)}/monitor-stats/`
-const SVG = document.getElementById('ns').namespaceURI  // §7a allows no URLs in the page, not even the SVG namespace
-const $ = (id) => document.getElementById(id)
-let raw = '', rows = [], scrolled = false
-
-// Model comments are untrusted text: everything goes in through textContent, never innerHTML.
-function h(tag, attrs = {}, ...kids) {
-  const el = attrs.svg ? document.createElementNS(SVG, tag) : document.createElement(tag)
-  for (const [k, v] of Object.entries(attrs)) if (k !== 'svg' && v != null) el.setAttribute(k, v)
-  for (const k of kids.flat()) if (k != null) el.append(k)
-  return el
-}
-const s = (tag, attrs = {}, ...kids) => h(tag, { ...attrs, svg: 1 }, ...kids)
+// monitor-stats: what the camera judge saw in each try (its frames and verdicts), and how often it agreed.
 const judged = (r) => typeof r.success === 'boolean'
-const isFinal = (r) => r.final !== false  // an attempt's last try; earlier tries ended in a recovery
-const tries = (ep) => rows.filter((r) => r.episode === ep).length
-const pct = (k, n) => (n ? Math.round((100 * k) / n) + '%' : '–')
-const empty = (box, text) => box.replaceChildren(h('p', { class: 'empty' }, text))
-
-function summary() {
-  const finals = rows.filter(isFinal), j = finals.filter(judged), ok = j.filter((r) => r.success).length
-  const both = j.filter((r) => typeof r.check === 'boolean'), agree = both.filter((r) => r.check === r.success).length
-  $('s-n').textContent = j.length + (finals.length > j.length ? ` / ${finals.length}` : '')
-  $('s-ok').textContent = j.length ? String(ok) : '–'
-  $('s-rate').textContent = j.length ? `${pct(ok, j.length)} of judged` : ''
-  $('s-agree').textContent = pct(agree, both.length)
-  $('s-agree-n').textContent = both.length ? `${agree} of ${both.length}` : j.length ? 'success-check is off' : ''
-}
-
-// 1. one bar per attempt: height = score, colour = the verdict
-function chartAttempts() {
-  const box = $('c-attempts'), j = rows.filter((r) => isFinal(r) && judged(r))
-  if (!j.length) return empty(box, 'No judged attempts yet.')
-  const W = 560, H = 120, gap = 4, bw = Math.max(4, Math.min(28, (W - 30) / j.length - gap))
-  const svg = s('svg', { viewBox: `0 0 ${W} ${H + 18}`, role: 'img', 'aria-label': 'score of each attempt' },
-    s('line', { class: 'axis', x1: 26, x2: W, y1: H, y2: H }),
-    s('text', { x: 0, y: 10 }, '100'), s('text', { x: 10, y: H }, '0'))
-  const every = Math.ceil(j.length / 20)
-  j.forEach((r, i) => {
-    const x = 30 + i * (bw + gap), bh = Math.max(2, (r.score / 100) * (H - 6))
-    svg.append(s('rect', { class: r.success ? 'ok' : 'bad', x, y: H - bh, width: bw, height: bh, rx: 2 },
-      s('title', {}, `attempt ${r.episode}: ${r.success ? 'success' : 'failed'}, score ${r.score}`)))
-    if (i % every === 0) svg.append(s('text', { x: x + bw / 2, y: H + 14, 'text-anchor': 'middle' }, String(r.episode)))
-  })
-  box.replaceChildren(svg)
-}
-
-// 2. failure reasons, most common first
-function chartReasons() {
-  const box = $('c-reasons'), counts = new Map()
-  for (const r of rows) {
-    if (!judged(r) || r.success) continue
-    const k = r.reason_label || r.reason_code || 'other'
-    counts.set(k, (counts.get(k) || 0) + 1)
-  }
-  if (!counts.size) return empty(box, 'No failed attempts.')
-  const items = [...counts].sort((a, b) => b[1] - a[1]), max = items[0][1], W = 560, row = 24
-  const svg = s('svg', { viewBox: `0 0 ${W} ${items.length * row}`, role: 'img', 'aria-label': 'failure reasons' })
-  items.forEach(([label, n], i) => {
-    const y = i * row, w = Math.max(3, ((W - 200) * n) / max)
-    svg.append(s('text', { x: 0, y: y + 15 }, label.length > 26 ? label.slice(0, 25) + '…' : label),
-      s('rect', { class: 'cat', x: 170, y: y + 4, width: w, height: 14, rx: 3 }),
-      s('text', { x: 176 + w, y: y + 15 }, String(n)))
-  })
-  box.replaceChildren(svg)
-}
-
-// 3. the first frame the judge flagged in each failed attempt (frames are spread evenly over the attempt)
-function chartWhen() {
-  const box = $('c-when')
-  const n = Math.max(0, ...rows.map((r) => (r.frames || []).length))
-  const bins = Array(n).fill(0)
-  for (const r of rows) {
-    if (!judged(r) || r.success) continue
-    const i = (r.frames || []).findIndex((f) => f.status === 'error')
-    if (i >= 0) bins[i]++
-  }
-  if (!bins.some(Boolean)) return empty(box, 'No frame was flagged in a failed attempt.')
-  const W = 560, H = 100, max = Math.max(...bins), bw = (W - 30) / n - 8
-  const svg = s('svg', { viewBox: `0 0 ${W} ${H + 32}`, role: 'img', 'aria-label': 'first flagged frame of failed attempts' },
-    s('line', { class: 'axis', x1: 26, x2: W, y1: H, y2: H }))
-  bins.forEach((c, i) => {
-    const x = 30 + i * (bw + 8), bh = c ? Math.max(2, (c / max) * (H - 14)) : 0
-    svg.append(s('rect', { class: 'bad', x, y: H - bh, width: bw, height: bh, rx: 3 }),
-      s('text', { x: x + bw / 2, y: H - bh - 4, 'text-anchor': 'middle' }, c ? String(c) : ''),
-      s('text', { x: x + bw / 2, y: H + 14, 'text-anchor': 'middle' }, `frame ${i + 1}`))
-  })
-  svg.append(s('text', { x: 30, y: H + 30 }, 'start of the attempt'),
-    s('text', { x: W, y: H + 30, 'text-anchor': 'end' }, 'end'))
-  box.replaceChildren(svg)
-}
-
-function list() {
-  const box = $('list')
-  if (!rows.length) return empty(box, 'No attempts judged in this run yet.')
-  box.replaceChildren(...rows.slice().reverse().map((r) => {
-    const name = tries(r.episode) > 1 ? `Attempt ${r.episode} · try ${r.try}` : `Attempt ${r.episode}`
-    const pill = !judged(r) ? h('span', { class: 'dk-pill warn' }, 'not judged')
-      : h('span', { class: `dk-pill ${r.success ? 'ok' : 'bad'}` }, r.success ? 'success' : 'failed')
-    const check = judged(r) && typeof r.check === 'boolean'
-      ? h('span', { class: r.check === r.success ? 'dk-faint' : 'dk-warn' },
-          r.check === r.success ? 'agrees with success-check' : `success-check says ${r.check ? 'success' : 'failed'}`)
-      : null
-    const grid = h('div', { class: 'grid' }, (r.frames || []).map((f, i) => h('figure', { class: f.status || '' },
-      f.file ? h('img', { src: DIR + encodeURIComponent(f.file), alt: `frame ${i + 1}`, loading: 'lazy' }) : null,
-      h('figcaption', {}, `${f.t_s != null ? f.t_s.toFixed(1) + ' s' : ''}${f.comment ? ' · ' + f.comment : ''}`))))
-    return h('div', { class: `att${r.episode === HERE ? ' here' : ''}`, id: `ep${r.episode}${isFinal(r) ? '' : '-' + r.try}` },
-      h('div', { class: 'att-head' }, h('b', {}, name), pill,
-        judged(r) ? h('span', { class: 'dk-muted' }, `score ${r.score}`) : null,
-        r.model_s != null ? h('span', { class: 'dk-faint' }, `answered in ${r.model_s.toFixed(1)} s`) : null, check),
-      r.reason || r.error ? h('p', { class: 'dk-muted' }, r.reason || r.error) : null,
-      grid)
-  }))
-  const here = $(`ep${HERE}`)
-  if (HERE != null && here && !scrolled) { here.scrollIntoView({ block: 'start' }); scrolled = true }
-}
-
-function csvCell(v) { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
-function toCsv() {
-  const cols = ['episode', 'try', 'task', 'judge_success', 'score', 'reason_code', 'reason', 'success_check', 'first_error_s', 'model_s', 'error']
-  const lines = rows.map((r) => {
-    const bad = (r.frames || []).find((f) => f.status === 'error')
-    return [r.episode, r.try ?? 1, r.task, judged(r) ? r.success : '', r.score, r.reason_code, r.reason, r.check, bad ? bad.t_s : '', r.model_s, r.error]
-      .map(csvCell).join(',')
-  })
-  return [cols.join(','), ...lines].join('\n') + '\n'
-}
-// A blob made inside the sandbox is same-origin to it, so `download` works (a /media link would just navigate).
-function download(text, type, name) {
-  const url = URL.createObjectURL(new Blob([text], { type }))
-  const a = h('a', { href: url, download: name })
-  document.body.append(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
-}
-$('dl-json').onclick = () => download(raw, 'application/json', `monitor-stats_${RUN}.json`)
-$('dl-csv').onclick = () => download(toCsv(), 'text/csv', `monitor-stats_${RUN}.csv`)
-
-async function load() {
-  let text = ''
-  try {
-    const r = await fetch(DIR + 'attempts.json', { cache: 'no-store' })
-    if (r.ok) text = await r.text()
-  } catch { /* the run folder is not there yet */ }
-  if (text === raw && raw) return
-  let next
-  try { next = text ? JSON.parse(text) : [] } catch { return }  // caught mid-write: the next poll gets it
-  raw = text; rows = next
-  $('dl-json').disabled = $('dl-csv').disabled = !rows.length
-  summary(); chartAttempts(); chartReasons(); chartWhen(); list()
-}
-$('run').textContent = RUN
-load()
-setInterval(load, 3000)  // a live run adds an attempt every few seconds
+const isFinal = (r) => r.final !== false
+dk.plugin({
+  how: (P) => [
+    dk.h('p', {}, `At the end of each attempt, and of every try a recovery cut short, it sends ${P.frames} frames of the ${P.camera} camera (at most ${P.image_width} px wide) and the task to a vision model (${P.provider === 'gemini' ? 'Gemini Flash-Lite, then Flash' : 'Claude'}), which says success or not, a score, the reason, and a comment on every frame.`),
+    dk.h('p', {}, `It waits at most ${P.timeout_s} s for a model call and ${P.max_wait_s} s for a verdict; the robot never waits for it. It also tells how often the camera agrees with success-check.`),
+  ],
+  numbers: async (c) => {
+    c.rows = (await dk.json('monitor-stats/attempts.json')) || []
+    const finals = c.rows.filter(isFinal), j = finals.filter(judged), ok = j.filter((r) => r.success).length
+    const both = j.filter((r) => typeof r.check === 'boolean'), agree = both.filter((r) => r.check === r.success).length
+    const caught = c.rows.filter((r) => !isFinal(r) && judged(r) && !r.success).length
+    return [
+      { label: 'attempts judged', value: `${j.length} of ${c.episodes.length}`, sub: `${ok} success by the camera`, tone: j.length < finals.length ? 'warn' : null },
+      { label: 'agrees with success-check', value: both.length ? `${agree} of ${both.length}` : '–', tone: both.length && agree < both.length ? 'warn' : both.length ? 'ok' : null },
+      { label: 'failed tries caught', value: String(caught), sub: 'before a recovery took over' },
+    ]
+  },
+  item: (e) => ({ t: e.data && e.data.at_s != null ? e.data.at_s : e.t_s, level: e.level, text: e.message }),
+  context: (c, ep) => {
+    const rows = (c.rows || []).filter((r) => r.episode === ep.episode)
+    return rows.map((r) => dk.h('div', { class: 'dk-try' },
+      dk.h('p', { class: 'dk-row' }, rows.length > 1 ? dk.h('b', {}, `try ${r.try}`) : null,
+        !judged(r) ? dk.h('span', { class: 'dk-pill warn' }, 'not judged') : dk.h('span', { class: `dk-pill ${r.success ? 'ok' : 'bad'}` }, r.success ? 'success' : 'failed'),
+        judged(r) ? dk.h('span', { class: 'dk-faint' }, `score ${r.score}${r.model_s != null ? ` · answered in ${dk.fmt(r.model_s)} s` : ''}`) : null,
+        judged(r) && typeof r.check === 'boolean' ? dk.h('span', { class: r.check === r.success ? 'dk-faint' : 'dk-warn' }, r.check === r.success ? 'agrees with success-check' : `success-check says ${r.check ? 'success' : 'failed'}`) : null),
+      r.reason || r.error ? dk.h('p', { class: 'dk-faint' }, r.reason || r.error) : null,
+      dk.h('div', { class: 'dk-frames' }, (r.frames || []).map((f, i) => dk.h('figure', { class: f.status === 'error' ? 'bad' : '' },
+        f.file ? dk.h('img', { src: dk.media(`monitor-stats/${f.file}`), alt: `frame ${i + 1}`, loading: 'lazy' }) : null,
+        dk.h('figcaption', {}, `${f.t_s != null ? dk.fmt(f.t_s) + ' s' : ''}${f.comment ? ' · ' + f.comment : ''}`))))))
+  },
+  download: false,  // its Data card below has JSON and CSV
+  extra: (c) => {
+    const rows = c.rows || []
+    if (!rows.some(judged)) return null
+    const counts = {}
+    for (const r of rows) if (judged(r) && !r.success) { const k = r.reason_label || r.reason_code || 'other'; counts[k] = (counts[k] || 0) + 1 }
+    const n = Math.max(0, ...rows.map((r) => (r.frames || []).length))
+    const bins = Array.from({ length: n }, (_, i) => ({ label: `${i + 1}`, value: 0, tone: 'bad', title: '' }))
+    for (const r of rows) {
+      if (!judged(r) || r.success) continue
+      const i = (r.frames || []).findIndex((f) => f.status === 'error')
+      if (i >= 0) bins[i].value++
+    }
+    const csv = () => {
+      const cell = (v) => { const t = v == null ? '' : String(v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
+      const lines = rows.map((r) => [r.episode, r.try ?? 1, r.task, judged(r) ? r.success : '', r.score, r.reason_code, r.reason, r.check,
+        ((r.frames || []).find((f) => f.status === 'error') || {}).t_s, r.model_s, r.error].map(cell).join(','))
+      const url = URL.createObjectURL(new Blob([['episode,try,task,judge_success,score,reason_code,reason,success_check,first_error_s,model_s,error', ...lines].join('\n') + '\n'], { type: 'text/csv' }))
+      const a = dk.h('a', { href: url, download: `monitor-stats_${dk.RUN}.csv` }); document.body.append(a); a.click(); a.remove()
+    }
+    return [
+      dk.card('Score of each try', dk.bars(rows.filter(judged).map((r) => ({ label: rows.filter((x) => x.episode === r.episode).length > 1 ? `${r.episode}.${r.try}` : `${r.episode}`, value: r.score, tone: r.success ? 'ok' : 'bad', title: `attempt ${r.episode}, try ${r.try ?? 1}: score ${r.score}` })), { max: 100 })),
+      Object.keys(counts).length ? dk.card('Why the camera says it failed', dk.hbars(Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value, tone: 'bad' })))) : null,
+      bins.some((b) => b.value) ? dk.card('First flagged frame of a failed try', dk.bars(bins), dk.h('p', { class: 'dk-faint' }, 'frames are spread evenly over the try: 1 is its start')) : null,
+      dk.card('Data', dk.row(dk.downloadButton('monitor-stats', () => rows), dk.h('button', { class: 'dk-btn', on: { click: csv } }, 'Download CSV'))),
+    ]
+  },
+})
 </script>
 </body>
 </html>

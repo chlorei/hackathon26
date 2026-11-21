@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>harvester</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// harvester: which attempts it saved as training data, and how much.
+dk.plugin({
+  how: (P) => dk.h('p', {}, `It saves each attempt as a LeRobot v2.1 dataset at ${P.dataset_fps} rows per second (cameras ${Object.entries(P.cameras).map(([k, v]) => `${k} → ${v}`).join(', ')}). Successful ones go to success/ and are ready for fine-tuning${P.save_failed ? '; failed ones to failed/, with the reason' : ''}. Attempts shorter than ${P.min_frames} frames are skipped.`),
+  numbers: (c) => {
+    const kept = c.episodes.filter((e) => e.harvester)
+    const good = kept.filter((e) => e.harvester.split === 'success')
+    return [
+      { label: 'ready for fine-tuning', value: `${good.length} of ${c.episodes.length}`, tone: good.length ? 'ok' : null, sub: 'successful attempts saved' },
+      { label: 'frames saved', value: String(kept.reduce((a, e) => a + (e.harvester.frames || 0), 0)), sub: `${kept.length - good.length} failed kept for analysis` },
+    ]
+  },
+  context: (c, ep) => (ep.harvester ? dk.h('p', { class: 'dk-faint' }, `Saved to ${ep.harvester.path} · ${ep.harvester.frames} frames · ${ep.harvester.split}`) : dk.empty('Not saved.')),
+})
+</script>
+</body>
+</html>

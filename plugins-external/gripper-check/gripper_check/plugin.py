@@ -28,7 +28,8 @@ class GripperCheck(Plugin):
     name = "gripper-check"
     Params = Params
     manifest = Manifest(group="diagnosis", icon="Hand", capability="observe",
-                        hooks=["on_episode_start", "on_step", "on_episode_end"], step_rate_hz=10, needs=["robot"])
+                        hooks=["on_episode_start", "on_step", "on_episode_end"], step_rate_hz=10, needs=["robot"],
+                        ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.closed_at = {s: None for s in SIDES}

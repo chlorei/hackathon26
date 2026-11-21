@@ -16,7 +16,7 @@ type Route = { page: 'live' | 'plugins' | 'create' | 'history' | 'app'; runId: s
 function parse(hash: string): Route {
   const [page, runId, episode] = hash.replace(/^#\/?/, '').split('/')
   if (page === 'app' && runId) return { page: 'app', runId, episode: null }
-  if (page === 'plugins') return { page: 'plugins', runId: null, episode: null }
+  if (page === 'plugins') return { page: 'plugins', runId: runId ? decodeURIComponent(runId) : null, episode: null }  // #/plugins/<name>
   if (page === 'create') return { page: 'create', runId: null, episode: null }
   if (page === 'history') return { page: 'history', runId: runId || null, episode: episode ? Number(episode) : null }
   return { page: 'live', runId: null, episode: null }
@@ -74,7 +74,7 @@ export default function App() {
       </header>
       <main className="mx-auto w-full max-w-[1680px] flex-1 px-7 py-6">
         {route.page === 'live' && <LivePage onOpenRun={openRun} />}
-        {route.page === 'plugins' && <PluginsPage />}
+        {route.page === 'plugins' && <PluginsPage focus={route.runId} />}
         {route.page === 'create' && <CreatePage onOpenPlugins={() => go('/plugins')} />}
         {route.page === 'app' && route.runId && <AppPage app={(apps.data?.apps ?? []).find((a) => a.name === route.runId)} name={route.runId} />}
         {route.page === 'history' && (

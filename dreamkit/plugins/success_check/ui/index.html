@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>success-check</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// success-check: when the task counted as done, and how long it took.
+const cm = (m) => `${Math.round(m * 100)} cm`
+dk.plugin({
+  how: (P) => [
+    dk.h('p', {}, `It calls an attempt a success when the object named in the task rests within ${cm(P.radius_bowl_m)} of the bowl's centre (${cm(P.radius_plate_m)} for a plate), between ${cm(P.below_m)} below and ${cm(P.above_m)} above the target's base, released (gripper command above ${P.open_above}) for ${P.hold_s} s.`),
+    dk.h('p', {}, P.early_stop ? 'The attempt ends as soon as that happens.' : 'The attempt runs on after it (early_stop is off).'),
+  ],
+  numbers: (c) => {
+    const done = c.mine.filter((e) => e.level === 'success' && e.t_s != null)
+    const times = done.map((e) => e.t_s).sort((a, b) => a - b)
+    return [
+      { label: 'attempts done', value: `${done.length} of ${c.episodes.length}`, tone: done.length === c.episodes.length ? 'ok' : done.length ? null : 'bad' },
+      { label: 'time to success, median', value: times.length ? `${dk.fmt(times[Math.floor(times.length / 2)])} s` : '–', sub: times.length > 1 ? `fastest ${dk.fmt(times[0])} s` : null },
+    ]
+  },
+  context: (c, ep) => (ep.success === false && !c.mine.some((e) => e.episode === ep.episode)
+    ? dk.empty(`Not done: the object never rested in the target${ep.reason ? ` (the attempt ended: ${ep.reason.replace(/_/g, ' ')})` : ''}.`) : null),
+  quiet: (c) => `It did not see the task done in any of the ${c.episodes.length} attempts.`,
+})
+</script>
+</body>
+</html>

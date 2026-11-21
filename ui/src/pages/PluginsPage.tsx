@@ -20,9 +20,15 @@ function stageOf(p: PluginInfo): 'detect' | 'recover' | 'learn' {
   return 'detect'
 }
 
-export default function PluginsPage() {
+export default function PluginsPage({ focus }: { focus?: string | null }) {
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
-  const [open, setOpen] = useState<string | null>(null)
+  const [open, setOpen] = useState<string | null>(focus ?? null)  // #/plugins/<name>: that plugin's settings open
+  useEffect(() => {
+    if (!focus) return
+    setOpen(focus)
+    const t = setTimeout(() => document.getElementById(`plugin-${focus}`)?.scrollIntoView({ block: 'center' }), 300)
+    return () => clearTimeout(t)
+  }, [focus])
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs })
   const lastRun = runs.data?.runs[0]?.id ?? null  // newest first
   const [page, setPage] = useState<PluginPage | null>(null)
@@ -57,7 +63,7 @@ export default function PluginsPage() {
               <Panel>
                 {items.map((p) => (
                   <PluginRow key={p.name} plugin={p} lead={p.name === stage.lead} open={open === p.name} onOpen={() => toggle(p.name)}
-                    lastRun={lastRun} onPage={() => lastRun && setPage({ plugin: p.name, runId: lastRun, episode: null })} />
+                    lastRun={lastRun} onPage={() => setPage({ plugin: p.name, runId: lastRun ?? '', episode: null })} />
                 ))}
               </Panel>
             </section>
@@ -129,7 +135,7 @@ function PluginRow({ plugin, open, onOpen, lead, lastRun, onPage }: {
   const dirty = JSON.stringify(values) !== JSON.stringify(plugin.params)
   const external = plugin.source && plugin.source !== 'builtin'
   return (
-    <div className="border-b border-line last:border-0">
+    <div id={`plugin-${plugin.name}`} className="border-b border-line last:border-0">
       <div className={clsx('flex items-center gap-4 px-5', lead ? 'py-4' : 'py-3.5')}>
         <span className={clsx('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', plugin.enabled ? 'bg-raised text-ink' : 'bg-raised/60 text-faint')}>
           <PluginIcon name={plugin.name} icon={plugin.icon} className="!h-[18px] !w-[18px]" />
@@ -149,10 +155,8 @@ function PluginRow({ plugin, open, onOpen, lead, lastRun, onPage }: {
           )}
         </button>
         <StatusLine plugin={plugin} className="hidden w-60 shrink-0 lg:flex" />
-        {plugin.manifest.ui && (
-          <Button variant="quiet" onClick={onPage} disabled={!lastRun} className="!px-2.5"
-            title={lastRun ? `Open ${plugin.name}'s page for the last run (${lastRun})` : 'No runs yet'}>Open page</Button>
-        )}
+        <Button variant="quiet" onClick={onPage} className="!px-2.5"
+          title={lastRun ? `What ${plugin.name} did in the last run (${lastRun})` : `What ${plugin.name} does`}>Open page</Button>
         <Button variant="quiet" onClick={onOpen} className="!px-2.5">{open ? 'Close' : 'Settings'}</Button>
         <Toggle checked={plugin.enabled} disabled={!plugin.installed || update.isPending} onChange={(v) => update.mutate({ enabled: v })} />
       </div>

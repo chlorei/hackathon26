@@ -132,7 +132,8 @@ class Reliability(Plugin):
     name = "reliability"
     Params = Params
     manifest = Manifest(group="output", icon="ChartNoAxesColumn", capability="observe",
-                        hooks=["on_run_start", "on_episode_start", "on_run_end"], step_rate_hz=1)
+                        hooks=["on_run_start", "on_episode_start", "on_run_end"], step_rate_hz=1,
+                        ui="ui/index.html")
 
     def on_run_start(self, ctx: PluginContext) -> None:
         self.z = NormalDist().inv_cdf(0.5 + self.params.confidence / 2)  # 0.95 -> 1.96

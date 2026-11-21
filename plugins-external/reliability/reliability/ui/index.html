@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>reliability</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// reliability: the success rate it measured, with its interval, the cost of a success, and any A/B result.
+dk.plugin({
+  how: (P) => [
+    dk.h('p', {}, `At the end of the run it counts successes and gives the success rate with its ${Math.round(P.confidence * 100)}% confidence interval (Wilson), and what one success cost at $${P.price_per_hour} per robot-hour (${P.calls_per_hour} model calls an hour).`),
+    dk.h('p', {}, P.baseline_run ? `It compares this run with ${P.baseline_run}, scene by scene (${P.pair_on.replace(/_/g, ' ')}), and calls a difference real below p = ${P.significance}.` : 'Set baseline_run to compare with an earlier run, scene by scene.'),
+  ],
+  numbers: async (c) => {
+    const s = (await dk.json('reliability/summary.json')) || {}
+    c.summary = s
+    const rate = s.rate, ci = s.interval
+    return [
+      { label: 'success rate', value: rate == null ? '–' : `${Math.round(rate * 100)}%`, sub: ci ? `${Math.round(ci[0] * 100)}–${Math.round(ci[1] * 100)}% (${Math.round(c.P.confidence * 100)}% interval)` : 'written at the end of the run' },
+      { label: 'cost of one success', value: s.cost_per_success_usd == null ? '–' : `$${dk.fmt(s.cost_per_success_usd, 2)}`, sub: s.cost_usd == null ? null : `$${dk.fmt(s.cost_usd, 2)} in all` },
+    ]
+  },
+  quiet: () => 'It reports at the end of the run; this run has not finished yet.',
+  extra: (c) => {
+    const b = c.summary && c.summary.baseline
+    if (!b) return null
+    const k = b.comparison || {}
+    return dk.card(`Compared with ${b.run}`, dk.stats([
+      { label: 'this run', value: `${Math.round((k.rate_this ?? 0) * 100)}%` },
+      { label: b.run, value: `${Math.round((k.rate_base ?? 0) * 100)}%` },
+      { label: 'difference', value: `${k.delta > 0 ? '+' : ''}${Math.round((k.delta ?? 0) * 100)} pp`, sub: `${b.verdict} (p = ${dk.fmt(k.p_value, 3)})`, tone: b.verdict === 'better' ? 'ok' : b.verdict === 'worse' ? 'bad' : null },
+    ]))
+  },
+})
+</script>
+</body>
+</html>

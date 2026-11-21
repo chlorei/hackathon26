@@ -64,12 +64,17 @@ def _digest() -> str:
     return "\n".join(out)
 
 
+def strip_ui(text: str) -> str:
+    """The example without its page: a generated plugin has none (the server gives it the standard one)."""
+    return re.sub(r',\s*ui="ui/index\.html"', "", re.sub(r'\nui = "ui/index\.html"', "", text))
+
+
 def _example() -> str:
     files = ["pyproject.toml", "gripper_check/__init__.py", "gripper_check/plugin.py",
              "tests/test_gripper_check.py", "README.md"]
     return json.dumps({"name": "gripper-check", "summary": "Catches a gripper closed on nothing and a grip that "
-                       "loosens mid-carry.", "files": {f: (EXAMPLE / f).read_text(encoding="utf-8") for f in files}},
-                      indent=1)
+                       "loosens mid-carry.", "files": {f: strip_ui((EXAMPLE / f).read_text(encoding="utf-8"))
+                                                       for f in files}}, indent=1)
 
 
 def _fixtures() -> list[str]:
@@ -107,7 +112,8 @@ def build_prompt(messages: list[dict[str, str]], files: dict[str, str] | None, p
         "success_apple_bowl, dropped_mid_carry and not_reached, each asserting exactly `not r.errors(\"<name>\")` "
         "and `r.budget_ms(\"<name>\") < 1.0`. Do not assert that an event fires: the fixtures are recordings and "
         "you cannot know what they contain.\n"
-        "- README.md: what it watches, the feed lines it writes, its settings.",
+        "- README.md: what it watches, the feed lines it writes, its settings.\n"
+        "- No `ui` in the manifest or pyproject: the panel gives every plugin a standard page of its own.",
         "## Replay fixtures available to tests\n" + ", ".join(_fixtures()),
         "## Failure codes (dreamkit.reasons), if the plugin names a failure\n" + ", ".join(reasons.FAILURES),
         "## The plugin standard (excerpts of PLUGIN_STANDARD.md)\n" + _digest(),

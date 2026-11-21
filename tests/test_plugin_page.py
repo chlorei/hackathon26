@@ -34,6 +34,7 @@ def test_plugin_page_is_served_with_the_theme_and_kept_to_its_own_files(tmp_path
 
     page = c.get("/plugin-ui/fake/")
     assert page.status_code == 200 and server.THEME_LINK in page.text and '<base href="/plugin-ui/fake/">' in page.text
+    assert 'window.DK_PLUGIN = {"name": "fake"}' in page.text  # the plugin's record for the page (here, only its name)
     assert c.get("/plugin-ui/fake/app.js").text == "1"
     assert c.get("/plugin-ui/fake/..%2Fsecret.txt").status_code == 404
     assert c.get("/plugin-ui/nope/").status_code == 404

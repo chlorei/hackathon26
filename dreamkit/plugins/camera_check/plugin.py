@@ -38,6 +38,7 @@ class CameraCheck(Plugin):
         self.reported = False
         self.last_q: dict[str, np.ndarray] | None = None
         self.seen: dict[str, dict[str, float]] = {}  # per camera, for the page only (run_dir/camera-check/)
+        self.shots: dict[str, np.ndarray] = {}  # the picture that failed, small, for the page only
 
     def before_model(self, ctx: PluginContext) -> None:
         if self.reported:
@@ -71,6 +72,10 @@ class CameraCheck(Plugin):
                 if self.same[cam] >= p.frozen_calls:
                     problems.append(f"camera {cam} is frozen ({self.same[cam]} identical pictures)")
         if problems:
+            for cam, rgb in ctx.frames.items():
+                if any(f"camera {cam} " in p for p in problems):
+                    step = max(1, rgb.shape[1] // 320)
+                    self.shots[cam] = np.array(rgb[::step, ::step])
             self.reported = True
             ctx.result["camera-check"] = {"problems": problems}
             ctx.ui.badge("camera failure", "error")
@@ -80,6 +85,16 @@ class CameraCheck(Plugin):
         if ctx.run_dir is None or not self.seen:
             return
         name = f"ep{ctx.episode:03d}_checks.json"  # what the page shows: how many pictures each camera passed
+        shots = {cam: f"ep{ctx.episode:03d}_{cam}.jpg" for cam in self.shots}
         record = {"episode": ctx.episode, "cameras": {c: {k: round(v, 2) for k, v in d.items()} for c, d in self.seen.items()},
-                  "problems": (ctx.result.get("camera-check") or {}).get("problems", [])}
-        ctx.defer(lambda: ctx.files.path(name).write_text(json.dumps(record)))
+                  "problems": (ctx.result.get("camera-check") or {}).get("problems", []), "frames": shots}
+        pictures = self.shots
+
+        def write() -> None:
+            from PIL import Image  # noqa: PLC0415 - only when a page record is written
+
+            for cam, file in shots.items():
+                Image.fromarray(np.ascontiguousarray(pictures[cam], dtype=np.uint8)).save(ctx.files.path(file), quality=85)
+            ctx.files.path(name).write_text(json.dumps(record))
+
+        ctx.defer(write)

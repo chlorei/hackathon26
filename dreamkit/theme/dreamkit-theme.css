@@ -108,19 +108,72 @@ kbd { background: var(--dk-panel); border: 1px solid var(--dk-line); border-bott
 .dk-table tr:last-child td { border-bottom: 0; }
 
 /* ---- plugin pages built with /theme/dreamkit-page.js (§7a) ------------------------------------------------------ */
-.dk-page { display: grid; gap: 14px; padding: 16px; }
-.dk-headrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.dk-h1 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
-.dk-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.dk-page { display: grid; gap: 14px; padding: 18px 18px 28px; max-width: 760px; margin: 0 auto; box-sizing: border-box; }
+.dk-plugin-head { display: flex; gap: 14px; align-items: flex-start; padding: 2px 2px 4px; }
+.dk-icon-box { flex: none; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;
+               border-radius: 12px; background: var(--dk-raised); color: var(--dk-ink); }
+.dk-icon { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round;
+           stroke-linejoin: round; }
+.dk-plugin-text { min-width: 0; display: grid; gap: 6px; }
+.dk-plugin-name { margin: 0; font-size: 21px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.2; }
+.dk-plugin-what { margin: 0; font-size: 14px; color: var(--dk-dim); }
+.dk-run-id { margin: 0; font-size: 11.5px; color: var(--dk-faint); font-family: var(--dk-font-mono); word-break: break-all; }
+.dk-card > .dk-body > p { margin: 0 0 6px; font-size: 14px; }
+.dk-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .dk-stat { padding: 12px 16px; }
 .dk-stat .dk-big { font-size: 26px; }
 .dk-stat small { display: block; font-size: 12px; color: var(--dk-dim); }
-.dk-empty { margin: 0; padding: 12px 0; color: var(--dk-faint); font-size: 13px; }
+.dk-empty { margin: 0; padding: 4px 0; color: var(--dk-faint); font-size: 13.5px; }
+.dk-quiet { margin: 10px 0 0; font-size: 13px; }
+.dk-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.dk-card .dk-row:last-child { margin-top: 10px; }
+.dk-chip.dk-bad { color: var(--dk-bad); border-color: var(--dk-bad-soft); }
+.dk-dot.warn { background: var(--dk-warn); }
+
+/* an attempt: its timeline and this plugin's moments */
+.dk-attempt { border-top: 1px solid var(--dk-line); padding: 12px 0 10px; }
+.dk-attempt:first-of-type { border-top: 0; padding-top: 2px; }
+.dk-attempt.dk-here { background: var(--dk-signal-soft); margin: 0 -20px; padding: 10px 20px; border-radius: 0; }
+.dk-attempt p { margin: 4px 0 0; font-size: 13px; }
+.dk-attempt-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13.5px; margin-bottom: 4px; }
+.dk-evs { list-style: none; margin: 4px 0 0; padding: 0; }
+.dk-ev { display: grid; grid-template-columns: 52px 12px 1fr; gap: 8px; align-items: baseline; padding: 4px 6px;
+         margin: 0 -6px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.dk-ev:hover { background: var(--dk-raised); }
+.dk-ev.sel { background: var(--dk-signal-soft); }
+.dk-ev-t { color: var(--dk-faint); font-variant-numeric: tabular-nums; text-align: right; }
+.dk-ev .dk-dot { align-self: center; }
+.dk-tl { margin-top: 2px; }
+.dk-tl circle { cursor: pointer; }
+.dk-tl circle.sel { stroke: var(--dk-ink); stroke-width: 2.5; }
+
+/* charts (SVG): colours only from the theme */
 .dk-chart { display: block; width: 100%; height: auto; overflow: visible; }
 .dk-chart text { font-size: 11px; fill: var(--dk-dim); font-family: var(--dk-font-sans); }
 .dk-chart .axis, .dk-chart .track { stroke: var(--dk-line); stroke-width: 2; }
 .dk-chart .ok { fill: var(--dk-ok); } .dk-chart .bad { fill: var(--dk-bad); } .dk-chart .warn { fill: var(--dk-warn); }
 .dk-chart .info { fill: var(--dk-signal); } .dk-chart .muted { fill: var(--dk-faint); } .dk-chart .cat { fill: var(--dk-cat-1); }
 .dk-chart .steel { fill: var(--dk-steel); } .dk-chart .violet { fill: var(--dk-violet); }
-.dk-table tr.dk-here td { background: var(--dk-signal-soft); }
-.dk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* settings: the current values, in words */
+.dk-settings { display: grid; grid-template-columns: minmax(110px, max-content) 1fr; gap: 8px 16px; margin: 0; font-size: 13px; }
+.dk-settings dt { font-family: var(--dk-font-mono); font-size: 12px; color: var(--dk-dim); padding-top: 1px; word-break: break-all; }
+.dk-settings dd { margin: 0; }
+.dk-settings dd b { font-weight: 600; }
+.dk-settings dd .dk-faint { font-size: 12px; }
+
+/* media a plugin shows (frames, videos) */
+.dk-frames { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin-top: 8px; }
+.dk-frames figure { margin: 0; }
+.dk-frames img, .dk-video { display: block; width: 100%; border-radius: 6px; border: 2px solid var(--dk-line); background: var(--dk-raised); }
+.dk-frames figure.bad img { border-color: var(--dk-bad); }
+.dk-frames figcaption { font-size: 11.5px; color: var(--dk-dim); line-height: 1.35; margin-top: 2px; }
+.dk-frames figure.bad figcaption { color: var(--dk-bad); }
+.dk-videos { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-top: 8px; }
+.dk-videos figcaption { font-size: 12px; color: var(--dk-dim); margin-top: 2px; }
+.dk-try { margin-top: 10px; }
+.dk-try > p { margin: 0 0 2px; font-size: 13px; }
+.dk-how { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; }
+.dk-how li { margin: 2px 0; }
+.dk-page code { font-family: var(--dk-font-mono); font-size: 12px; background: var(--dk-raised); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+.dk-page details summary { cursor: pointer; font-size: 13.5px; }

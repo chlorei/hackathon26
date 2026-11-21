@@ -241,11 +241,17 @@ Data
 - No network beyond `/media/` and `/theme/`; no API calls; the page never changes anything.
 - With no run (`run_id` missing or not found) the page says how to get one (`sim_loop.py --mock …`), never errors.
 
-Shared helpers
-- `/theme/dreamkit-page.js` (`<script src="/theme/dreamkit-page.js"></script>`): `dk.page(plugin, title, build)`
-  loads the run, its episodes and events, handles the no-run and plugin-off cases and redraws while the run is live;
-  `dk.stats`, `dk.bars`, `dk.hbars`, `dk.timeline` (SVG), `dk.table`, `dk.downloadButton`. A page: a few big numbers
-  of what the plugin changed, one or two charts, then the attempts.
+One page per plugin, one question: what is this plugin, and what did IT do in this run?
+- Every plugin has a page. Without `ui` the server gives it the standard one (`dreamkit/theme/plugin-page.html`: its
+  description, settings and events), so a plugin made on the Create tab has one too.
+- `/theme/dreamkit-page.js` draws every page the same way: `dk.plugin({how, numbers, context, extra, quiet, …})`.
+  In order: header (icon, name, what it does, on/off in the run, ms/step, errors; the run id small) · How it works
+  (a few lines, with the current settings in words) · at most three numbers about this plugin only · What it
+  noticed in this run (its events by attempt on the attempt's timeline; a click finds the moment; frames, videos
+  where they help; "Nothing to report" when there is nothing) · Settings (current values, "Change settings" asks
+  the panel to open them). No run: "Run sim_loop to see what this plugin does". Charts of the whole run belong in
+  History, not here.
+- The server puts the plugin's own record in `window.DK_PLUGIN` (description, icon, params, defaults, schema).
 
 Style — the panel's, only
 - The only stylesheet is the shared theme, `/theme/dreamkit-theme.css` (the panel's CSS variables and its base
@@ -457,8 +463,9 @@ test = the package's `tests/`; no per-step bench (an app has no hooks). After `d
   `released_near_target`.
 
 **v1.6** (plugin pages read the run)
-- A plugin page may read the run's `run.json` and `events.jsonl` besides its own files (§7a), and use the shared
-  `/theme/dreamkit-page.js`. Built-ins ship pages too (recovery, failure-monitor, …).
+- A plugin page may read the run's `run.json` and `events.jsonl` besides its own files (§7a).
+- Every plugin has a page with the same structure (`dk.plugin`): what it is, what it did in this run, its settings;
+  a plugin without `ui` gets the standard one. Built-ins and the external examples ship their own.
 
 **v1.5** (app plugins)
 - Second kind of plugin: `kind="app"` (§13), entry point group `dreamkit.apps`, `dreamkit.sdk.App`. DreamGym moved
