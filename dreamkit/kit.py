@@ -90,10 +90,18 @@ class Deferred:
             finally:
                 self.jobs.task_done()
 
-    def flush(self, timeout: float = 120.0) -> bool:
+    def flush(self, timeout: float = 120.0, heartbeat=None, every_s: float = 1.0) -> bool:
+        """Waits for the queued jobs. `heartbeat` runs every `every_s` meanwhile, so the panel's Live page does not
+        take a loop that waits for a plugin's model call (§5) for a finished one."""
         done = threading.Event()
         self.jobs.put(("dreamkit", done.set, (), {}))
-        return done.wait(timeout)
+        deadline = time.monotonic() + timeout
+        while not done.wait(min(every_s, max(0.0, deadline - time.monotonic()))):
+            if time.monotonic() >= deadline:
+                return False
+            if heartbeat is not None:
+                heartbeat()
+        return True
 
 
 class Kit:
@@ -415,7 +423,8 @@ class Kit:
         if r.get("success") is None and r.get("reason") not in (None, "timeout"):
             r["success"] = False  # nobody judged success, but a failure was found: that settles it
         ctx.result["recap"] = history.episode_recap(ctx, self.run_dir, self.deferred)  # after the recorder closed
-        self.deferred.flush()  # videos, traces, datasets and the recap clip are on disk before it is saved
+        self.deferred.flush(heartbeat=lambda: self._beat(force=True))  # videos, traces, datasets, the recap clip
+        # and plugins' model calls are done before the attempt is saved; the heartbeat keeps Live connected meanwhile
         r = ctx.result
         if r.get("success") is not True and not r.get("reason"):  # no failure-monitor: the first live verdict, if any
             first = (ctx.store.get("verdicts") or [None])[0]
@@ -477,7 +486,7 @@ class Kit:
             self.manager.call("on_run_end", self.ctx)
         except (StopEpisode, EndEpisode):
             pass
-        self.deferred.flush()
+        self.deferred.flush(heartbeat=lambda: self._beat(force=True))
         self.info["status"] = status
         self.info["finished"] = time.time()
         try:

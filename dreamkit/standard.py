@@ -58,6 +58,18 @@ class Manifest(BaseModel):
     ## What it reads: "robot" (state, gripper, command, cameras — every robot) and/or "world" (positions,
     ## contacts — only the simulator). A plugin that needs the world is off on a real robot ("sim only").
     needs: list[Literal["robot", "world"]] = Field(default_factory=lambda: ["robot"])
+    ## §7a: an optional page shown in the panel, relative to the plugin's module folder ("ui/index.html").
+    ui: str | None = None
+
+    @field_validator("ui")
+    @classmethod
+    def _ui(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        parts = Path(value).parts
+        if not value.endswith(".html") or Path(value).is_absolute() or ".." in parts:
+            raise ValueError(f"ui {value!r} must be a relative .html path inside the module folder, e.g. ui/index.html")
+        return value
 
     @field_validator("hooks")
     @classmethod
@@ -226,6 +238,83 @@ def check_pyproject(path: Path, cls: type | None = None) -> list[Problem]:
     tests = list((path / "tests").glob("test_*.py")) if (path / "tests").is_dir() else []
     if not tests:
         out.append(Problem("§9", str(path), "no tests/test_*.py", "Add replay tests: one passing, one failing case."))
+    return out
+
+
+# -- §7a: a plugin's own page -----------------------------------------------------------------------------------------
+_UI_FILES = (".html", ".htm", ".css", ".js", ".mjs")
+_EXTERNAL = re.compile(r"""(?:https?:)?//[a-z0-9.-]+\.[a-z]{2,}|https?://""", re.I)
+_CSS_COLOR = re.compile(r"#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(", re.I)
+_NAMED_COLOR = re.compile(r"\b(?:white|black|red|green|blue|gray|grey|yellow|orange|purple|pink|brown|navy|teal|"
+                          r"silver|gold|maroon|olive|lime|aqua|cyan|magenta|fuchsia)\b", re.I)
+_COLOR_PROPS = re.compile(r"(?:^|[;{\s\"'])(?:color|background(?:-color)?|border(?:-[a-z]+)*|outline(?:-color)?|fill|"
+                          r"stroke|box-shadow|text-shadow|caret-color|accent-color)\s*:\s*([^;{}\"'<>]*)", re.I)
+_DECL = re.compile(r"(?:^|[;{])\s*[-a-z]+\s*:\s*([^;{}]*)", re.I)
+_FONT_FAMILY = re.compile(r"font-family\s*:\s*([^;{}\"]*)", re.I)
+_STYLE_BLOCK = re.compile(r"<style[^>]*>(.*?)</style>", re.I | re.S)
+_STYLE_ATTR = re.compile(r"""style\s*=\s*(["'])(.*?)\1""", re.I | re.S)
+_SCRIPT_BLOCK = re.compile(r"<script[^>]*>(.*?)</script>", re.I | re.S)
+_JS_COLOR = re.compile(r"""["'`]\s*(#[0-9a-f]{3,8}|(?:rgba?|hsla?)\([^"'`]*\))\s*["'`]""", re.I)
+
+
+def _line(text: str, pos: int) -> int:
+    return text.count("\n", 0, pos) + 1
+
+
+def _css_problems(where: str, css: str, offset_text: str, offset: int) -> list[Problem]:
+    out: list[Problem] = []
+    for m in _DECL.finditer(css):
+        value = re.sub(r"var\([^)]*\)", "", m.group(1))
+        hit = _CSS_COLOR.search(value)
+        if hit:
+            out.append(Problem("§7a", f"{where}:{_line(offset_text, offset + m.start())}",
+                               f"colour {hit.group(0)!r} outside the theme's variables",
+                               "Use a theme variable, e.g. var(--dk-ok) or var(--dk-line)."))
+    for m in _COLOR_PROPS.finditer(css):
+        value = re.sub(r"var\([^)]*\)", "", m.group(1))
+        hit = _NAMED_COLOR.search(value)
+        if hit:
+            out.append(Problem("§7a", f"{where}:{_line(offset_text, offset + m.start())}",
+                               f"named colour {hit.group(0)!r} outside the theme's variables",
+                               "Use a theme variable, e.g. var(--dk-ink)."))
+    for m in _FONT_FAMILY.finditer(css):
+        value = m.group(1).strip()
+        if value and not re.fullmatch(r"(?:var\([^)]*\)\s*,?\s*)+|inherit|initial|unset", value):
+            out.append(Problem("§7a", f"{where}:{_line(offset_text, offset + m.start())}",
+                               f"own font {value!r}", "Use var(--dk-font-sans) or var(--dk-font-mono)."))
+    if "@font-face" in css:
+        out.append(Problem("§7a", where, "@font-face: a font of its own", "Remove it; the theme sets the fonts."))
+    return out
+
+
+def check_ui(module_dir: Path, ui: str) -> list[Problem]:
+    """§7a: the page exists, links nothing external, uses only the theme's colours and fonts."""
+    page = module_dir / ui
+    if not page.is_file():
+        return [Problem("§7a", str(page), "manifest ui points to a missing file", "Add the page or fix the path.")]
+    out: list[Problem] = []
+    for f in sorted(p for p in page.parent.rglob("*") if p.is_file() and p.suffix.lower() in _UI_FILES):
+        text = f.read_text(errors="replace")
+        where = str(f)
+        for m in _EXTERNAL.finditer(text):
+            out.append(Problem("§7a", f"{where}:{_line(text, m.start())}", f"external URL {m.group(0)!r}",
+                               "Ship the file next to index.html; read data only from /media/<run_id>/<plugin>/."))
+        if f.suffix.lower() == ".css":
+            out += _css_problems(where, text, text, 0)
+            continue
+        if f.suffix.lower() in (".html", ".htm"):
+            for m in _STYLE_BLOCK.finditer(text):
+                out += _css_problems(where, m.group(1), text, m.start(1))
+            for m in _STYLE_ATTR.finditer(text):
+                out += _css_problems(where, ";" + m.group(2), text, m.start(2))
+            scripts = [(m.group(1), m.start(1)) for m in _SCRIPT_BLOCK.finditer(text)]
+        else:
+            scripts = [(text, 0)]
+        for code, start in scripts:
+            for m in _JS_COLOR.finditer(code):
+                out.append(Problem("§7a", f"{where}:{_line(text, start + m.start())}",
+                                   f"colour {m.group(1)!r} in a script",
+                                   "Use a theme variable: 'var(--dk-bad)' or a .dk-* class."))
     return out
 
 

@@ -1,4 +1,4 @@
-# dreamkit plugin standard (v1.3)
+# dreamkit plugin standard (v1.4)
 
 Every plugin — built-in or from GitHub — follows this document. `dreamkit check <plugin>` enforces the rules
 marked **[check]**. If code and this document disagree, this document wins.
@@ -15,7 +15,8 @@ dreamkit-<name>/
 ├── README.md               # what it does, params table, example events
 ├── <module>/
 │   ├── __init__.py         # exports the plugin class only
-│   └── plugin.py           # Params + Plugin class
+│   ├── plugin.py           # Params + Plugin class
+│   └── ui/index.html       # optional: the plugin's own page in the panel (§7a)
 └── tests/
     └── test_<module>.py    # replay tests (section 9)
 ```
@@ -48,6 +49,7 @@ needs_frames = false                   # true only if it reads camera images
 needs = ["robot"]                      # "robot" (any robot) or ["robot", "world"] (simulator only)
 requires = ["failure-monitor"]         # plugins that must run before this one
 conflicts = []                         # plugins that must not be on at the same time
+ui = "ui/index.html"                   # optional: a page shown in the panel, relative to the module folder (§7a)
 ```
 
 Built-ins declare the same fields as class attributes (`manifest = Manifest(...)`); the manager reads both forms the
@@ -207,13 +209,43 @@ Verdicts — `ctx.result`
 - `data` keys: snake_case; a float is a measurement and needs a unit suffix (`t_s`, `dist_m`, `rtt_ms`); strings,
   ints and booleans do not.
 
-UI — only through standard blocks, never custom React
+UI — standard blocks first; a plugin that needs more ships one page in the panel's style (§7a), never custom React
 ```python
 ctx.ui.metric("grip force", 12.3, unit="N")
 ctx.ui.mark(t_s=9.3, label="released off target", level="error")   # timeline marker
 ctx.ui.series("hand_to_object", t_s, value, unit="cm")              # chart line
 ctx.ui.badge("recovered 2×", level="success")
 ```
+
+---
+
+## 7a. Plugin UI  **[check]**
+
+A plugin may ship **one page** for what the standard blocks cannot show (a grid of frames, a table, downloads).
+Declare it in the manifest: `ui = "ui/index.html"`, a path inside the plugin's module folder, so it ships with the
+package.
+
+Where it shows
+- In Live and History, the plugin's lines in the feed get a `›`; a click opens a side panel with the page.
+- The page runs in `<iframe sandbox="allow-scripts allow-downloads">`: no same-origin, so it cannot read the panel,
+  its cookies or other plugins' pages. The panel passes `?run_id=<id>&attempt=<n>` (`attempt` is the episode number).
+- The server serves it at `/plugin-ui/<name>/` with the theme already linked; files next to `index.html` are served
+  from the same folder.
+
+Data
+- Only the plugin's own files, written in `run_dir/<plugin>/` (§8), read with `fetch("/media/<run_id>/<plugin>/…")`.
+  Downloads are plain links to the same files (`<a href="/media/…" download>`).
+- No network beyond `/media/` and `/theme/`; no API calls; the page never changes anything.
+
+Style — the panel's, only
+- The only stylesheet is the shared theme, `/theme/dreamkit-theme.css` (the panel's CSS variables and its base
+  components: `.dk-card`, `.dk-title`, `.dk-pill`, `.dk-chip`, `.dk-dot`, `.dk-bar`, …). The server links it; the
+  page adds layout CSS of its own if it needs to.
+- Colours only through the theme's variables (`var(--dk-ok)`, …). **[check]** no `#hex`, `rgb()`, `hsl()` or named
+  colours in CSS, in `style=` attributes or in script strings.
+- No fonts of its own (`@font-face`, a `font-family` that is not a theme variable). **[check]**
+- No external anything: no `http://`, `https://` or `//host` URLs, no CDN, no CSS/JS framework; scripts and styles
+  inline or as files next to `index.html`. **[check]**
 
 ---
 
@@ -317,11 +349,11 @@ the SDK, the manager and the installer refuse what breaks it, with a message tha
 |---|---|---|
 | **Base class** | manifest, Params, docstring, names | `Plugin.__init_subclass__` validates the class when it is defined; a bad plugin fails at import with `PluginStandardError: <rule>, see PLUGIN_STANDARD.md §N` |
 | **Scoped context** | capabilities | each plugin gets its own `ctx` built from its manifest: `observe` gets no `stop()` / `request_retry()`, and `ctx.actions` arrays are read-only (`writeable=False`); `modify_actions` gets a copy, and the manager rejects the change if any value got larger or left joint limits; undeclared hooks are never called |
-| **Typed helpers** | events, verdicts, files, UI | `ctx.emit` checks level, unit suffixes in `data`, rate (1/s on `on_step`); `reason` must come from `reasons.py`; `ctx.files` only opens paths inside `run_dir/<plugin>/`; UI only through `ctx.ui.*` |
+| **Typed helpers** | events, verdicts, files, UI | `ctx.emit` checks level, unit suffixes in `data`, rate (1/s on `on_step`); `reason` must come from `reasons.py`; `ctx.files` only opens paths inside `run_dir/<plugin>/`; UI through `ctx.ui.*`, or one page under §7a |
 | **Manager at runtime** | budget, errors, conflicts | measures every hook; over budget → warning, then off; 5 errors in a row → off; a second `control` plugin is not loaded; reasons shown in the panel |
 | **Installer** | nothing unchecked gets in | `dreamkit install` runs `check`, the plugin's tests and `bench` on the fixture library before enabling; any failure → uninstall + the log in the panel |
 | **Template repo** | the same tooling everywhere | `dreamkit new` adds `ruff` + `mypy` config, a pre-commit hook running `dreamkit check`, and a GitHub Action running `check` + `test` + `bench` on every push; the registry accepts a PR only with that Action green |
-| **Panel** | the same look for every plugin | the UI is generated from the manifest (group, icon, description) and the Params JSON schema; a plugin cannot ship its own UI, so it cannot look different |
+| **Panel** | the same look for every plugin | the UI is generated from the manifest (group, icon, description) and the Params JSON schema; a plugin's own page (§7a) gets the shared theme from the server, runs sandboxed, and `dreamkit check` refuses external URLs, own fonts and colours outside the theme's variables |
 
 Error messages always name the rule, the file and line when known, and the fix:
 `gripper_check/plugin.py:14 — Params.window has no unit suffix (§4). Rename to window_s and add unit="s".`
@@ -334,6 +366,7 @@ Error messages always name the rule, the file and line when known, and the fix:
 - [ ] `dreamkit test <path>` passes, budget under 1 ms per step.
 - [ ] README: what it does, params table (generated by `dreamkit check --readme`), one example event.
 - [ ] Capability is the smallest that works (`observe` if in doubt).
+- [ ] A page of its own (§7a) only if the standard blocks cannot show it; it passes `dreamkit check`.
 - [ ] Added to `registry.yaml` by pull request: name, repo, one-line description, group, icon.
 
 ---
@@ -350,6 +383,13 @@ Error messages always name the rule, the file and line when known, and the fix:
 - `contacts(with_force=True)` returns `(a, b, force_n)`.
 - Bundled fixtures: `collision_table` (the mock hits the table, not the bowl) instead of `collision_bowl`; also
   `released_near_target`.
+
+**v1.4** (plugin pages)
+- A plugin may ship one page in the panel (§7a): manifest `ui`, sandboxed iframe (`allow-scripts allow-downloads`),
+  data only from `run_dir/<plugin>/` via `/media`, style only from the shared `/theme/dreamkit-theme.css`.
+  `dreamkit check` refuses external URLs, own fonts and colours outside the theme's variables.
+- The core keeps the Live heartbeat going while it waits for `ctx.defer` jobs, so a plugin waiting for a model call
+  does not make Live take the run for finished.
 
 **v1.3** (real robots)
 - `ctx.robot` (always) and `ctx.world` (simulator only); `client.step(state=…)` without an env; manifest `needs`.

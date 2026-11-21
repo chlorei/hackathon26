@@ -122,3 +122,58 @@ def test_a_second_control_plugin_is_not_loaded():
     resolved = m._resolve([m.available["recovery"]["cls"](), Guard()])
     assert [p.name for p in resolved] == ["recovery"]
     assert m.refused["table-guard"].startswith("conflicts with recovery")
+
+
+# -- §7a: a plugin's own page -----------------------------------------------------------------------------------------
+
+def test_a_plugin_page_in_the_theme_passes(tmp_path):
+    from dreamkit.standard import check_ui
+
+    (tmp_path / "ui").mkdir()
+    (tmp_path / "ui" / "index.html").write_text(
+        '<style>.x { color: var(--dk-ok); border: 1px solid var(--dk-line); font-family: var(--dk-font-mono) }'
+        ' #grid:hover { fill: var(--dk-bad) }</style><div class="dk-card" style="background: var(--dk-panel)"></div>'
+        '<script>fetch(`/media/${run}/monitor-stats/results.json`); el.style.color = "var(--dk-bad)"</script>'
+        '<a href="/media/r/x/results.csv" download>csv</a>')
+    assert check_ui(tmp_path, "ui/index.html") == []
+
+
+def test_a_plugin_page_outside_the_theme_is_refused(tmp_path):
+    from dreamkit.standard import check_ui
+
+    (tmp_path / "ui").mkdir()
+    (tmp_path / "ui" / "index.html").write_text(
+        '<link rel="stylesheet" href="https://cdn.example.com/bootstrap.css">\n'
+        '<style>@font-face { font-family: X; src: url(x.woff) }\n.a { color: #ff0000 }\n.b { background: white }\n'
+        '.c { font-family: "Comic Sans MS" }</style>\n<div style="border-color: rgb(1,2,3)"></div>\n'
+        '<script src="//unpkg.com/react"></script><script>el.style.fill = "#abc"</script>')
+    found = " | ".join(str(p) for p in check_ui(tmp_path, "ui/index.html"))
+    for what in ("external URL 'https://", "external URL '//unpkg.com", "@font-face", "'#ff0000'", "'white'",
+                 "own font", "'rgb('", "'#abc' in a script"):
+        assert what in found, what
+    assert "§7a" in found and "index.html:" in found  # the rule, the file and the line
+    assert "missing file" in str(check_ui(tmp_path, "ui/other.html")[0])
+
+
+def test_manifest_ui_must_stay_inside_the_package():
+    assert Manifest(ui="ui/index.html").ui == "ui/index.html"
+    for bad in ("../x.html", "/abs/index.html", "ui/index.js"):
+        with pytest.raises(ValueError):
+            Manifest(ui=bad)
+
+
+def test_the_heartbeat_keeps_going_while_the_core_waits_for_deferred_jobs():
+    import threading
+    import time
+
+    from dreamkit.kit import Deferred
+
+    d = Deferred(lambda plugin, error: None)
+    release = threading.Event()
+    d("slow-plugin", release.wait, (5,), {})
+    beats = []
+    threading.Timer(0.35, release.set).start()
+    assert d.flush(timeout=5, heartbeat=lambda: beats.append(time.monotonic()), every_s=0.1)
+    assert len(beats) >= 2  # Live keeps hearing from the loop while a plugin waits for its model
+    d("slow-plugin", time.sleep, (1,), {})
+    assert d.flush(timeout=0.2, every_s=0.05) is False  # the timeout still holds

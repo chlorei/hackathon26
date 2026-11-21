@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from . import registry
-from .standard import PluginStandardError, Problem, check_class, check_pyproject
+from .standard import PluginStandardError, Problem, check_class, check_pyproject, check_ui
 
 ROOT = Path(__file__).resolve().parent.parent  # the dreamkit checkout (tests/plugins/ lives here)
 BUILTIN_TESTS = ROOT / "tests" / "plugins"
@@ -83,6 +83,11 @@ def check(target: str, readme: bool = False) -> tuple[bool, list[str]]:
     problems: list[Problem] = check_class(t.cls)
     if t.src is not None:
         problems += check_pyproject(t.src, t.cls)
+    ui = getattr(getattr(t.cls, "manifest", None), "ui", None)
+    if ui:
+        import inspect  # noqa: PLC0415
+
+        problems += check_ui(Path(inspect.getfile(t.cls)).resolve().parent, ui)
     try:
         t.cls.Params()
     except Exception as error:  # noqa: BLE001
