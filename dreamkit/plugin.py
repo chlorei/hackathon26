@@ -93,6 +93,8 @@ class Context:
     _plugin: str = "dreamkit"
     _retry: bool = False
     _telemetry: dict[str, float] = field(default_factory=dict)
+    _override: tuple[Any, Any, str] | None = None
+    _reset_policy: Any = None  # set by the Kit: ends the model's session, keeps the attempt going
 
     @property
     def episode_dir(self):
@@ -108,6 +110,16 @@ class Context:
     def telemetry(self, **values: float) -> None:
         """Live numbers for the panel's graphs (sent a few times a second, not stored)."""
         self._telemetry.update(values)
+
+    def override(self, left_rows: Any, right_rows: Any) -> None:
+        """before_model only: answer this get_action() with these rows instead of calling the model (a `control`
+        plugin, e.g. recovery driving the arms home). The user's loop executes them like any chunk."""
+        self._override = (np.asarray(left_rows, dtype=float), np.asarray(right_rows, dtype=float), self._plugin)
+
+    def reset_policy(self) -> None:
+        """Starts a new session on the model (client.reset_episode()) without ending the attempt."""
+        if self._reset_policy is not None:
+            self._reset_policy()
 
     def stop(self, reason: str) -> None:
         """Stops the attempt as a failure."""

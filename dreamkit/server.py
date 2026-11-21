@@ -227,6 +227,31 @@ def create_app(config_path: str | Path) -> FastAPI:
             raise HTTPException(500, f"cannot open a file manager here: {error}") from error
         return {"ok": True}
 
+    @app.get("/api/runs/{run_id}/harvest")
+    def get_harvest(run_id: str):
+        from . import harvest
+
+        folder = run_folder(run_id)
+        ready, failed = harvest.episodes(folder), harvest.episodes(folder, "failed")
+        try:
+            check = json.loads((folder / "dataset" / "validation.json").read_text())
+        except (OSError, ValueError):
+            check = None
+        return {"success": len(ready), "failed": len(failed), "validation": check}
+
+    @app.post("/api/runs/{run_id}/harvest/validate")
+    async def validate_harvest(run_id: str):
+        """Dream Labs' own dataset checks on this run's successful episodes. Local only: nothing is uploaded."""
+        from . import harvest
+
+        folder = run_folder(run_id)
+        if not harvest.episodes(folder):
+            raise HTTPException(404, "no successful episodes in this run (is the harvester plugin on?)")
+        report = await asyncio.to_thread(harvest.validate, folder / "dataset" / "success")
+        report["checked"] = time.time()
+        storage.write_json(folder / "dataset" / "validation.json", report)
+        return report
+
     @app.get("/api/runs/{run_id}/trace/{episode}")
     def get_trace(run_id: str, episode: int):
         path = run_folder(run_id) / f"ep{episode}" / "trace.json"

@@ -64,6 +64,11 @@ class FailureMonitor(Plugin):
         "slow_ms": 700.0,
         "tie_s": 1.0,
         "trace_every": 2,  # keep every Nth step in the saved trace
+        # live verdicts (mid-attempt, what recovery acts on)
+        "live_verdicts": True,
+        "settle_s": 1.0,  # after the object leaves the hand, wait this long before calling it
+        "grasp_judge_s": 1.5,  # a closed grasp that has not lifted the object after this long grasped air
+        "not_reached_s": 15.0,  # no reach and no grasp near the object this long into a segment = not reached
     }
 
     # -- recording ---------------------------------------------------------------------------------------------
@@ -86,6 +91,11 @@ class FailureMonitor(Plugin):
         self.stall: dict[str, Any] | None = None
         self.stall_warned = False
         self.grasps: list[dict[str, Any]] = []  # each closure: side, t, dist, max rise while closed
+        self.verdicts: list[dict[str, Any]] = []  # live verdicts, one per segment at most
+        self.segment = ctx.store.get("segment", 0)
+        self.seg_start_t = 0.0
+        self.seg_grasp_from = 0
+        self.verdict_given = False
         if self.obj:
             self.z0 = float(ctx.env.data.body(self.obj).xpos[2])
             self.start = ctx.env.data.body(self.obj).xpos.copy()
@@ -122,6 +132,8 @@ class FailureMonitor(Plugin):
     def on_step(self, ctx: Context) -> None:
         if not getattr(self, "active", False):
             return
+        if ctx.store.get("segment", 0) != self.segment:
+            self._new_segment(ctx)
         self._record(ctx)
         row = self.rows[-1]
         p = self.params
@@ -200,6 +212,78 @@ class FailureMonitor(Plugin):
         if not self.flags.get("fell") and z < TABLE_TOP_Z - p["fell_below_m"]:
             self.flags["fell"] = round(ctx.t, 2)
             self._milestone(ctx, "fell", "error", f"{self.obj} fell off the table")
+        if p["live_verdicts"] and not self.verdict_given:
+            self._live_verdict(ctx, row)
+
+    # -- live verdicts and segments -------------------------------------------------------------------------------
+    def _new_segment(self, ctx: Context) -> None:
+        """A control plugin (recovery) restarted the task mid-attempt: judge what happens next on its own."""
+        self.segment = ctx.store.get("segment", 0)
+        self.seg_start_t = ctx.t
+        self.seg_grasp_from = len(self.grasps)
+        self.verdict_given = False
+        fell = self.flags.get("fell")
+        self.flags = {"reached": False, "lifted": False, "grasping": {s: False for s in SIDES}}
+        if fell:
+            self.flags["fell"] = fell
+        self.still_since, self.stall, self.stall_warned = None, None, False
+        if self.obj:
+            self.z0 = float(ctx.env.data.body(self.obj).xpos[2])
+
+    def _in_target(self, row) -> bool:
+        if "target" not in row:
+            return False
+        return (float(np.linalg.norm(row["obj"][:2] - row["target"][:2])) < 0.09
+                and row["target"][2] - 0.01 < row["obj"][2] < row["target"][2] + 0.12)
+
+    def _separation_reason(self, sep: dict[str, Any], target, final_dist) -> str:
+        p = self.params
+        window = [r for r in self.rows if sep["t"] - 0.3 <= r["t"] <= sep["t"] + p["release_window_s"]]
+        side = sep.get("side", "left")
+        peak = max((r[f"cmd_{side}"] for r in window), default=0.0)
+        sep["released"] = bool(peak >= p["release_cmd"])
+        sep["gripper_cmd_peak"] = round(peak, 2)
+        release_dist = float(np.linalg.norm(np.asarray(sep["tcp"][:2]) - target[:2])) if target is not None else None
+        sep["release_distance_m"] = release_dist and round(release_dist, 3)
+        sep["final_distance_m"] = final_dist and round(final_dist, 3)
+        if not sep["released"]:
+            return "dropped"
+        if release_dist is not None and release_dist <= p["miss_max_m"]:
+            return "missed_target"
+        return "released_off_target"
+
+    def _live_verdict(self, ctx: Context, row: dict[str, Any]) -> None:
+        p = self.params
+        if not self.obj or self._in_target(row):
+            return
+        verdict = None
+        sep = self.flags.get("separated")
+        if self.flags.get("fell") and self.flags["fell"] >= self.seg_start_t:
+            verdict = {"reason": "fell_off_table", "at": self.flags["fell"]}
+        elif self.flags["lifted"] and sep and ctx.t - sep["t"] >= p["settle_s"]:
+            target = row.get("target")
+            final = float(np.linalg.norm(row["obj"][:2] - target[:2])) if target is not None else None
+            verdict = {"reason": self._separation_reason(dict(sep), target, final), "at": sep["t"]}
+        elif self.stall is not None:
+            verdict = {"reason": "stalled", "at": self.stall["at"]}
+        else:
+            seg_grasps = self.grasps[self.seg_grasp_from:]
+            near = [g for g in seg_grasps if g["dist"] < p["near_m"]]
+            last = near[-1] if near else None
+            if (last and not self.flags["lifted"] and self.flags["grasping"][last["side"]]
+                    and ctx.t - last["t"] >= p["grasp_judge_s"] and last["rise"] < p["grasp_lift_m"]):
+                verdict = {"reason": "grasped_air", "at": last["t"], "side": last["side"]}
+            elif not self.flags["reached"] and not near and ctx.t - self.seg_start_t >= p["not_reached_s"]:
+                verdict = {"reason": "not_reached", "at": round(ctx.t, 2)}
+        if verdict is None:
+            return
+        self.verdict_given = True
+        verdict.update(segment=self.segment, message=LABEL[verdict["reason"]].format(
+            obj=self.obj, target=self.target or "target", what="contact"))
+        self.verdicts.append(verdict)
+        ctx.store["verdict"] = verdict
+        ctx.emit("warn", f"verdict: {verdict['message']} at {verdict['at']:.1f} s", kind="verdict",
+                 **{k: v for k, v in verdict.items() if k != "message"})
 
     def _near_target(self, row) -> bool:
         if "target" not in row:
@@ -265,23 +349,7 @@ class FailureMonitor(Plugin):
                 cands.append({"reason": "fell_off_table", "at": self.flags["fell"]})
             sep = self.flags.get("separated")
             if self.flags["lifted"] and sep:
-                release_dist = (float(np.linalg.norm(np.asarray(sep["tcp"][:2]) - target[:2]))
-                                if target is not None else None)
-                sep["release_distance_m"] = release_dist and round(release_dist, 3)
-                sep["final_distance_m"] = final_dist and round(final_dist, 3)
-                # released = the policy opened the gripper around the moment the object left it
-                window = [r for r in rows if sep["t"] - 0.3 <= r["t"] <= sep["t"] + p["release_window_s"]]
-                side = sep.get("side", "left")
-                peak = max((r[f"cmd_{side}"] for r in window), default=0.0)
-                sep["released"] = bool(peak >= p["release_cmd"])
-                sep["gripper_cmd_peak"] = round(peak, 2)
-                if not sep["released"]:
-                    # the gripper was still closed when the object left it: it slipped / was knocked out
-                    cands.append({"reason": "dropped", "at": sep["t"], "details": sep})
-                elif release_dist is not None and release_dist <= p["miss_max_m"]:
-                    cands.append({"reason": "missed_target", "at": sep["t"], "details": sep})
-                else:
-                    cands.append({"reason": "released_off_target", "at": sep["t"], "details": sep})
+                cands.append({"reason": self._separation_reason(sep, target, final_dist), "at": sep["t"], "details": sep})
             near_grasps = [g for g in self.grasps if g["dist"] < p["near_m"]]
             air = [g for g in near_grasps if g["rise"] < p["grasp_lift_m"]]
             if air and not self.flags["lifted"]:
@@ -304,6 +372,9 @@ class FailureMonitor(Plugin):
             if mean > p["slow_ms"]:
                 first = next(t for t, r in self.rtts if r > p["slow_ms"])
                 cands.append({"reason": "slow_model", "at": first, "details": {"mean_rtt_ms": round(mean)}})
+        for v in self.verdicts:  # what went wrong before a recovery restarted the task
+            if not any(c["reason"] == v["reason"] and abs(c["at"] - v["at"]) < 0.5 for c in cands):
+                cands.append({"reason": v["reason"], "at": v["at"], "details": {"segment": v["segment"]}})
         if not cands:
             cands.append({"reason": "timeout", "at": round(end_t, 2)})
         earliest = min(c["at"] for c in cands)

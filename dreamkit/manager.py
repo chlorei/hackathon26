@@ -23,6 +23,8 @@ BUILTIN_MODULES = (
     "recorder",
     "safety",
     "recap",
+    "harvester",
+    "recovery",
     "report",
 )
 LOCAL_DIRS = (Path("~/.dreamkit/plugins").expanduser(), Path("plugins"))

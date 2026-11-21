@@ -82,6 +82,7 @@ class Kit:
         self.ctx = Context(env=None, task="", model="", run_id=self.run_id, run_dir=self.run_dir, config=cfg,
                            emitter=self.emitter, seed=cfg.seed)
         self.ctx.reply = None
+        self.ctx._reset_policy = self._reset_policy
         self._in_episode = False
         self._closed = False
         self._scene = 0
@@ -145,9 +146,17 @@ class Kit:
             self._begin(self.ctx.task, self.ctx.env, None)
         ctx = self.ctx
         self.manager.call("before_model", ctx)
-        reply = self.client.get_action(**kwargs)
-        self._requests += 1
-        ctx.timing = getattr(self.client, "last_timing", None)
+        if ctx._override is not None:  # a control plugin answers instead of the model
+            left, right, by = ctx._override
+            ctx._override = None
+            reply = {"q_l_chunk": left.tolist(), "q_r_chunk": right.tolist()}
+            ctx.timing = None
+            ctx.store["overridden_by"] = by
+        else:
+            reply = self.client.get_action(**kwargs)
+            self._requests += 1
+            ctx.timing = getattr(self.client, "last_timing", None)
+            ctx.store.pop("overridden_by", None)
         ctx.reply = reply
         yam = isinstance(reply, dict) and "q_l_chunk" in reply and "q_r_chunk" in reply
         ctx.actions = (np.array(reply["q_l_chunk"], dtype=float), np.array(reply["q_r_chunk"], dtype=float)) if yam else None
@@ -163,6 +172,14 @@ class Kit:
                 reply = {**reply, "q_l_chunk": left.tolist(), "q_r_chunk": right.tolist()}
         self._beat()
         return reply
+
+    def _reset_policy(self) -> None:
+        """A new model session in the middle of an attempt (recovery): the scene and the attempt go on."""
+        client = self.client
+        if getattr(client, "mock", False):
+            client.reset_episode(recovery=True)
+        elif hasattr(client, "reset_episode"):
+            client.reset_episode()
 
     def reset_episode(self) -> Any:
         fn = getattr(self.client, "reset_episode", None)
@@ -230,6 +247,7 @@ class Kit:
         ctx.env = env if env is not None else ctx.env
         ctx.step, ctx.t = 0, 0.0
         ctx.result, ctx.actions, ctx.command, ctx.timing, ctx.reply = {}, None, None, None, None
+        ctx._override = None
         ctx._retry, ctx._telemetry = False, {}
         state = getattr(ctx.env, "state", None)
         ctx.state = state() if callable(state) else {}
@@ -240,6 +258,8 @@ class Kit:
                 images = None
         ctx.frames, ctx.frames_new = (dict(images) if images else {}), images is not None
         ctx.store["episode"] = dict(info)
+        ctx.store.pop("verdict", None)  # live verdicts and recovery segments belong to one attempt
+        ctx.store["segment"] = 0
         ctx.episode_dir.mkdir(parents=True, exist_ok=True)
         self._in_episode = True
         self._next_is_retry = False

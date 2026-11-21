@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = "Apache-2.0"
 dependencies = [
-    "dreamlabs-client>=1.1.7,<2",
+    "dreamlabs-client[datasets]>=1.1.7,<2",
     "mujoco>=3.3.5",
     "numpy",
     "pillow>=10",
@@ -34,6 +34,8 @@ latency-monitor = "dreamkit.plugins.latency_monitor:LatencyMonitor"
 recorder = "dreamkit.plugins.recorder:Recorder"
 safety = "dreamkit.plugins.safety:Safety"
 recap = "dreamkit.plugins.recap:Recap"
+harvester = "dreamkit.plugins.harvester:Harvester"
+recovery = "dreamkit.plugins.recovery:Recovery"
 report = "dreamkit.plugins.report:Report"
 
 [build-system]

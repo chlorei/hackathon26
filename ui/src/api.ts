@@ -33,6 +33,7 @@ export interface EpisodeResult {
   latency?: { mean_ms: number; p95_ms: number; max_ms: number; n: number }
   recap?: { headline: string; moments: { t: number; text: string; tone: 'bad' | 'good' | 'info'; verdict?: boolean }[]; video: string | null }
   gripper?: { t: number; side: string; kind: string }[]
+  recoveries?: number
 }
 
 export interface RunInfo {
@@ -129,7 +130,21 @@ export const api = {
   reveal: (id: string, episode?: number) =>
     call<{ path: string }>(`/api/runs/${id}/reveal${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
   live: () => call<{ id: string | null; task?: string; model?: string; mock?: boolean }>('/api/live'),
+  harvest: (id: string) => call<{ success: number; failed: number; validation: Validation | null }>(`/api/runs/${id}/harvest`),
+  validateHarvest: (id: string) => call<Validation>(`/api/runs/${id}/harvest/validate`, { method: 'POST' }),
   deleteRun: (id: string) => call<{ ok: boolean }>(`/api/runs/${id}`, { method: 'DELETE' }),
+}
+
+export interface Validation {
+  ok: boolean
+  error?: string | null
+  episodes?: number
+  frames?: number
+  fps?: number
+  state_dim?: number
+  action_dim?: number
+  video_keys?: string[]
+  checked?: number
 }
 
 export interface TraceRow {

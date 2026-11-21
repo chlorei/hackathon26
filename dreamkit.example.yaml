@@ -15,8 +15,10 @@ plugins:
   - safety: {enabled: false}   # caps joint speed: on for real robots; off for the mock's 'dropped' jerk
   - success-check
   - failure-monitor
+  - recovery: {max_recoveries: 3}   # fixes a failure mid-attempt; the scene is never reset
   - retry: {attempts: 2, on: [not_reached, grasped_air, dropped, missed_target]}
   - recorder: {fps: 10}
+  - harvester                     # every attempt -> LeRobot v2.1 (runs/<id>/dataset/)
   - recap
   - report
 # --mock: a scripted policy instead of Dream-1 (no credits). Behaviours cycle per attempt:

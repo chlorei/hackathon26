@@ -161,6 +161,9 @@ class Recap(Plugin):
         if reasons:
             top, n = max(reasons.items(), key=lambda kv: kv[1])
             lines.append(f"Most common failure: {top.replace('_', ' ')} ({n}×).")
+        rescued = [e for e in ok if e.get("recoveries")]
+        if rescued:
+            lines.append(f"Recovery turned {len(rescued)} failing attempt{'s' if len(rescued) > 1 else ''} into a success.")
         retried = [s for s in solved if any(e["scene"] == s and e.get("success") is False for e in eps)]
         if retried:
             lines.append(f"Retries saved {len(retried)} scene{'s' if len(retried) > 1 else ''}.")

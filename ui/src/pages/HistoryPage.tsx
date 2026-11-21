@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ArrowLeft, Clapperboard, FileText, FolderOpen, Trash2 } from 'lucide-react'
+import { ArrowLeft, Clapperboard, Database, FileText, FolderOpen, Trash2 } from 'lucide-react'
 import { api, REASON_LABEL, type EpisodeResult, type RunInfo } from '../api'
 import { AttemptStrip, Button, Outcome, Panel, PanelTitle, Tag, when, type Mark } from '../ui'
 
@@ -98,6 +98,7 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
           {r.report && <a href={`/media/${id}/report.html`} target="_blank" rel="noreferrer"><Button><FileText className="h-4 w-4" /> Report</Button></a>}
         </div>
       </div>
+      <Harvest id={id} />
       {r.recap?.text && (
         <Panel className="flex gap-3 px-4 py-3">
           <Clapperboard className="mt-0.5 h-4 w-4 shrink-0 text-signal" strokeWidth={1.75} />
@@ -114,6 +115,7 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
                   <div className="flex items-center gap-2 text-[13px]">
                     <Outcome success={e.success} />
                     <span>Scene {e.scene + 1}{e.attempt > 1 ? `, retry ${e.attempt - 1}` : ''}</span>
+                    {(e.recoveries ?? 0) > 0 && <Tag tone="signal">recovered{e.recoveries! > 1 ? ` ×${e.recoveries}` : ''}</Tag>}
                     <span className="ml-auto text-[12px] text-faint">{e.duration_s.toFixed(0)} s</span>
                   </div>
                   {e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason}{e.at != null && ` at ${e.at.toFixed(1)} s`}</p>}
@@ -125,6 +127,40 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
         {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} /> : <p className="text-faint">This run has no finished attempts.</p>}
       </div>
     </div>
+  )
+}
+
+function Harvest({ id }: { id: string }) {
+  const queryClient = useQueryClient()
+  const harvest = useQuery({ queryKey: ['harvest', id], queryFn: () => api.harvest(id) })
+  const check = useMutation({
+    mutationFn: () => api.validateHarvest(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['harvest', id] }),
+  })
+  const h = harvest.data
+  if (!h || (h.success === 0 && h.failed === 0)) return null
+  const v = h.validation
+  return (
+    <Panel className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
+      <Database className="h-4 w-4 shrink-0 text-ok" strokeWidth={1.75} />
+      <p className="text-[14px]">
+        <span className="font-medium text-ok">{h.success} successful episode{h.success === 1 ? '' : 's'}</span> ready for fine-tuning
+        <span className="text-dim">{h.failed ? `, ${h.failed} failed kept for analysis` : ''}</span>
+      </p>
+      <div className="ml-auto flex items-center gap-3">
+        {v && (v.ok ? (
+          <span className="text-[13px] text-ok">validate_dataset passed: {v.episodes} episodes, {v.frames} frames, {v.fps} fps</span>
+        ) : <span className="max-w-[48ch] text-[13px] text-bad">validate_dataset: {v.error}</span>)}
+        {h.success > 0 && (
+          <Button onClick={() => check.mutate()} disabled={check.isPending}>
+            {check.isPending ? 'Checking…' : v ? 'Check again' : 'Check with validate_dataset'}
+          </Button>
+        )}
+      </div>
+      <p className="basis-full text-[12px] text-faint">
+        Local check only, nothing is uploaded. To gather several runs: <code className="text-dim">dreamkit harvest export {id}</code>
+      </p>
+    </Panel>
   )
 }
 

@@ -68,3 +68,31 @@ def test_camera_failure_stops_the_robot(make_config):
     assert episode["reason"] == "stopped_by_plugin"
     assert "camera top is black" in episode["details"]["message"]
     assert episode["at"] < 5
+
+
+def test_recovery_fixes_failures_mid_attempt_without_resetting_the_scene(make_config):
+    code, info, folder = _run(make_config(
+        plugins=["success-check", "failure-monitor", "recovery", "harvester"],
+    ), "--episodes", "3", "--seconds", "45", "--behaviors", "dropped,grasped_air,released_off_target")
+    eps = info["episodes"]
+    assert [e["success"] for e in eps] == [True, True, True]
+    assert [e["recoveries"] for e in eps] == [1, 2, 1]  # grasped air: back off, then stalled: home + ask again
+    assert all(e["attempt"] == 1 for e in eps)  # one attempt each: no scene reset, no retry
+    events = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()]
+    actions = [e["data"].get("action") for e in events if e.get("plugin") == "recovery" and e["data"].get("action")]
+    assert actions == ["home", "lift", "home", "home"]
+
+
+def test_harvested_episodes_pass_dream_labs_dataset_checks(make_config, tmp_path):
+    from dreamkit import harvest
+
+    code, info, folder = _run(make_config(plugins=["success-check", "failure-monitor", "harvester"]),
+                              "--episodes", "2", "--behaviors", "success,dropped")
+    assert len(harvest.episodes(folder)) == 1 and len(harvest.episodes(folder, "failed")) == 1
+    failed = json.loads((harvest.episodes(folder, "failed")[0] / "dreamkit.json").read_text())
+    assert failed["success"] is False and failed["reason"] == "dropped"
+    out = tmp_path / "export"
+    assert len(harvest.export([folder], out)) == 1
+    report = harvest.validate(out)
+    assert report["ok"], report
+    assert report["state_dim"] == 14 and report["action_dim"] == 14 and len(report["video_keys"]) == 3

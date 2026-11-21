@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -208,6 +209,36 @@ def cmd_accuracy(args) -> int:
     return 0
 
 
+def cmd_harvest(args) -> int:
+    from rich.console import Console
+
+    from . import harvest
+
+    console = Console()
+    root = _runs_root(args.config)
+    runs = [root / r for r in args.runs] if args.runs else sorted(p for p in root.iterdir() if p.is_dir())
+    missing = [r.name for r in runs if not r.is_dir()]
+    if missing:
+        console.print(f"[red]no such run: {', '.join(missing)}[/red]")
+        return 1
+    out = Path(args.out)
+    copied = harvest.export(runs, out)
+    if not copied:
+        console.print("no successful episodes in these runs (is the harvester plugin on?)")
+        return 1
+    console.print(f"{len(copied)} successful episode{'s' if len(copied) != 1 else ''} -> {out}")
+    if args.no_validate:
+        return 0
+    report = harvest.validate(out)
+    if report.get("ok"):
+        console.print(f"[green]validate_dataset: OK[/green] {json.dumps({k: v for k, v in report.items() if k != 'ok'})}")
+        console.print("Ready for fine-tuning. Nothing was uploaded; when you decide to: "
+                      "client.upload_dataset(path, name, embodiment)")
+        return 0
+    console.print(f"[red]validate_dataset: {report.get('error')}[/red]")
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dreamkit", description="Plugins and a monitor for Dream-1. In your loop: client = dreamkit.wrap(dream.DreamClient()); demo loop: python examples/sim_loop.py --mock")
     parser.add_argument("-c", "--config", help="dreamkit.yaml (default: ./dreamkit.yaml)")
@@ -236,6 +267,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("labels")
     p.add_argument("--tolerance", type=float, default=2.0, help="seconds")
     p.set_defaults(func=cmd_accuracy)
+    p = sub.add_parser("harvest", help="successful episodes -> one folder, checked with validate_dataset (no upload)")
+    hsub = p.add_subparsers(dest="harvest_cmd", required=True)
+    e = hsub.add_parser("export", help="gather and validate")
+    e.add_argument("runs", nargs="*", help="run ids (default: all runs)")
+    e.add_argument("--out", default="harvest")
+    e.add_argument("--no-validate", action="store_true")
+    e.set_defaults(func=cmd_harvest)
     p = sub.add_parser("new", help="scaffold a plugin package")
     p.add_argument("name")
     p.set_defaults(func=cmd_new)

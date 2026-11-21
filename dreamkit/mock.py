@@ -29,11 +29,16 @@ BEHAVIORS = ("success", "dropped", "released_off_target", "missed_target", "not_
 class MockClient:
     mock = True
 
-    def __init__(self, env, behaviors: list[str] | None = None, seed: int = 0, latency_ms: float = 0.0):
+    def __init__(self, env, behaviors: list[str] | None = None, seed: int = 0, latency_ms: float = 0.0,
+                 recovery_behaviors: list[str] | None = None):
         self.env = env
         self.solve = importlib.import_module("mock_pickups").solve  # the simulator folder is on sys.path
         self.behaviors = list(behaviors or ["success"])
-        unknown = [b for b in self.behaviors if b not in BEHAVIORS]
+        ## What the "model" does after a recovery reset it mid-attempt (cycled); real Dream-1 decides for itself.
+        self.recovery_behaviors = list(recovery_behaviors or ["success"])
+        self.recoveries = 0
+        self.after_recovery = False
+        unknown = [b for b in self.behaviors + self.recovery_behaviors if b not in BEHAVIORS]
         if unknown:
             raise ValueError(f"unknown mock behaviour(s) {unknown}; choose from {', '.join(BEHAVIORS)}")
         self.seed = seed
@@ -53,8 +58,11 @@ class MockClient:
 
     def get_action(self, **_: Any) -> dict[str, Any]:
         if self.plan is None:
-            self.behavior = self.behaviors[self.attempt % len(self.behaviors)]
-            self.rng = np.random.default_rng(self.seed * 1000 + self.attempt)
+            if self.after_recovery:
+                self.behavior = self.recovery_behaviors[(self.recoveries - 1) % len(self.recovery_behaviors)]
+            else:
+                self.behavior = self.behaviors[self.attempt % len(self.behaviors)]
+            self.rng = np.random.default_rng(self.seed * 1000 + self.attempt * 10 + self.recoveries)
             self.plan = self._plan(self.behavior)
             self.t0 = float(self.env.data.time)
         if self.latency_ms:
@@ -65,9 +73,15 @@ class MockClient:
         self.last_timing = {"mock": True}  # no model was called: latency plugins say so instead of reporting 0 ms
         return {"q_l_chunk": np.array([r[0] for r in rows]).tolist(), "q_r_chunk": np.array([r[1] for r in rows]).tolist()}
 
-    def reset_episode(self) -> None:
-        if self.plan is not None:
-            self.attempt += 1
+    def reset_episode(self, recovery: bool = False) -> None:
+        """A new session. recovery=True: the same attempt goes on from where the arms are (dreamkit's recovery)."""
+        if recovery:
+            self.recoveries += 1
+            self.after_recovery = True
+        else:
+            if self.plan is not None or self.after_recovery:
+                self.attempt += 1
+            self.after_recovery = False
         self.plan = None
 
     def close(self) -> None:
