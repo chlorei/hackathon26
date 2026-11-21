@@ -156,6 +156,65 @@ def cmd_new(args) -> int:
     return 0
 
 
+def _runs_root(config: str | None) -> Path:
+    from . import config as config_mod
+
+    cfg, base = config_mod.load(_config_path(config))
+    root = Path(cfg.runs_dir).expanduser()
+    return root if root.is_absolute() else base / root
+
+
+def cmd_review(args) -> int:
+    """Every failed attempt (real model only unless --mock) into a CSV to label by watching the video."""
+    import csv
+
+    from . import storage
+
+    root = _runs_root(args.config)
+    rows = []
+    for run in storage.list_runs(root):
+        if run.get("mock") and not args.mock:
+            continue
+        for e in run.get("episodes", []):
+            if e.get("success") is False:
+                top = next((v for v in e.get("videos", []) if v.endswith("top.mp4")), "")
+                rows.append({"run": run["id"], "episode": e["episode"], "task": e.get("task"),
+                             "predicted": e.get("reason"), "at": e.get("at"),
+                             "video": str(root / run["id"] / top) + (f"#t={max(0, (e.get('at') or 1) - 1):.1f}" if top else ""),
+                             "human": "", "human_at": "", "note": ""})
+    with open(args.out, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]) if rows else ["run", "episode", "predicted", "human"])
+        writer.writeheader()
+        writer.writerows(rows[: args.limit] if args.limit else rows)
+    print(f"{min(len(rows), args.limit or len(rows))} failures -> {args.out}. Watch each video, fill `human` with the "
+          f"real reason (same names) and optionally `human_at`, then: dreamkit accuracy {args.out}")
+    return 0
+
+
+def cmd_accuracy(args) -> int:
+    import csv
+
+    with open(args.labels) as f:
+        rows = [r for r in csv.DictReader(f) if (r.get("human") or "").strip()]
+    if not rows:
+        print("no labelled rows (fill the `human` column)")
+        return 1
+    hits = [r for r in rows if r["predicted"].strip() == r["human"].strip()]
+    timed = [r for r in hits if (r.get("human_at") or "").strip() and r.get("at")]
+    close = [r for r in timed if abs(float(r["at"]) - float(r["human_at"])) <= args.tolerance]
+    print(f"failure-monitor: {len(hits)}/{len(rows)} reasons correct ({100 * len(hits) / len(rows):.0f}%)")
+    if timed:
+        print(f"moment within ±{args.tolerance:.0f} s: {len(close)}/{len(timed)}")
+    confusion: dict[tuple[str, str], int] = {}
+    for r in rows:
+        if r not in hits:
+            key = (r["human"].strip(), r["predicted"].strip())
+            confusion[key] = confusion.get(key, 0) + 1
+    for (human, predicted), n in sorted(confusion.items(), key=lambda kv: -kv[1]):
+        print(f"  {n}× was {human}, said {predicted}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dreamkit", description="Plugins around the Dream-1 control loop")
     parser.add_argument("-c", "--config", help="dreamkit.yaml (default: ./dreamkit.yaml)")
@@ -185,6 +244,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("install", help="install a plugin: catalogue name, GitHub URL or local folder")
     p.add_argument("target")
     p.set_defaults(func=cmd_install)
+    p = sub.add_parser("review", help="export failed attempts to a CSV for labelling (accuracy check)")
+    p.add_argument("--out", default="labels.csv")
+    p.add_argument("--limit", type=int, default=0)
+    p.add_argument("--mock", action="store_true", help="include mock runs")
+    p.set_defaults(func=cmd_review)
+    p = sub.add_parser("accuracy", help="failure-monitor accuracy from a labelled CSV")
+    p.add_argument("labels")
+    p.add_argument("--tolerance", type=float, default=2.0, help="seconds")
+    p.set_defaults(func=cmd_accuracy)
     p = sub.add_parser("new", help="scaffold a plugin package")
     p.add_argument("name")
     p.set_defaults(func=cmd_new)

@@ -45,6 +45,8 @@ dreamkit list                       # installed plugins
 dreamkit search gripper             # the catalogue (registry.yaml)
 dreamkit install gripper-check      # from GitHub, by catalogue name, URL or local folder
 dreamkit new my-check               # scaffold a plugin package
+dreamkit review --limit 20          # failed attempts -> labels.csv (video links at the failure second)
+dreamkit accuracy labels.csv        # after labelling: "failure-monitor: 17/20 reasons correct"
 ```
 
 Every run is saved in `runs/<id>/`: `run.json` (results), `events.jsonl` (the feed), `ep<N>/<cam>.mp4` (video, in
@@ -119,6 +121,16 @@ dreamkit ui → FastAPI (:8800) → Runner subprocess (python -m dreamkit.runner
 The runner is `dream_control.main`'s loop (same window filling, `capture`, `feed`, `validate_chunk`, physics paused
 while the model thinks) with hooks around each stage. It prints one JSON event per line; the server relays them to the
 panel over a WebSocket.
+
+## Demo recipes
+
+```bash
+# retry: a drop, then the same scene again, solved
+dreamkit run --mock                                    # mock.behaviors: [dropped, success] in dreamkit.yaml
+# camera fault: in the panel, Plugins → camera-check → simulate_failure: "top" → Start → the robot stops
+# plugin from GitHub
+dreamkit install gripper-check && dreamkit list
+```
 
 ## Tests
 
