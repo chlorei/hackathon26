@@ -4,6 +4,9 @@ from dreamkit.testing import replay
 def test_slows_a_fast_chunk_and_the_manager_accepts_it():
     r = replay("success_apple_bowl", plugins=[{"safety": {"max_speed_rad_s": 0.3}}])
     assert r.result["safety"]["rows_slowed"] > 0
+    marks = r.result["ui"]["safety"]["marks"]
+    assert marks and marks[0]["label"].startswith("slowed ") and marks[0]["level"] == "warn"
+    assert all(b["t_s"] - a["t_s"] >= 2.0 for a, b in zip(marks, marks[1:], strict=False))  # as often as the feed
     assert not r.errors("safety")  # stricter only: never rejected
 
 

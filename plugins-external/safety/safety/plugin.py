@@ -44,6 +44,7 @@ class Safety(Plugin):
         if ctx.t - self.last_warn.get(kind, -1e9) >= self.params.warn_every_s:
             self.last_warn[kind] = ctx.t
             ctx.emit("warn", message, **data)
+            ctx.ui.mark(ctx.t, message, "warn")  # History's strip: where the chunk was slowed or cut
 
     def after_model(self, ctx: PluginContext) -> None:
         if ctx.actions is None or not ctx.state:
