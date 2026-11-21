@@ -158,6 +158,14 @@ path and an *Open folder* button):
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
 cameras and graphs outside React and pauses when its tab is hidden.
 
+## DreamGym (in this repo)
+
+`dreamgym serve` opens a second app on http://127.0.0.1:8765 that drives the simulator itself: **Arena** (success rate
+with a 95% interval over seeded, randomised scenes, failure GIFs), **Compare** and **Prompt Tuner** (same seeds,
+McNemar's test), **Data & fine-tune** (scripted demos, Harvester, `validate_dataset`, upload + train, job status) and
+**Teleop** (keyboard control in the browser, recorded as LeRobot v2.1). See [dreamgym/README.md](dreamgym/README.md).
+Its numbers per run also come to dreamkit runs through the `reliability` plugin.
+
 ## Add plugins from GitHub
 
 Any of these work, in the terminal or on the panel's Plugins page:
