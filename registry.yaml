@@ -5,3 +5,8 @@
   pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/gripper-check
   description: Catches a gripper closed on nothing and a grip that loosens mid-carry
   tags: [gripper, grasp]
+- name: reliability
+  repo: https://github.com/chlorei/hackathon26/tree/main/plugins-external/reliability
+  pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/reliability
+  description: Success rate with a confidence interval, cost per success, and a proven A/B comparison between runs
+  tags: [statistics, ab-test, reliability]

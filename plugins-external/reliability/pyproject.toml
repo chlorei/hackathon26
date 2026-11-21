@@ -1,0 +1,27 @@
+[project]
+name = "dreamkit-reliability"
+version = "0.1.0"
+description = "reliability: a dreamkit plugin"
+requires-python = ">=3.11"
+dependencies = ["dreamkit>=0.2,<0.4"]
+
+[project.entry-points."dreamkit.plugins"]
+reliability = "reliability:Reliability"
+
+[tool.dreamkit]
+api = "1"
+group = "output"
+icon = "ChartNoAxesColumn"
+capability = "observe"
+hooks = ["on_run_start", "on_episode_start", "on_run_end"]
+step_rate_hz = 1
+needs_frames = false
+requires = []
+conflicts = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["reliability"]
