@@ -106,3 +106,21 @@ kbd { background: var(--dk-panel); border: 1px solid var(--dk-line); border-bott
                padding: 6px 10px 6px 0; border-bottom: 1px solid var(--dk-line); }
 .dk-table td { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--dk-line); vertical-align: top; }
 .dk-table tr:last-child td { border-bottom: 0; }
+
+/* ---- plugin pages built with /theme/dreamkit-page.js (§7a) ------------------------------------------------------ */
+.dk-page { display: grid; gap: 14px; padding: 16px; }
+.dk-headrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dk-h1 { margin: 0 auto 0 0; font-size: 15px; font-weight: 600; }
+.dk-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+.dk-stat { padding: 12px 16px; }
+.dk-stat .dk-big { font-size: 26px; }
+.dk-stat small { display: block; font-size: 12px; color: var(--dk-dim); }
+.dk-empty { margin: 0; padding: 12px 0; color: var(--dk-faint); font-size: 13px; }
+.dk-chart { display: block; width: 100%; height: auto; overflow: visible; }
+.dk-chart text { font-size: 11px; fill: var(--dk-dim); font-family: var(--dk-font-sans); }
+.dk-chart .axis, .dk-chart .track { stroke: var(--dk-line); stroke-width: 2; }
+.dk-chart .ok { fill: var(--dk-ok); } .dk-chart .bad { fill: var(--dk-bad); } .dk-chart .warn { fill: var(--dk-warn); }
+.dk-chart .info { fill: var(--dk-signal); } .dk-chart .muted { fill: var(--dk-faint); } .dk-chart .cat { fill: var(--dk-cat-1); }
+.dk-chart .steel { fill: var(--dk-steel); } .dk-chart .violet { fill: var(--dk-violet); }
+.dk-table tr.dk-here td { background: var(--dk-signal-soft); }
+.dk-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }

@@ -42,3 +42,8 @@ def test_plugin_page_is_served_with_the_theme_and_kept_to_its_own_files(tmp_path
     null = {"origin": "null"}
     assert c.get("/media/r1/fake/a.json", headers=null).headers.get("access-control-allow-origin") == "null"
     assert "access-control-allow-origin" not in c.get("/media/r1/recorder/b.json", headers=null).headers
+    (run / "run.json").write_text("{}")
+    (run / "events.jsonl").write_text("")
+    for f in ("run.json", "events.jsonl"):  # the run's record is readable to every page (§7a, v1.6)
+        assert c.get(f"/media/r1/{f}", headers=null).headers.get("access-control-allow-origin") == "null"
+    assert c.get("/theme/dreamkit-page.js").headers["content-type"].startswith("text/javascript")

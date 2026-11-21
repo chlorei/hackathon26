@@ -1,4 +1,4 @@
-# dreamkit plugin standard (v1.5)
+# dreamkit plugin standard (v1.6)
 
 Every plugin — built-in or from GitHub — follows this document. There are two kinds: **loop plugins** (§1–§12:
 hooks inside your control loop; one page each, §7a) and **app plugins** (§13: a whole tab — a page, an API and
@@ -234,9 +234,18 @@ Where it shows
   from the same folder.
 
 Data
-- Only the plugin's own files, written in `run_dir/<plugin>/` (§8), read with `fetch("/media/<run_id>/<plugin>/…")`.
-  Downloads are plain links to the same files (`<a href="/media/…" download>`).
+- The plugin's own files, written in `run_dir/<plugin>/` (§8), and the run's record, `run.json` and `events.jsonl`,
+  read with `fetch("/media/<run_id>/…")`; nothing of other plugins' folders. A page shows what the plugin did in
+  this run; it does not change the plugin's behaviour or `ctx.result` to have something to show.
+- A download is a blob the page builds (`URL.createObjectURL`): a `/media` link would navigate, not download.
 - No network beyond `/media/` and `/theme/`; no API calls; the page never changes anything.
+- With no run (`run_id` missing or not found) the page says how to get one (`sim_loop.py --mock …`), never errors.
+
+Shared helpers
+- `/theme/dreamkit-page.js` (`<script src="/theme/dreamkit-page.js"></script>`): `dk.page(plugin, title, build)`
+  loads the run, its episodes and events, handles the no-run and plugin-off cases and redraws while the run is live;
+  `dk.stats`, `dk.bars`, `dk.hbars`, `dk.timeline` (SVG), `dk.table`, `dk.downloadButton`. A page: a few big numbers
+  of what the plugin changed, one or two charts, then the attempts.
 
 Style — the panel's, only
 - The only stylesheet is the shared theme, `/theme/dreamkit-theme.css` (the panel's CSS variables and its base
@@ -446,6 +455,10 @@ test = the package's `tests/`; no per-step bench (an app has no hooks). After `d
 - `contacts(with_force=True)` returns `(a, b, force_n)`.
 - Bundled fixtures: `collision_table` (the mock hits the table, not the bowl) instead of `collision_bowl`; also
   `released_near_target`.
+
+**v1.6** (plugin pages read the run)
+- A plugin page may read the run's `run.json` and `events.jsonl` besides its own files (§7a), and use the shared
+  `/theme/dreamkit-page.js`. Built-ins ship pages too (recovery, failure-monitor, …).
 
 **v1.5** (app plugins)
 - Second kind of plugin: `kind="app"` (§13), entry point group `dreamkit.apps`, `dreamkit.sdk.App`. DreamGym moved

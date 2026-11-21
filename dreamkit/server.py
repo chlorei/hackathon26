@@ -528,9 +528,11 @@ def create_app(config_path: str | Path) -> FastAPI:
         if root not in target.parents or not target.is_file():
             raise HTTPException(404, "not found")
         response = FileResponse(target)
-        # §7a: a plugin page runs sandboxed (origin "null"); it may read its own plugin's files, nothing else.
-        if request.headers.get("origin") == "null" and len(Path(path).parts) > 1:
-            if Path(path).parts[0] in plugin_pages():
+        # §7a: a plugin page runs sandboxed (origin "null"); it may read its own plugin's files and the run's record
+        # (run.json, events.jsonl), nothing else.
+        if request.headers.get("origin") == "null":
+            parts = Path(path).parts
+            if parts in (("run.json",), ("events.jsonl",)) or (len(parts) > 1 and parts[0] in plugin_pages()):
                 response.headers["Access-Control-Allow-Origin"] = "null"
         return response
 
@@ -548,6 +550,10 @@ def create_app(config_path: str | Path) -> FastAPI:
     @app.get("/theme/dreamkit-theme.css")
     def theme():
         return FileResponse(THEME, media_type="text/css")
+
+    @app.get("/theme/dreamkit-page.js")
+    def theme_page_js():
+        return FileResponse(THEME.parent / "dreamkit-page.js", media_type="text/javascript")
 
     @app.get("/plugin-ui/{name}/{path:path}")
     def plugin_ui(name: str, path: str = ""):
