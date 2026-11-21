@@ -109,7 +109,8 @@ class FailureMonitor(Plugin):
     name = "failure-monitor"
     Params = Params
     manifest = Manifest(group="core", icon="ScanSearch", capability="observe",
-                        hooks=["on_episode_start", "after_model", "on_step", "on_episode_end"], step_rate_hz=20)
+                        hooks=["on_episode_start", "after_model", "on_step", "on_episode_end"], step_rate_hz=20,
+                        ui="ui/index.html")
 
     # -- recording ---------------------------------------------------------------------------------------------
     def on_episode_start(self, ctx: PluginContext) -> None:

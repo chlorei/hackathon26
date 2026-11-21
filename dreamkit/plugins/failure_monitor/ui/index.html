@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>failure-monitor</title></head>
+<body>
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// What failure-monitor found in this run: why attempts went wrong, at which second, with its own words.
+dk.page('failure-monitor', 'Failures', ({ episodes }) => {
+  const label = (r) => (r || 'unknown').replace(/_/g, ' ')
+  const verdicts = episodes.flatMap((e) => (e.verdicts || []).filter((v) => v.by === 'failure-monitor')
+    .map((v) => ({ attempt: e.episode, try: (v.segment || 0) + 1, reason: v.reason, at_s: v.at_s, message: v.message,
+      source: v.source, final: e.success, _here: e._here })))
+  const hit = new Set(verdicts.map((v) => v.attempt))
+  const counts = {}
+  for (const v of verdicts) counts[v.reason] = (counts[v.reason] || 0) + 1
+  const reasons = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  const firsts = episodes.map((e) => verdicts.find((v) => v.attempt === e.episode)).filter(Boolean).map((v) => v.at_s).sort((a, b) => a - b)
+  const median = firsts.length ? firsts[Math.floor(firsts.length / 2)] : null
+  // "when it breaks": failures per 5 s of an attempt
+  const span = Math.max(5, ...verdicts.map((v) => v.at_s))
+  const bins = Array.from({ length: Math.ceil(span / 5) }, (_, i) => ({ label: `${i * 5}–${i * 5 + 5} s`, value: 0, tone: 'bad' }))
+  for (const v of verdicts) bins[Math.min(bins.length - 1, Math.floor(v.at_s / 5))].value++
+  return [
+    dk.stats([
+      { label: 'failures diagnosed', value: String(verdicts.length), tone: verdicts.length ? 'bad' : 'ok' },
+      { label: 'attempts that went wrong', value: `${hit.size} of ${episodes.length}`, sub: `${episodes.filter((e) => hit.has(e.episode) && e.success).length} still ended well (recovery)` },
+      { label: 'most common', value: reasons.length ? label(reasons[0][0]) : '–', sub: reasons.length ? `${reasons[0][1]}×` : 'no failures' },
+      { label: 'first failure, median', value: median == null ? '–' : `${dk.fmt(median)} s`, sub: 'into the attempt' },
+    ]),
+    dk.card('Why attempts went wrong', reasons.length ? dk.hbars(reasons.map(([r, n]) => ({ label: label(r), value: n, tone: 'bad' })))
+      : dk.empty('No failures in this run.')),
+    dk.card('When it breaks', verdicts.length ? dk.bars(bins) : dk.empty('No failures in this run.')),
+    dk.card('Each failure', verdicts.length ? [dk.row(dk.downloadButton('failure-monitor', () => verdicts.map(({ _here, ...v }) => v))),
+      dk.table([{ key: 'attempt', label: 'attempt' }, { key: 'try', label: 'try' }, { key: 'at_s', label: 'at', fmt: (v) => `${dk.fmt(v)} s` },
+        { key: 'reason', label: 'reason', fmt: label }, { key: 'message', label: 'what it saw' },
+        { key: 'final', label: 'attempt ended', fmt: (v) => (v ? 'success' : 'failed') }], verdicts)]
+      : dk.empty('Every attempt went to plan.')),
+  ]
+})
+</script>
+</body>
+</html>
