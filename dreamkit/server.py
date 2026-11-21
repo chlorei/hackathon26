@@ -335,7 +335,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         return json.loads(path.read_text())
 
     @app.websocket("/ws/live/{run_id}")
-    async def ws_live(socket: WebSocket, run_id: str):
+    async def ws_live(socket: WebSocket, run_id: str, frames: int = 0):
         """Follows a run's files: new lines of events.jsonl, the live camera frames, the heartbeat's telemetry."""
         await socket.accept()
         try:
@@ -351,7 +351,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         last_touch = 0.0
         try:
             while True:
-                if time.time() - last_touch > 1.0:  # the loop renders cameras only while someone watches (§5)
+                if frames and time.time() - last_touch > 1.0:  # the loop renders cameras only while they are shown (§5)
                     watching.parent.mkdir(exist_ok=True)
                     watching.touch()
                     last_touch = time.time()

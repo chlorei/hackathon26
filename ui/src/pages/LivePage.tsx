@@ -32,17 +32,19 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
     if (id && id !== runId) setRunId(id) // a newer run took over
   }, [live.data?.id, runId])
 
-  const stream = useRunStream(runId)
+  const [showCams, setShowCams] = useState(() => localStorage.getItem('dk-cams') === '1')
+  const stream = useRunStream(runId, showCams)
   const running = Boolean(live.data?.id) && live.data?.id === runId
   const current = stream.current
   const marks = useMemo<Mark[]>(() => (current ? marksFrom(stream.events, current.episode) : []), [stream.events, current])
+  const toggleCams = () => { localStorage.setItem('dk-cams', showCams ? '0' : '1'); setShowCams(!showCams) }
 
   if (!runId) return <Waiting />
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="min-w-0 space-y-4">
-        <Cameras live={stream.live} running={running} />
+        <NowCard events={stream.events} episodes={stream.episodes} current={current} running={running} live={stream.live} />
         <Panel>
           <PanelTitle right={current && <LiveClock live={stream.live} />}>
             {current ? `Attempt ${current.episode}, scene ${current.scene + 1}${current.attempt > 1 ? `, retry ${current.attempt - 1}` : ''}` : running ? 'Between attempts' : 'This run has ended'}
@@ -72,6 +74,15 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
           </div>
         </Panel>
         <Attempts episodes={stream.episodes} current={current} onOpen={(ep) => onOpenRun(runId, ep)} />
+        <Panel>
+          <PanelTitle right={<Button variant="quiet" onClick={toggleCams}>{showCams ? 'Hide cameras' : 'Show cameras'}</Button>}>
+            Cameras
+          </PanelTitle>
+          {showCams ? <div className="px-4 pb-4"><Cameras live={stream.live} running={running} /></div> : (
+            <p className="px-5 pb-4 text-dim">Hidden: you watch the arm itself (the robot, or the simulator window). Open them to check
+              what the model sees; the loop renders frames for the panel only while they are open.</p>
+          )}
+        </Panel>
       </div>
 
       <div className="space-y-4 xl:sticky xl:top-[68px] xl:self-start">
@@ -95,6 +106,50 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
         <Feed events={stream.events} onWatch={(ep) => onOpenRun(runId, ep)} />
       </div>
     </div>
+  )
+}
+
+/** What is happening right now, in one glance: the attempt, the clock, and the last thing that mattered. */
+function NowCard({ events, episodes, current, running, live }: {
+  events: EventRecord[]
+  episodes: EpisodeResult[]
+  current: { episode: number; scene: number; attempt: number } | null
+  running: boolean
+  live: LiveStore
+}) {
+  useLive(live)
+  const ep = current?.episode
+  const mine = events.filter((e) => e.episode === ep && e.plugin !== 'dreamkit')
+  const verdict = [...mine].reverse().find((e) => e.data?.kind === 'verdict' || (e.level === 'error' && e.data?.reason))
+  const recovering = [...mine].reverse().find((e) => e.plugin === 'recovery' && e.data?.action)
+  const last = [...mine].reverse().find((e) => e.level !== 'info' || e.plugin === 'failure-monitor')
+  const done = episodes.length
+  const ok = episodes.filter((e) => e.success).length
+  const tone = !current ? 'idle' : recovering && (!verdict || (tOf(recovering) ?? 0) >= (tOf(verdict) ?? 0)) ? 'recover'
+    : verdict ? 'bad' : 'ok'
+  const headline = !current ? (running ? 'Between attempts' : 'Run finished')
+    : tone === 'recover' ? recovering!.message
+    : verdict ? verdict.message.replace(/^verdict: /, '')
+    : last ? last.message : 'Running, nothing wrong so far'
+  return (
+    <Panel className={clsx('px-6 py-5', tone === 'bad' && 'border-bad/50', tone === 'recover' && 'border-signal/50')}>
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <span className="text-[13px] font-semibold uppercase tracking-[.06em] text-dim">
+          {current ? `Attempt ${current.episode} · scene ${current.scene + 1}${current.attempt > 1 ? ` · retry ${current.attempt - 1}` : ''}` : 'Now'}
+        </span>
+        {current && <span className="text-[15px] font-semibold text-signal">{live.t.toFixed(1)} s</span>}
+        <span className="ml-auto text-dim">{ok} of {done} attempts worked so far</span>
+      </div>
+      <p className={clsx('mt-2 text-[26px] font-semibold leading-tight tracking-[-0.01em]',
+        tone === 'bad' && 'text-bad', tone === 'recover' && 'text-signal', tone === 'ok' && 'text-ink', tone === 'idle' && 'text-dim')}>
+        {headline}
+      </p>
+      {current && (
+        <p className="mt-1 text-dim">
+          {tone === 'recover' ? 'recovery is fixing it from where the robot is' : verdict ? `${verdict.plugin} · ${tOf(verdict)?.toFixed(1)} s` : last ? `${last.plugin} · ${tOf(last)?.toFixed(1)} s` : 'plugins are watching'}
+        </p>
+      )}
+    </Panel>
   )
 }
 
