@@ -105,6 +105,9 @@ class Recovery(Plugin):
             self.actions.append("home")
             ctx.emit("info", f"{reason.replace('_', ' ')}: arms home, asking again {n}", reason=reason, action="home")
         ctx.ui.badge(f"recovered {self.used}×", "success")
+        # History's strip shows where the attempt was taken over (the feed line above says how)
+        ctx.ui.mark(ctx.t, f"recovery {self.used}/{self.params.max_recoveries}: {self.actions[-1]} "
+                           f"after {reason.replace('_', ' ')}", "info")
         self.queue, self.queue_from_step = rows, ctx.step
         self._send(ctx)
 

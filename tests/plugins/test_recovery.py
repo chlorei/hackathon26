@@ -6,6 +6,7 @@ def test_drives_home_and_asks_again_on_a_drop():
     acts = [e["data"].get("action") for e in r.events.of("recovery") if e["data"].get("action")]
     assert acts and acts[0] == "home"
     assert r.result["recovery"]["count"] >= 1
+    assert r.result["ui"]["recovery"]["marks"][0]["label"] == "recovery 1/3: home after dropped"  # History's strip
     assert r.budget_ms("recovery") < 1.0
 
 
