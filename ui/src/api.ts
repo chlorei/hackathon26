@@ -32,6 +32,8 @@ export interface EpisodeResult {
   at_s?: number
   stopped_by?: string
   labeled_by?: 'person' | 'loop'
+  judged_by?: 'world' | 'vision' | 'person' | 'loop'  // who decided success (world -> vision -> person)
+  disagreement?: { world: boolean; vision: boolean; by: string }  // physics and vision differ; the world stands
   message?: string
   details?: Record<string, unknown>
   candidates?: { reason: string; at: number }[]
@@ -65,6 +67,22 @@ export interface AppInfo {
   inactive: string | null
 }
 
+/** dreamkit.stats.summary: the numbers every screen shows, computed once on the server. */
+export interface RunStats {
+  attempts: number
+  successes: number
+  success_rate: number
+  ci95: [number, number]
+  unknown: number
+  invalid: number
+  failures: Record<string, number>
+  top_reason: string | null
+  cost_usd: number
+  cost_per_success_usd: number | null
+  model_calls: number
+  mean_latency_ms: number | null
+}
+
 /** An attempt's folder, runs/<run>/ep003/, and the dataset it joined (harvester). */
 export interface EpisodeFiles {
   folder: string
@@ -76,6 +94,7 @@ export interface RunInfo {
   id: string
   source: 'gym' | 'loop'  // filled by the server for every run
   kind: 'dream' | 'scripted'  // Dream-1 drove it, or a mock / scripted / test policy
+  stats: RunStats  // dreamkit.stats over this run's attempts
   task: string
   model: string
   mock: boolean
@@ -208,6 +227,7 @@ export const api = {
   registry: () => call<{ source: string; plugins: RegistryEntry[] }>('/api/registry'),
   install: (name: string) => call<{ ok: boolean; log: string; app?: string | null }>('/api/install', { method: 'POST', body: JSON.stringify({ name }) }),
   runs: () => call<{ runs: RunInfo[] }>('/api/runs'),
+  stats: (kind: string) => call<RunStats & { kind: string; runs: number; empty_runs: number; real: RunStats }>(`/api/stats?kind=${kind}`),
   run: (id: string) => call<RunInfo>(`/api/runs/${id}`),
   trace: (id: string, episode: number) =>
     call<{ object: string; target: string; rows: TraceRow[]; milestones: { t: number; kind: string; message: string }[] }>(

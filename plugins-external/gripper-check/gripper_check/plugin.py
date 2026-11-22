@@ -1,5 +1,8 @@
 """gripper-check: a dreamkit plugin that watches the grippers themselves, from the robot's own signals — commanded
-vs measured opening — so it works on a real robot as well as in the simulator (PLUGIN_STANDARD.md)."""
+vs measured opening — so it works on a real robot as well as in the simulator (PLUGIN_STANDARD.md).
+
+It warns live and never calls a verdict: failure-monitor gives the one final verdict of an attempt and takes these
+signals as evidence (ctx.result["gripper-check"]["signals"], written as they happen)."""
 
 from __future__ import annotations
 
@@ -63,10 +66,11 @@ class GripperCheck(Plugin):
     def _flag(self, ctx: PluginContext, side: str, kind: str, message: str) -> None:
         self.flagged[side].add(kind)
         self.events.append({"t_s": round(ctx.t, 2), "side": side, "kind": kind})
+        # evidence for failure-monitor, as it happens (a warning, not a verdict)
+        ctx.result["gripper-check"] = {"signals": list(self.events), "events": list(self.events)}
         ctx.ui.mark(ctx.t, message, "warn")
         ctx.emit("warn", message, side=side, kind=kind)
 
     def on_episode_end(self, ctx: PluginContext) -> None:
         if self.events:
-            ctx.result["gripper-check"] = {"events": self.events}
             ctx.ui.badge(f"gripper {len(self.events)}x", "warn")

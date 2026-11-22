@@ -5,4 +5,4 @@ they end, so the dataset is always ready. `dreamkit datasets check <name>` runs 
 
 from __future__ import annotations
 
-from .datasets import validate  # noqa: F401  (fine-tune and older code import harvest.validate)
+from .datasets import validate  # noqa: F401  (older code imports harvest.validate)

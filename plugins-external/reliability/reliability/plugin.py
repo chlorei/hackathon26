@@ -7,32 +7,27 @@ Turns the attempts of a run into numbers you can defend:
   exact test, so "the fine-tune is better" is either proven or called what it is: could be luck.
 
 Everything is computed from finished attempts (ctx.episodes), after success-check and failure-monitor have written
-their verdicts, so the plugin does not depend on plugin order and costs nothing per step.
-Ported from DreamGym's Arena and Compare (the stats module there).
+their verdicts, so the plugin does not depend on plugin order and costs nothing per step. The numbers come from
+dreamkit.stats (the same as History and the Data tab) and the money from what the core recorded per attempt
+(dreamkit.cost): this plugin computes nothing of its own.
 """
 
 from __future__ import annotations
 
 import json
-import math
-from collections import Counter
 from statistics import NormalDist
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from dreamkit.cost import usd
+from dreamkit import stats
 from dreamkit.plugin import Plugin, PluginContext
 from dreamkit.standard import Manifest
 
 class Params(BaseModel):
     confidence: float = Field(0.95, ge=0.5, le=0.999, description="Confidence level of the success-rate interval",
                               json_schema_extra={"unit": ""})
-    price_per_hour: float = Field(3.0, ge=0, le=100, description="Dollars per robot-hour of the model (Dream-1 3, "
-                                  "flash 2); 0 for a mock run", json_schema_extra={"unit": ""})
-    calls_per_hour: int = Field(2250, ge=1, description="Model calls billed as one robot-hour (1.6 s of actions each)",
-                                json_schema_extra={"unit": ""})
     baseline_run: str = Field("", description="Run id or folder to compare with scene by scene; empty for none")
     pair_on: str = Field("first_attempt", description="Which outcome of a scene to compare",
                          json_schema_extra={"choices": ["first_attempt", "any_attempt"]})
@@ -40,40 +35,8 @@ class Params(BaseModel):
                                 json_schema_extra={"unit": ""})
 
 
-# --- statistics (dependency-free) ---------------------------------------------------------------------------------
-
-def wilson(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """Wilson score interval: honest at small n, unlike p ± z·sqrt(p(1-p)/n)."""
-    if n == 0:
-        return 0.0, 1.0
-    p = successes / n
-    denom = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / denom
-    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
-    return max(0.0, centre - half), min(1.0, centre + half)
-
-
-def mcnemar_exact(only_a: int, only_b: int) -> float:
-    """Two-sided exact McNemar p-value from the discordant scenes (A won alone, B won alone)."""
-    n = only_a + only_b
-    if n == 0:
-        return 1.0
-    tail = sum(math.comb(n, i) for i in range(min(only_a, only_b) + 1)) / 2 ** n
-    return min(1.0, 2 * tail)
-
-
-def fisher_exact(k1: int, n1: int, k2: int, n2: int) -> float:
-    """Two-sided Fisher exact p-value for two independent rates (used when the scenes do not pair)."""
-    total_k, total = k1 + k2, n1 + n2
-    if total == 0 or n1 == 0 or n2 == 0:
-        return 1.0
-
-    def prob(a: int) -> float:
-        return math.comb(total_k, a) * math.comb(total - total_k, n1 - a) / math.comb(total, n1)
-
-    observed = prob(k1)
-    lo, hi = max(0, total_k - n2), min(total_k, n1)
-    return min(1.0, sum(p for a in range(lo, hi + 1) if (p := prob(a)) <= observed * (1 + 1e-9)))
+# the one statistics module (History, Data, monitor-stats use it too)
+wilson, mcnemar_exact, fisher_exact = stats.wilson, stats.mcnemar_exact, stats.fisher_exact
 
 
 def _key(episode: dict[str, Any]) -> Any:
@@ -93,32 +56,22 @@ def scene_outcomes(episodes: list[dict[str, Any]], pair_on: str) -> dict[Any, bo
     return out
 
 
-def summarize(episodes: list[dict[str, Any]], z: float, price_per_hour: float, calls_per_hour: int) -> dict[str, Any]:
-    n = len(episodes)
-    k = sum(1 for e in episodes if e.get("success"))
-    lo, hi = wilson(k, n, z)
-    calls = sum(int(e.get("requests") or 0) for e in episodes)
-    cost = usd(calls, price_per_hour, calls_per_hour)  # dreamkit.cost: the one place a dollar is computed
+def summarize(episodes: list[dict[str, Any]], z: float = stats.Z95) -> dict[str, Any]:
+    """dreamkit.stats.summary (rate, interval, failures, cost from the core) plus the time a success took."""
+    s = stats.summary(episodes, z)
     times = [float(e["duration_s"]) for e in episodes if e.get("success") and e.get("duration_s") is not None]
-    reasons = Counter(e.get("reason") or "unknown" for e in episodes if not e.get("success"))
-    return {
-        "attempts": n, "successes": k, "rate": round(k / n, 4) if n else 0.0, "interval": [round(lo, 4), round(hi, 4)],
-        "failures": dict(reasons.most_common()),
-        "mean_time_to_success_s": round(sum(times) / len(times), 2) if times else None,
-        "model_calls": calls, "cost_usd": round(cost, 4), "cost_per_success_usd": round(cost / k, 4) if k else None,
-    }
+    return {**s, "rate": s["success_rate"], "interval": s["ci95"],  # the names this plugin's page and events use
+            "mean_time_to_success_s": round(sum(times) / len(times), 2) if times else None}
 
 
 def compare(base: list[dict[str, Any]], this: list[dict[str, Any]], pair_on: str) -> dict[str, Any]:
     a, b = scene_outcomes(base, pair_on), scene_outcomes(this, pair_on)
     shared = sorted(set(a) & set(b), key=str)
     if shared:
-        only_a = sum(1 for s in shared if a[s] and not b[s])
-        only_b = sum(1 for s in shared if b[s] and not a[s])
-        ra, rb = sum(a[s] for s in shared) / len(shared), sum(b[s] for s in shared) / len(shared)
-        return {"paired": True, "scenes": len(shared), "rate_base": round(ra, 4), "rate_this": round(rb, 4),
-                "delta": round(rb - ra, 4), "only_base_won": only_a, "only_this_won": only_b,
-                "p_value": round(mcnemar_exact(only_a, only_b), 4), "test": "mcnemar_exact"}
+        p = stats.paired(a, b)
+        return {"paired": True, "scenes": p["seeds"], "rate_base": p["rate_a"], "rate_this": p["rate_b"],
+                "delta": p["delta"], "only_base_won": p["only_a_succeeded"], "only_this_won": p["only_b_succeeded"],
+                "p_value": p["p_value"], "test": p["test"]}
     ka, na, kb, nb = sum(a.values()), len(a), sum(b.values()), len(b)
     ra, rb = (ka / na if na else 0.0), (kb / nb if nb else 0.0)
     return {"paired": False, "scenes": 0, "rate_base": round(ra, 4), "rate_this": round(rb, 4),
@@ -154,7 +107,7 @@ class Reliability(Plugin):
                 ctx.emit("warn", f"baseline run {self.params.baseline_run} not readable: {type(error).__name__}")
 
     def _stats(self, episodes: list[dict[str, Any]]) -> dict[str, Any]:
-        return summarize(episodes, self.z, self.params.price_per_hour, self.params.calls_per_hour)
+        return summarize(episodes, self.z)
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         done = ctx.episodes  # finished attempts, verdicts final

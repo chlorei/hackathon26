@@ -92,6 +92,9 @@ class Context:
     run_dir: Path | None = None
     config: Any = None
     datasets_dir: Path | None = None  # <data_dir>/datasets: where datasets go (the harvester's, DreamGym's)
+    ## What the model's time has cost, kept by the core after every call (dreamkit.cost): plugins only read it.
+    cost: dict[str, Any] = field(default_factory=lambda: {"price_per_hour": 0.0, "run_calls": 0, "attempt_calls": 0,
+                                                           "run_usd": 0.0, "attempt_usd": 0.0, "dream_price_per_hour": 0.0})
     episode: int = 0
     scene: int = 0
     attempt: int = 1
@@ -311,6 +314,9 @@ class PluginContext:
     run_id = property(lambda self: self._core.run_id)
     ## §8: this attempt's folder, runs/<run>/ep003/: the files of the attempt (videos, trace.json ...), shared by all
     episode_dir = property(lambda self: self._core.episode_dir)
+    ## the money so far (the core counts every billed model call): price_per_hour, run_calls, attempt_calls, run_usd,
+    ## attempt_usd, dream_price_per_hour (what Dream-1 would bill, e.g. to try a budget on a mock). Read-only.
+    cost = property(lambda self: dict(self._core.cost))
     ## <data_dir>/datasets/: datasets live here, not inside a run (the harvester appends to one)
     datasets_dir = property(lambda self: self._core.datasets_dir)
     run_dir = property(lambda self: self._core.run_dir)

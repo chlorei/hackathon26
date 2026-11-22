@@ -103,7 +103,7 @@ def main(argv: list[str] | None = None, sim_loop=None) -> int:
         for i, (model, prompt) in enumerate(variants):
             label = (model.split("/")[-1] if len(models) > 1 else "") + (f" | {prompt}" if len(prompts) > 1 else "")
             label = label.strip(" |")
-            reliability = {"price_per_hour": price(model, args.mock)}
+            reliability: dict = {}  # the money comes from the core (dreamkit.cost), not from a setting
             if first_dir is not None:
                 reliability["baseline_run"] = str(first_dir)
             path = Path(tmp) / f"variant{i}.yaml"
@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None, sim_loop=None) -> int:
 
     base_eps = rows[0]["episodes"]
     for r in rows:
-        r["summary"] = summarize(r["episodes"], 1.96, price(r["model"], args.mock), CALLS_PER_HOUR)
+        r["summary"] = summarize(r["episodes"])  # dreamkit.stats, the same numbers as History
         r["vs_baseline"] = None if r is rows[0] else compare(base_eps, r["episodes"], "first_attempt")
     print("\nrank  success              vs baseline            variant")
     for k, r in enumerate(sorted(rows, key=lambda r: -r["summary"]["rate"]), 1):

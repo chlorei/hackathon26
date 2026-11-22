@@ -40,18 +40,17 @@ class BudgetGuard(Plugin):
                         ui="ui/index.html")
 
     def on_run_start(self, ctx: PluginContext) -> None:
-        self.calls = 0
         self.warned: set[int] = set()
         self.stopped = False
         self.at_start = 0.0  # spent when the attempt began
 
-    def _price(self, ctx: PluginContext) -> float:
-        mock = ctx.mock and not self.params.count_mock
-        model = "dream-1" if ctx.mock and self.params.count_mock else ctx.model
-        return cost.price_per_hour(model, mock, getattr(ctx.config, "prices", None))
-
     def _spent(self, ctx: PluginContext) -> float:
-        return cost.usd(self.calls, self._price(ctx))
+        """What the run has cost, as the core counts it (ctx.cost); a mock bills nothing unless count_mock asks to
+        try the budget as if Dream-1 had been called."""
+        c = ctx.cost
+        if ctx.mock and self.params.count_mock:
+            return c["run_calls"] * c["dream_price_per_hour"] / cost.CALLS_PER_HOUR
+        return float(c["run_usd"])
 
     def _publish(self, ctx: PluginContext) -> None:
         ctx.ui.series("budget_usd", ctx.t, self.params.budget_usd)  # Live: "of $Y", the bar
@@ -65,7 +64,6 @@ class BudgetGuard(Plugin):
     def after_model(self, ctx: PluginContext) -> None:
         if "overridden_by" in ctx.store:  # rows a plugin sent instead of the model: not billed
             return
-        self.calls += 1
         self._publish(ctx)
         p = self.params
         spent, budget = self._spent(ctx), p.budget_usd

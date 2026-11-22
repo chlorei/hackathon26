@@ -21,6 +21,7 @@ REASONS: dict[str, str] = {
     "model_error": "model error",
     "error": "error in the loop",
     "marked_failed": "marked failed by a person",
+    "judged_failed": "judged failed from the camera",  # vision decided (no world), with no more precise code
     "budget_exhausted": "credit budget used up",  # budget-guard: the run stops safely before the money runs out
 }
 ## Codes for a failure of the task itself (what failure-monitor diagnoses and recovery can act on).

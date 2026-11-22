@@ -302,3 +302,109 @@ def check(root: Path, config: dict[str, Any] | None = None) -> dict[str, Any]:
     report["checked"] = time.time()
     update(root, validate=report)
     return report
+
+
+# -- fine-tune: the one path (the Data tab and `dreamkit datasets train` both call these) --------------------------
+## The embodiment every dreamkit dataset is uploaded under: the YAM body as the harvester and DreamGym write it.
+EMBODIMENT = "dreamkit-yam"
+TERMINAL = ("processed", "failed")
+
+
+def train_config() -> dict[str, Any]:
+    from .plugins.harvester.plugin import YAM_CONFIG
+
+    return {**YAM_CONFIG, "head_camera": "overhead"}
+
+
+def _client() -> Any:
+    import dream
+
+    return dream.DreamClient()
+
+
+def _plain(obj: Any) -> dict[str, Any]:
+    if isinstance(obj, dict):
+        return obj
+    return {k: v for k, v in vars(obj).items() if not k.startswith("_")} if hasattr(obj, "__dict__") else {"raw": str(obj)}
+
+
+def train(root: Path, *, suffix: str = "dreamkit", steps: int | None = None, name: str | None = None,
+          wait_s: float | None = None, poll_s: float = 20.0, log: Any = print) -> dict[str, Any]:
+    """Checks the dataset, registers the embodiment once, uploads it, waits for Dream Labs to process it and starts the
+    fine-tune (fine-tuning credits). Everything is recorded in dataset.json (validate, upload, finetune) as it happens.
+
+    `wait_s`: how long to wait for processing (None: until it is done); if it runs out, the upload stays recorded as
+    processing and `refresh()` starts the training later. Returns the finetune record."""
+    root = Path(root)
+    report = check(root, train_config())
+    if not report.get("ok"):
+        raise RuntimeError(f"dataset check failed: {report.get('error')}")
+    log(f"validate_dataset ok: {report.get('episodes')} episodes, {report.get('frames')} frames")
+    client = _client()
+    mine = {e.name.split("/", 1)[-1]: e for e in client.get_embodiments()}
+    embodiment = mine.get(EMBODIMENT) or client.add_embodiment(EMBODIMENT, train_config())
+    rec = record(root)
+    previous = list((rec.get("finetune") or {}).get("previous") or [])
+    if (rec.get("finetune") or {}).get("job_id"):  # trained before: keep the old model ids
+        old = rec["finetune"]
+        previous.append({k: old.get(k) for k in ("model", "job_id", "updated")})
+    upload_name = (name or root.name).replace("_", "-").lower()[:60]
+    if (rec.get("upload") or {}).get("dataset_name"):  # uploaded before (maybe with fewer episodes): a new name
+        upload_name = f"{upload_name}-{time.strftime('%m%d-%H%M')}"
+    update(root, upload={"dataset_name": upload_name, "dataset_id": None, "status": "uploading", "updated": time.time()},
+           finetune={"stage": "uploading", "job_id": None, "model": None, "previous": previous, "updated": time.time()})
+    with lerobot_view(root) as view:
+        ds = client.upload_dataset(str(view), upload_name, embodiment.name)
+    update(root, upload={"dataset_id": ds.id, "dataset_name": ds.name, "status": "processing", "updated": time.time()},
+           finetune={"stage": "processing", "updated": time.time()})
+    log(f"uploaded {ds.name}; Dream Labs is processing it")
+    deadline = None if wait_s is None else time.monotonic() + wait_s
+    while (st := client.get_dataset_status(ds.id)).status not in TERMINAL:
+        if deadline is not None and time.monotonic() > deadline:
+            log("still processing; `dreamkit datasets status` starts the training once it is processed")
+            return record(root).get("finetune") or {}
+        time.sleep(poll_s)
+    if st.status == "failed":
+        update(root, upload={"status": "failed", "error": str(st.error)},
+               finetune={"stage": "failed", "status": "failed", "error": str(st.error), "updated": time.time()})
+        raise RuntimeError(f"dataset processing failed: {st.error}")
+    return _start_job(root, client, ds.name, suffix, steps, log)
+
+
+def _start_job(root: Path, client: Any, dataset_name: str, suffix: str, steps: int | None, log: Any) -> dict[str, Any]:
+    job = _plain(client.finetune(dataset_name, suffix, steps=steps))
+    rec = update(root, upload={"status": "processed"},
+                 finetune={"stage": "training", "status": str(job.get("status") or "queued"), "job": job,
+                           "job_id": job.get("id") or job.get("job_id"), "suffix": suffix, "steps": steps,
+                           "started": time.time(), "updated": time.time()})
+    log(f"fine-tune started: job {rec['finetune']['job_id']} (a few hours)")
+    return rec["finetune"]
+
+
+def refresh(root: Path, *, suffix: str | None = None, log: Any = print) -> dict[str, Any]:
+    """Asks Dream Labs where the dataset's upload or job is: a processed upload starts the training, a finished job
+    records its model id. Returns the finetune record."""
+    root = Path(root)
+    rec = record(root)
+    up, ft = rec.get("upload") or {}, rec.get("finetune") or {}
+    client = _client()
+    if ft.get("stage") == "processing" and up.get("dataset_id"):
+        st = client.get_dataset_status(up["dataset_id"])
+        if st.status == "processed":
+            return _start_job(root, client, up["dataset_name"], suffix or ft.get("suffix") or "dreamkit",
+                              ft.get("steps"), log)
+        if st.status == "failed":
+            rec = update(root, upload={"status": "failed", "error": str(st.error)},
+                         finetune={"stage": "failed", "status": "failed", "error": str(st.error), "updated": time.time()})
+        return rec.get("finetune") or {}
+    if not ft.get("job_id"):
+        return ft
+    job = _plain(client.get_finetuning_status(ft["job_id"]))
+    model = job.get("fine_tuned_model")
+    state = str(job.get("status", "")).lower()
+    stage = "done" if model else ("failed" if state in ("failed", "cancelled") else "training")
+    rec = update(root, finetune={"stage": stage, "status": job.get("status"), "model": model, "job": job,
+                                 "updated": time.time()})
+    if model:
+        log(f"fine-tune ready: {model}")
+    return rec["finetune"]

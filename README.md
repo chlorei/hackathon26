@@ -173,10 +173,10 @@ python examples/sim_loop.py --mock --behaviors dropped,grasped_air,released_off_
 python examples/recovery_ab.py --episodes 10  # Dream-1, same seeds with and without recovery (uses credits)
 python examples/ab_test.py --tune --episodes 10   # prompt tuner: paraphrases of the task, same seeds, ranked with proof
 python examples/ab_test.py --models dreamlabs/dream-1-beta,<fine-tune id> --episodes 20   # base vs fine-tune
-python examples/finetune.py --runs <run-id...>    # harvested successes -> validated -> upload -> fine-tune (--status)
 dreamkit ui                                 # the panel: Live / Plugins / History
 dreamkit where                              # where runs and datasets are, and how big
-dreamkit datasets [check <name>]            # every dataset with its status; check: validate_dataset (local)
+dreamkit datasets [check|train|status <name>]   # every dataset; check: validate_dataset (local); train: upload +
+                                            # fine-tune (fine-tuning credits); status: the job, the model id when done
 dreamkit migrate [--dry-run]                # older runs/, gym/, harvest/ into the data folder (moves, never deletes)
 dreamkit list | search | install | new      # plugins
 dreamkit review --limit 20                  # failed attempts -> labels.csv, each with its video at the failure second

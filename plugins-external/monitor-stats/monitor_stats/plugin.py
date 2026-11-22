@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import io
 import json
-import math
 from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import NormalDist
@@ -24,6 +23,7 @@ from PIL import Image
 from pydantic import BaseModel, Field
 
 from dreamkit import reasons
+from dreamkit import stats
 from dreamkit.plugin import Plugin, PluginContext
 from dreamkit.standard import Manifest
 
@@ -54,21 +54,13 @@ class Params(BaseModel):
 
 # --- statistics (pure, tested) ------------------------------------------------------------------------------------
 
-def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    if n == 0:
-        return 0.0, 1.0
-    p = k / n
-    d = 1 + z * z / n
-    c = (p + z * z / (2 * n)) / d
-    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
-    return max(0.0, c - h), min(1.0, c + h)
+wilson = stats.wilson  # the one statistics module (History, Data and reliability use it too)
 
 
 def _rate(verdicts: list[dict[str, Any]], z: float) -> dict[str, Any]:
-    n, k = len(verdicts), sum(1 for v in verdicts if v["success"])
-    lo, hi = wilson(k, n, z)
-    return {"attempts": n, "successes": k, "rate": round(k / n, 4) if n else 0.0,
-            "interval": [round(lo, 4), round(hi, 4)],
+    r = stats.rate(sum(1 for v in verdicts if v["success"]), len(verdicts), z)
+    n = len(verdicts)
+    return {"attempts": n, "successes": r["successes"], "rate": r["success_rate"], "interval": r["ci95"],
             "mean_score": round(sum(v["score"] for v in verdicts) / n, 1) if n else None}
 
 
@@ -230,11 +222,12 @@ class MonitorStats(Plugin):
                 data["reason"] = v["reason_code"]
             if first is not None:
                 data["at_s"] = first  # the panel offers "watch from" on it
-            ctx.emit("error", f"camera verdict: {v['reason']} ({tag}score {v['score']})", **data)
+            # a warning, not a verdict: the core decides success (world, then vision, then a person), §7a-b
+            ctx.emit("warn", f"camera verdict: {v['reason']} ({tag}score {v['score']})", **data)
         if not final:
             self.tries.append({"try": try_no, **v})
             return
-        ctx.result[KEY] = {**v, **({"tries": self.tries} if self.tries else {})}
+        ctx.result[KEY] = {**v, "judge": "vision", **({"tries": self.tries} if self.tries else {})}
         self.judged.append(v)
         ctx.ui.badge(f"camera: {'success' if v['success'] else 'failed'} · {v['score']}",
                      "success" if v["success"] else "error")

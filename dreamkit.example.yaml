@@ -1,7 +1,7 @@
 # dreamkit.yaml — which plugins run around Dream-1, and their settings. Nothing else:
 # what to run (task, attempts, model, mock) is your loop's business — see examples/sim_loop.py --help.
 sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator, relative to this file
-runs_dir: runs                                             # where each run's folder goes (the panel reads it)
+data_dir: dreamkit-data                                    # runs/ and datasets/: everything dreamkit saves
 plugins:
   - camera-check
   - success-check
@@ -9,3 +9,5 @@ plugins:
   - recovery: {max_recoveries: 3, retry_attempts: 1}       # the one control plugin
   - recorder: {video_fps: 10}
   - harvester
+  - gripper-check                                          # live gripper warnings
+  - budget-guard                                           # credit budget: warns, stops safely with recovery

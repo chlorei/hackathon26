@@ -15,11 +15,6 @@
   pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/monitor-stats
   description: A vision model judges every attempt from camera frames; success rate by task and top failure reasons across runs
   tags: [vision, judge, statistics]
-- name: fine-tune
-  repo: https://github.com/chlorei/hackathon26/tree/main/plugins-external/fine-tune
-  pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/fine-tune
-  description: Builds a fine-tuning dataset from successful attempts and trains Dream-1 on it
-  tags: [dataset, fine-tuning, learn]
 - name: dreamgym
   kind: app
   title: Data

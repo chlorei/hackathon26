@@ -225,13 +225,15 @@ INIT_YAML = """\
 sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator, relative to this file
 data_dir: dreamkit-data                                   # runs/ and datasets/: everything dreamkit saves
 prices: {dream-1: 3.0, flash: 2.0}                         # dollars per robot-hour of the model (Live, History)
-plugins:
-  - success-check      # was the task done: the object rests in the target, the gripper let go
-  - failure-monitor    # why an attempt failed, and at which second; its verdicts drive recovery
+plugins:                 # the working set: every one is on (monitor-stats needs a vision key: add it when you have one)
   - camera-check       # a black, uniform or frozen camera, before the model is asked again
+  - success-check      # was the task done: the object rests in the target, the gripper let go
+  - failure-monitor    # why an attempt failed, and at which second: the one final verdict
   - recovery           # the one control plugin: takes over a failing attempt (arms home, ask again)
-  - reliability        # success rate with its confidence interval, the cost of one success
-  - monitor-stats      # a vision model judges each attempt from the camera (GEMINI_API_KEY in .env)
+  - recorder           # every camera of every attempt to MP4 (History plays it)
+  - harvester          # successful attempts into datasets/harvest-<task>/ (fine-tuning data)
+  - gripper-check      # live warnings from the gripper (closed on nothing, loosening grip)
+  - budget-guard       # warns as the credit budget goes; with recovery it stops the run safely
 """
 
 
@@ -327,6 +329,24 @@ def cmd_datasets(args) -> int:
 
     cfg, base = config_mod.load(_config_path(args.config))
     root = cfg.datasets_path(base)
+    if args.datasets_cmd in ("train", "status"):  # the one fine-tune path (the Data tab calls the same functions)
+        folder = root / args.name
+        if not folder.is_dir():
+            print(f"no dataset {args.name!r} in {root}")
+            return 1
+        try:
+            if args.datasets_cmd == "train":
+                ft = datasets.train(folder, suffix=args.suffix, steps=args.steps, name=args.upload_name,
+                                    wait_s=args.wait_s)
+            else:
+                ft = datasets.refresh(folder)
+        except Exception as error:  # no key, no network, a refused dataset: say it plainly
+            print(f"{args.name}: {type(error).__name__}: {error}")
+            return 1
+        model = ft.get("model")
+        print(f"{args.name}: {ft.get('stage') or 'not started'}" + (f", model {model}" if model else
+              (f", job {ft.get('job_id')}" if ft.get("job_id") else "")))
+        return 0
     if args.datasets_cmd == "check":
         folder = root / args.name
         if not folder.is_dir():
@@ -520,6 +540,16 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_datasets, datasets_cmd="list")
     dsub = p.add_subparsers(dest="datasets_cmd")
     c = dsub.add_parser("check", help="Dream Labs' validate_dataset on a dataset (local, nothing uploaded)")
+    c.add_argument("name")
+    c.set_defaults(func=cmd_datasets)
+    c = dsub.add_parser("train", help="check, upload and start a Dream-1 fine-tune (uses fine-tuning credits)")
+    c.add_argument("name")
+    c.add_argument("--suffix", default="dreamkit", help="the fine-tune is named dream-1-ft:<id>-<suffix>")
+    c.add_argument("--steps", type=int, default=None, help="training steps (multiple of 100); default: the service's")
+    c.add_argument("--upload-name", default=None, help="the dataset's name on the platform (default: its folder)")
+    c.add_argument("--wait-s", type=float, default=None, help="wait this long for processing (default: until done)")
+    c.set_defaults(func=cmd_datasets)
+    c = dsub.add_parser("status", help="ask Dream Labs about the upload / job; records the model id when done")
     c.add_argument("name")
     c.set_defaults(func=cmd_datasets)
     p = sub.add_parser("migrate", help="move runs/, gym/ and harvest/ into the data folder (moves, never deletes)")

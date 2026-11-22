@@ -1,48 +1,13 @@
-"""Small, dependency-free statistics: how sure is "7 of 10", and is A really better than B."""
+"""DreamGym's summaries of its evaluation rows, on dreamkit.stats (Wilson, McNemar, Fisher): one source of numbers."""
 
 from __future__ import annotations
 
-import math
 from collections import Counter
 from typing import Iterable, Mapping
 
 
-def wilson(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """95% Wilson score interval for a success rate; honest at small n (unlike p +- 1.96 sqrt(p(1-p)/n))."""
-    if n == 0:
-        return (0.0, 1.0)
-    p = successes / n
-    denom = 1 + z * z / n
-    centre = (p + z * z / (2 * n)) / denom
-    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
-    return (max(0.0, centre - half), min(1.0, centre + half))
-
-
-def mcnemar_exact(b: int, c: int) -> float:
-    """Two-sided exact McNemar p-value for paired outcomes.
-
-    b: seeds where A succeeded and B failed; c: the reverse. Same seeds = same scenes, so pairing removes the
-    scene's own difficulty from the comparison and needs far fewer episodes than comparing two rates.
-    """
-    n = b + c
-    if n == 0:
-        return 1.0
-    tail = sum(math.comb(n, i) for i in range(min(b, c) + 1)) / 2**n
-    return min(1.0, 2 * tail)
-
-
-def fisher_exact(k1: int, n1: int, k2: int, n2: int) -> float:
-    """Two-sided Fisher exact p-value for two independent rates k1/n1 vs k2/n2 (unpaired runs)."""
-    total_k, total = k1 + k2, n1 + n2
-    if total == 0:
-        return 1.0
-
-    def prob(a: int) -> float:
-        return math.comb(total_k, a) * math.comb(total - total_k, n1 - a) / math.comb(total, n1)
-
-    observed = prob(k1)
-    lo, hi = max(0, total_k - n2), min(total_k, n1)
-    return min(1.0, sum(p for a in range(lo, hi + 1) if (p := prob(a)) <= observed * (1 + 1e-9)))
+# the one statistics module: History, reliability and monitor-stats use the same functions
+from dreamkit.stats import fisher_exact, mcnemar_exact, wilson  # noqa: E402,F401
 
 
 def summarize(results: Iterable[Mapping]) -> dict:

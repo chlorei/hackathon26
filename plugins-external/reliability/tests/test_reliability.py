@@ -54,7 +54,9 @@ def test_statistics():
     assert fisher_exact(5, 10, 5, 10) == 1.0
     eps = [{"seed": i, "attempt": 1, "success": i < 2, "reason": None if i < 2 else "dropped", "requests": 25,
             "duration_s": 40.0} for i in range(4)]
-    s = summarize(eps, 1.96, 3.0, 2250)
+    for e in eps:  # what the core records per attempt (dreamkit.cost): 25 calls of Dream-1
+        e["cost_usd"] = 25 * 3.0 / 2250
+    s = summarize(eps, 1.96)
     assert s["successes"] == 2 and s["failures"] == {"dropped": 2}
     assert s["cost_per_success_usd"] == pytest.approx(0.0667, abs=1e-4)
     better = [dict(e, success=True, reason=None) for e in eps]

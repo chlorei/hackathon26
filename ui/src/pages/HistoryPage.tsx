@@ -23,21 +23,7 @@ type Filter = 'dream' | 'scripted' | 'all'
 
 /** An attempt that counts: it ran, and dreamkit could read what success meant. The rest is shown grey as invalid. */
 const valid = (e: EpisodeResult) => e.task_readable !== false
-/** Mean model round trip of a run's attempts (failure-monitor's latency), in ms. */
-function latencyMs(eps: EpisodeResult[]): number | null {
-  const lat = eps.map((e) => (e as unknown as Record<string, { latency?: { mean_ms?: number; calls?: number } }>)['failure-monitor']?.latency)
-    .filter((l): l is { mean_ms: number; calls: number } => Boolean(l && l.mean_ms != null && l.calls))
-  const calls = lat.reduce((a, l) => a + l.calls, 0)
-  return calls ? lat.reduce((a, l) => a + l.mean_ms * l.calls, 0) / calls : null
-}
 const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`)
-
-/** Failures by meaning (an old code and its new name are one reason), most frequent first. */
-function reasonsOf(eps: EpisodeResult[]) {
-  const by: Record<string, number> = {}
-  for (const e of eps) if (e.success === false) by[reasonLabel(e.reason)] = (by[reasonLabel(e.reason)] ?? 0) + 1
-  return Object.entries(by).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
-}
 
 const DASH = '—'
 const field = (e: EpisodeResult, key: string) => (e as unknown as Record<string, Record<string, unknown> | undefined>)[key]
@@ -70,13 +56,13 @@ function savesText(r: RunInfo): ReactNode {
 
 /** One run in numbers, for the comparison. */
 function statsOf(r: RunInfo) {
-  const eps = (r.episodes ?? []).filter(valid)
-  const ok = eps.filter((e) => e.success).length
-  const lat = latencyMs(r.episodes ?? [])
+  const st = r.stats  // dreamkit.stats on the server: the same numbers as reliability and the Data tab
+  const done = (r.episodes ?? []).filter((e) => valid(e) && e.success)
   return {
-    rate: eps.length ? ok / eps.length : null, ok, n: eps.length,
-    time: ok ? eps.filter((e) => e.success).reduce((a, e) => a + e.duration_s, 0) / ok : null,
-    cost: costText(r), latency: lat == null ? DASH : ms(lat), reason: reasonsOf(eps)[0]?.reason ?? DASH,
+    rate: st?.attempts ? st.success_rate : null, ok: st?.successes ?? 0, n: st?.attempts ?? 0,
+    time: done.length ? done.reduce((a, e) => a + e.duration_s, 0) / done.length : null,
+    cost: costText(r), latency: st?.mean_latency_ms == null ? DASH : ms(st.mean_latency_ms),
+    reason: st?.top_reason ? reasonLabel(st.top_reason) : DASH,
   }
 }
 
@@ -150,21 +136,27 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
   const choose = (f: Filter) => { localStorage.setItem('dk-history-filter', f); setFilter(f) }
   const [picked, setPicked] = useState<string[]>([])  // up to two runs to compare
   const pick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id].slice(-2)))
+  const summary = useQuery({ queryKey: ['stats', filter], queryFn: () => api.stats(filter), refetchInterval: 6000 })
   if (runs.isError) return <LoadError error={runs.error} what="the runs" />
   const everything = runs.data?.runs ?? []
   const list = everything.filter((r) => filter === 'all' || r.kind === filter)
-  const attempts = list.flatMap((r) => r.episodes ?? [])
-  const counted = attempts.filter(valid)
-  const invalid = attempts.length - counted.length + list.filter((r) => !(r.episodes ?? []).length).length
-  const ok = counted.filter((e) => e.success).length
-  const reasons = reasonsOf(counted)
+  // every number here comes from the server (dreamkit.stats): the same as reliability and the Data tab
+  const st = summary.data
+  const nJudged = st?.attempts ?? 0
+  const ok = st?.successes ?? 0
+  const byLabel = Object.entries(st?.failures ?? {}).reduce<Record<string, number>>((acc, [code, n]) => {
+    acc[reasonLabel(code)] = (acc[reasonLabel(code)] ?? 0) + n
+    return acc
+  }, {})
+  const reasons = Object.entries(byLabel).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
+  const invalid = (st?.invalid ?? 0) + (st?.empty_runs ?? 0)
   const counts = { dream: everything.filter((r) => r.kind === 'dream').length, scripted: everything.filter((r) => r.kind === 'scripted').length, all: everything.length }
   // money only where it was spent: real runs, whichever filter is on
   const real = everything.filter(isReal)
-  const spent = real.reduce((a, r) => a + (r.cost_usd ?? 0), 0)
-  const realOk = real.flatMap((r) => r.episodes ?? []).filter((e) => valid(e) && e.success).length
+  const spent = st?.real.cost_usd ?? 0
+  const realOk = st?.real.successes ?? 0
   const top = reasons[0]
-  const topLat = top?.reason === reasonLabel('slow_model') ? latencyMs(counted.filter((e) => e.reason === 'slow_model')) : null
+  const topLat = st?.top_reason === 'slow_model' ? st.mean_latency_ms : null
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -184,14 +176,14 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
       {list.length > 0 && (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
           <Panel className="px-6 py-5">
-            <p className="text-[14px] text-dim">{count(counted.length, TERM.attempt)} in {count(list.length, TERM.run)}</p>
+            <p className="text-[14px] text-dim">{count(nJudged, TERM.attempt)} in {count(list.length, TERM.run)}</p>
             <p className="mt-1 flex items-baseline gap-3">
-              <span className="text-[44px] font-semibold leading-none tabular-nums">{counted.length ? Math.round((100 * ok) / counted.length) : 0}%</span>
-              <span className="text-[15px] text-dim">worked ({ok} of {counted.length})</span>
+              <span className="text-[44px] font-semibold leading-none tabular-nums">{Math.round(100 * (st?.success_rate ?? 0))}%</span>
+              <span className="text-[15px] text-dim">worked ({ok} of {nJudged})</span>
             </p>
             <p className="mt-3 text-[15px]">
-              {top ? <>Most failures: <b className="text-bad">{top.reason}</b>{topLat != null ? `, avg ${ms(topLat)}` : ''} ({top.n} of {counted.length - ok})</>
-                : counted.length ? 'No failures.' : 'No attempt was judged yet.'}
+              {top ? <>Most failures: <b className="text-bad">{top.reason}</b>{topLat != null ? `, avg ${ms(topLat)}` : ''} ({top.n} of {nJudged - ok})</>
+                : nJudged ? 'No failures.' : 'No attempt was judged yet.'}
             </p>
             <p className="mt-3 border-t border-line pt-3 text-[13px] text-dim">
               {real.length > 0 && <>Spent <b className="text-ink tabular-nums">${spent.toFixed(2)}</b>{realOk ? <> · ${(spent / realOk).toFixed(2)} per success</> : null} <span className="text-faint">(real runs only)</span>. </>}
@@ -239,9 +231,8 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
             <tbody>
               {list.map((r) => {
                 const eps = r.episodes ?? []
-                const judged = eps.filter(valid)
-                const worked = judged.filter((e) => e.success).length
-                const main = reasonsOf(judged)[0]
+                const rs = r.stats
+                const others = Object.keys(rs?.failures ?? {}).length - 1
                 return (
                   <tr key={r.id} tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)}
                     className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-raised/50">
@@ -258,8 +249,8 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
                     </td>
                     <td className="px-3 py-2.5 whitespace-nowrap text-dim tabular-nums">{eps.length ? `${eps.reduce((a, e) => a + (e.duration_s ?? 0), 0).toFixed(0)} s` : DASH}</td>
                     <td className={clsx('px-3 py-2.5 whitespace-nowrap tabular-nums', isReal(r) ? 'text-ink' : 'text-faint')}>{costText(r)}</td>
-                    <td className="truncate px-3 py-2.5" title={judged.length ? `${worked} of ${judged.length} worked` : undefined}>
-                      {main ? <span className="text-bad">{main.reason}{reasonsOf(judged).length > 1 ? ` +${reasonsOf(judged).length - 1}` : ''}</span> : <span className="text-faint">{DASH}</span>}
+                    <td className="truncate px-3 py-2.5" title={rs?.attempts ? `${rs.successes} of ${rs.attempts} worked` : undefined}>
+                      {rs?.top_reason ? <span className="text-bad">{reasonLabel(rs.top_reason)}{others > 0 ? ` +${others}` : ''}</span> : <span className="text-faint">{DASH}</span>}
                     </td>
                   </tr>
                 )
@@ -301,7 +292,6 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
   if (run.isError) return <LoadError error={run.error} what="this run" />
   if (!run.data) return <p className="text-dim">Loading the run…</p>
   const r: RunInfo = run.data
-  const judged = episodes.filter(valid)
   const menu: MenuItem[] = [
     ...(r.report ? [{ label: 'Open the report', href: `/media/${id}/${r.report}`, onSelect: () => undefined }] : []),
     ...(r.live ? [] : [{ label: 'Delete run…', tone: 'bad' as const, onSelect: () => setDeleting(true) }]),
@@ -329,9 +319,9 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
       )}
 
       <p className="text-[17px]">
-        {judged.length ? <><b>{judged.filter((e) => e.success).length} of {count(judged.length, TERM.attempt)}</b> worked</>
+        {r.stats?.attempts ? <><b>{r.stats.successes} of {count(r.stats.attempts, TERM.attempt)}</b> worked</>
           : <span className="text-dim">No attempt in this run could be judged.</span>}
-        {judged.length > 0 && reasonsOf(judged)[0] && <span className="text-dim"> · most failures: {reasonsOf(judged)[0].reason}</span>}
+        {r.stats?.top_reason && <span className="text-dim"> · most failures: {reasonLabel(r.stats.top_reason)}</span>}
       </p>
 
       <RunFacts r={r} onPage={(plugin) => setPage({ plugin, runId: id, episode: null })} />
@@ -354,6 +344,7 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
                   {!valid(e) && <p className="pl-5 text-[12px] text-faint">invalid: task not readable</p>}
                   {valid(e) && e.success == null && <LabelButtons runId={id} episode={e.episode} />}
                   {e.labeled_by === 'person' && <p className="pl-5 text-[12px] text-dim">marked by a person</p>}
+                  {e.disagreement && <p className="pl-5 text-[12px] text-warn" title={`the world says ${e.disagreement.world ? 'success' : 'failure'}, ${e.disagreement.by} sees ${e.disagreement.vision ? 'success' : 'failure'}; the world's answer stands`}>physics ≠ vision</p>}
                   {valid(e) && e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{reasonLabel(e.reason)}{atOf(e) != null && ` at ${atOf(e)!.toFixed(1)} s`}</p>}
                 </button>
               </li>
@@ -375,7 +366,7 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
 /** What the run cost and how its helpers did; each plugin's say about it, with its page one click away. */
 function RunFacts({ r, onPage }: { r: RunInfo; onPage: (plugin: string) => void }) {
   const eps = r.episodes ?? []
-  const lat = latencyMs(eps)
+  const lat = r.stats?.mean_latency_ms ?? null  // dreamkit.stats
   const facts: [string, ReactNode][] = [
     ['Policy', r.mock ? 'mock (scripted failures)' : r.model || 'unknown'],
     ['Cost', costText(r)],

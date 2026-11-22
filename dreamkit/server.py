@@ -106,6 +106,11 @@ def _annotate(run: dict[str, Any]) -> None:
         run["seconds"] = max([float(e.get("duration_s") or 0) for e in episodes] + [0.0])
     for e in episodes:
         e.setdefault("duration_s", 0.0)
+        if e.get("cost_usd") is None:  # older runs: the core's formula on their recorded calls (dreamkit.cost)
+            from . import cost as cost_mod
+
+            e["cost_usd"] = round(cost_mod.usd(int(e.get("requests") or 0),
+                                               cost_mod.price_per_hour(run.get("model"), bool(run.get("mock")))), 4)
         e.setdefault("videos", [])
         e.setdefault("requests", 0)
         e.setdefault("scene", 0)
@@ -113,6 +118,9 @@ def _annotate(run: dict[str, Any]) -> None:
         if "task_readable" not in e:
             obj, target = parse(str(e.get("task") or run.get("task") or ""))
             e["task_readable"] = bool(obj and target)
+    from . import stats
+
+    run["stats"] = stats.summary(episodes)  # the numbers every screen shows, from one place
 
 
 class AppsHost:
@@ -466,6 +474,21 @@ def create_app(config_path: str | Path) -> FastAPI:
             _annotate(r)
         return {"runs": runs}
 
+    @app.get("/api/stats")
+    def get_stats(kind: str = "all"):
+        """dreamkit.stats over the attempts of the runs of one kind (dream | scripted | all): History's top card.
+        `real` is the same over the runs Dream-1 drove, where money was spent, whichever kind is shown."""
+        from . import stats
+
+        runs = storage.list_runs(runs_root())
+        for r in runs:
+            _annotate(r)
+        chosen = [r for r in runs if kind == "all" or r.get("kind") == kind]
+        real = [r for r in runs if r.get("kind") == "dream"]
+        eps = lambda rs: [e for r in rs for e in r.get("episodes") or []]  # noqa: E731
+        return {"kind": kind, "runs": len(chosen), "empty_runs": sum(1 for r in chosen if not r.get("episodes")),
+                **stats.summary(eps(chosen)), "real": stats.summary(eps(real))}
+
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str):
         folder = run_folder(run_id)
@@ -506,7 +529,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         ep = next((e for e in (info or {}).get("episodes", []) if e.get("episode") == episode), None)
         if ep is None:
             raise HTTPException(404, "no such attempt")
-        ep["success"], ep["labeled_by"] = body.success, "person"
+        ep["success"], ep["labeled_by"], ep["judged_by"] = body.success, "person", "person"  # a person decides last
         if body.success:
             ep["reason"] = None
         elif not ep.get("reason"):

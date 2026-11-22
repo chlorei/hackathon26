@@ -535,8 +535,18 @@ class FailureMonitor(Plugin):
         if ctx.result.get("success") is True:
             return
         d = self.diagnose(ctx)
+        evidence = self._evidence(ctx)
+        if d is None and evidence.get("empty"):  # robot mode: only the gripper saw it; the verdict is still this one
+            first = evidence["empty"][0]
+            d = {"reason": "grasped_air", "at": first["t_s"], "message": "grasped air (the fingers closed on nothing)",
+                 "details": {"source": "robot", "side": first.get("side")},
+                 "candidates": [{"reason": "grasped_air", "at_s": first["t_s"]}]}
         if d is None:  # robot mode, nothing wrong seen: the outcome stays unknown (labelled in History)
             return
+        matching = {"grasped_air": "empty", "dropped": "loose"}.get(d["reason"])
+        if evidence:  # §7: other plugins' signals back the one verdict; they never add a second one
+            d["details"]["evidence"] = [{"by": "gripper-check", **e} for kind, es in evidence.items() for e in es
+                                        if matching is None or kind == matching] or None
         d["details"].setdefault("source", self.source)
         if ctx.result.get("reason") in ("stopped", "model_error", "error", "camera_failure") and d["reason"] == "timeout":
             return  # cut short by something else; that stays the reason
@@ -546,6 +556,14 @@ class FailureMonitor(Plugin):
                           candidates=d["candidates"])
         ctx.emit("error", f"{d['message']} at {d['at']:.1f} s", reason=d["reason"], at_s=float(d["at"]),
                  source=d["details"]["source"])
+
+    @staticmethod
+    def _evidence(ctx: PluginContext) -> dict[str, list[dict[str, Any]]]:
+        """gripper-check's live signals of this attempt, by kind (empty: closed on nothing, loose: grip loosening)."""
+        out: dict[str, list[dict[str, Any]]] = {}
+        for e in (ctx.result.get("gripper-check") or {}).get("signals") or []:
+            out.setdefault(str(e.get("kind")), []).append(e)
+        return out
 
     def _save_trace(self, ctx: PluginContext) -> None:
         every = self.params.trace_every

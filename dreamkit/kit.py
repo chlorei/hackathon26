@@ -181,6 +181,14 @@ class Kit:
         """Seconds into the current attempt (steps x 50 ms)."""
         return self.ctx.t
 
+    def _cost(self) -> None:
+        """ctx.cost: what the model has cost so far, the one place a dollar is computed (dreamkit.cost)."""
+        price = self._price()
+        self.ctx.cost = {"price_per_hour": price, "run_calls": self._run_calls, "attempt_calls": self._requests,
+                         "run_usd": round(cost.usd(self._run_calls, price), 6),
+                         "attempt_usd": round(cost.usd(self._requests, price), 6),
+                         "dream_price_per_hour": cost.price_per_hour("dream-1", False, self.config.prices)}
+
     def _price(self) -> float:
         """Dollars per robot-hour of this run's model (dreamkit.cost); 0 for a mock."""
         return cost.price_per_hour(self.ctx.model, self.info["mock"], self.config.prices)
@@ -244,6 +252,7 @@ class Kit:
             reply = self.client.get_action(**kwargs)
             self._requests += 1
             self._run_calls += 1
+            self._cost()
             ctx._telemetry["spent_usd"] = round(cost.usd(self._run_calls, self._price()), 4)  # Live: money as it goes
             ctx.timing = getattr(self.client, "last_timing", None)
             ctx.store.pop("overridden_by", None)
@@ -410,6 +419,7 @@ class Kit:
         self._next_is_retry = False
         self._episode_started = time.time()
         self._requests = 0
+        self._cost()  # a new attempt: its own calls start at zero
         self.emitter.emit("episode_start", episode=ctx.episode, scene=ctx.scene, attempt=ctx.attempt, task=ctx.task,
                           **_plain(info))
         if self.recorder is not None:
@@ -453,6 +463,7 @@ class Kit:
         self.deferred.flush(heartbeat=lambda: self._beat(force=True))  # videos, traces, datasets, the recap clip
         # and plugins' model calls are done before the attempt is saved; the heartbeat keeps Live connected meanwhile
         r = ctx.result
+        self._judge_success(ctx)  # world -> vision -> a person (PLUGIN_STANDARD.md §7b)
         if r.get("success") is not True and not r.get("reason"):  # no failure-monitor: the first live verdict, if any
             first = (ctx.store.get("verdicts") or [None])[0]
             r["success"] = False if first or r.get("success") is False else r.get("success")
@@ -486,6 +497,35 @@ class Kit:
                           duration_s=ctx.t, result=ctx.episodes[-1])
         self._save()
         self._beat(force=True)
+
+    def _judge_success(self, ctx: Any) -> None:
+        """Who decides success, in this order: the world (success-check, physics) -> a vision judge (a plugin result
+        with judge "vision", e.g. monitor-stats) -> a person (✓/✗ in History, or client.label()).
+        When physics and vision disagree, the world's answer stands; the disagreement is a warning and a mark."""
+        r = ctx.result
+        if r.get("labeled_by"):
+            r["judged_by"] = r["labeled_by"]
+            return
+        vision = next(((name, v) for name, v in r.items() if isinstance(v, dict) and v.get("judge") == "vision"
+                       and isinstance(v.get("success"), bool)), None)
+        if r.get("success") is not None and ctx.world.available:
+            r["judged_by"] = "world"
+            if vision and bool(r["success"]) != vision[1]["success"]:
+                said = lambda ok: "success" if ok else "failure"  # noqa: E731
+                r["disagreement"] = {"world": bool(r["success"]), "vision": vision[1]["success"], "by": vision[0]}
+                ctx.event("dreamkit", "warn", f"physics says {said(r['success'])}, {vision[0]} sees "
+                          f"{said(vision[1]['success'])}: the world's answer stands", kind="disagreement")
+                ctx._ui.setdefault("dreamkit", {}).setdefault("marks", []).append(
+                    {"t_s": round(ctx.t, 2), "label": "physics ≠ vision", "level": "warn"})
+        elif r.get("success") is None and vision:
+            name, v = vision
+            r["success"], r["judged_by"] = v["success"], "vision"
+            if not v["success"] and not r.get("reason"):
+                code = v.get("reason_code")
+                r["reason"] = code if code and reasons.is_reason(code) else "judged_failed"
+                r["message"] = r.get("message") or v.get("reason")
+        elif r.get("success") is not None:
+            r["judged_by"] = "loop"  # client.label() from the loop, or a plugin without a world
 
     def _deferred_error(self, plugin: str, error: Exception) -> None:
         stats = self.manager.stats.get(plugin)

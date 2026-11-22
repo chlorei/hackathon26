@@ -220,22 +220,28 @@ def test_a_dataset_can_be_trained_again(tmp_path, monkeypatch):
 
 
 def test_retrain_uploads_under_a_new_name_and_keeps_the_old_model(tmp_path, monkeypatch):
+    """The Data tab trains through dreamkit.datasets.train: the one fine-tune path, recorded in dataset.json."""
+    from dreamkit import datasets
+
     from dreamgym import finetune
 
     folder = tmp_path / "fruit"
-    finetune.state_dir(folder).joinpath("finetune.json").write_text(
-        json.dumps({"stage": "done", "job_id": "j1", "model": "m1", "dataset_name": "fruit"}))
+    datasets.update(folder, name="fruit", source="gym", upload={"dataset_name": "fruit"},
+                    finetune={"stage": "done", "job_id": "j1", "model": "m1"})
     uploaded = []
     client = types.SimpleNamespace(
         get_embodiments=lambda: [types.SimpleNamespace(name="me/" + finetune.EMBODIMENT)],
         upload_dataset=lambda path, name, emb: uploaded.append(name) or types.SimpleNamespace(id="d2", status="new", name=name),
         get_dataset_status=lambda i: types.SimpleNamespace(status="processed"),
         finetune=lambda name, suffix, steps=None: {"id": "j2"})
-    monkeypatch.setattr(finetune, "_client", lambda: client)
-    monkeypatch.setattr(finetune, "validate", lambda d: {"ok": True, "episodes": 1, "frames": 1, "fps": 10})
+    monkeypatch.setattr(datasets, "_client", lambda: client)
+    monkeypatch.setattr(datasets, "check", lambda root, config=None: {"ok": True, "episodes": 1, "frames": 1})
     record = finetune.start(folder, log=lambda *a: None)
     assert uploaded[0].startswith("fruit-") and record["job_id"] == "j2"
-    assert record["previous"] == [{"model": "m1", "job_id": "j1", "dataset_name": "fruit", "started": None}]
+    assert record["previous"][0]["model"] == "m1" and record["previous"][0]["job_id"] == "j1"
+    rec = datasets.record(folder)
+    assert rec["upload"]["dataset_id"] == "d2" and rec["finetune"]["stage"] == "training"
+    assert json.loads((folder / ".dreamgym" / "finetune.json").read_text())["job_id"] == "j2"  # the page's copy
 
 
 def test_custom_tasks_typed_in_the_data_tab(tmp_path, monkeypatch):

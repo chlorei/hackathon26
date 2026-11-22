@@ -73,7 +73,7 @@ def test_judges_a_failed_attempt_with_reason_code(model):
     v = result.result["monitor-stats"]
     assert v["success"] is False and v["reason"] == "dropped the apple while carrying it"
     assert v["reason_code"] == "dropped"
-    ev = [e for e in result.events.of("monitor-stats") if e["level"] == "error"]
+    ev = [e for e in result.events.of("monitor-stats") if e["level"] == "warn"]  # a warning: the core decides success
     assert ev and ev[0]["message"].startswith("camera verdict: dropped") and ev[0]["data"]["reason"] == "dropped"
     assert not result.errors("monitor-stats")
     assert result.budget_ms("monitor-stats") < 1.0
@@ -107,7 +107,7 @@ def test_a_try_cut_short_by_recovery_gets_its_own_verdict(model):
     v = result.result["monitor-stats"]
     assert v["success"] is True and len(v["tries"]) == len(calls) - 1
     assert v["tries"][0]["try"] == 1 and v["tries"][0]["reason_code"] == "dropped"
-    ev = [e for e in result.events.of("monitor-stats") if e["level"] == "error"]
+    ev = [e for e in result.events.of("monitor-stats") if e["level"] == "warn"]  # a warning: the core decides success
     assert ev and ev[0]["message"].startswith("camera verdict: dropped") and "try 1" in ev[0]["message"]
     assert ev[0]["data"]["at_s"] is not None
     rows = json.loads((result.run_dir / "monitor-stats" / "attempts.json").read_text())

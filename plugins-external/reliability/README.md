@@ -24,7 +24,7 @@ plugins:
   - success-check
   - failure-monitor
   - reliability                                   # this run alone
-  # - reliability: {baseline_run: 20261121-174122-0001, price_per_hour: 3}   # and compared with an earlier run
+  # - reliability: {baseline_run: 20261121-174122-0001}   # and compared with an earlier run
 ```
 
 ## What it shows
@@ -50,8 +50,6 @@ Example event:
 | param | default | unit | what |
 |---|---|---|---|
 | `confidence` | `0.95` |  | Confidence level of the success-rate interval |
-| `price_per_hour` | `3.0` |  | Dollars per robot-hour of the model (Dream-1 3, flash 2); 0 for a mock run |
-| `calls_per_hour` | `2250` |  | Model calls billed as one robot-hour (1.6 s of actions each) |
 | `baseline_run` | `` |  | Run id or folder to compare with scene by scene; empty for none |
 | `pair_on` | `first_attempt` | first_attempt / any_attempt | Which outcome of a scene to compare |
 | `significance` | `0.05` |  | p-value below which a difference counts as real |
