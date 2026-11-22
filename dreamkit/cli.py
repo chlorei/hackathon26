@@ -219,6 +219,35 @@ def cmd_publish(args) -> int:
     return _print(out.splitlines(), passed)
 
 
+INIT_YAML = """\
+# dreamkit.yaml: which plugins run around Dream-1, and their settings. What to run (task, attempts, model)
+# is your loop's business. Change a plugin's settings on the panel's Plugins page (dreamkit ui) or here.
+sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator, relative to this file
+runs_dir: runs                                             # one folder per run; the panel reads it
+prices: {dream-1: 3.0, flash: 2.0}                         # dollars per robot-hour of the model (Live, History)
+plugins:
+  - success-check      # was the task done: the object rests in the target, the gripper let go
+  - failure-monitor    # why an attempt failed, and at which second; its verdicts drive recovery
+  - camera-check       # a black, uniform or frozen camera, before the model is asked again
+  - recovery           # the one control plugin: takes over a failing attempt (arms home, ask again)
+  - reliability        # success rate with its confidence interval, the cost of one success
+  - monitor-stats      # a vision model judges each attempt from the camera (GEMINI_API_KEY in .env)
+"""
+
+
+def cmd_init(args) -> int:
+    """A dreamkit.yaml with a good default set of plugins; an existing one is never overwritten."""
+    path = Path(args.path)
+    if path.exists():
+        print(f"{path} already exists: left as it is (edit it, or use the panel's Plugins page)")
+        return 1
+    path.write_text(INIT_YAML)
+    print(f"wrote {path}: success-check, failure-monitor, camera-check, recovery, reliability, monitor-stats")
+    print("next: client = dreamkit.wrap(dream.DreamClient()) in your loop, and dreamkit ui to watch it")
+    print("reliability and monitor-stats are add-ons: dreamkit install reliability monitor-stats (or switch them off)")
+    return 0
+
+
 def cmd_new(args) -> int:
     from .template import scaffold
 
@@ -344,7 +373,7 @@ def cmd_harvest(args) -> int:
     return 1
 
 
-_BUILTIN_COMMANDS = {"ui", "sim", "run", "list", "search", "check", "test", "bench", "install", "publish", "new",
+_BUILTIN_COMMANDS = {"ui", "init", "sim", "run", "list", "search", "check", "test", "bench", "install", "publish", "new",
                      "record", "review", "accuracy", "harvest"}
 
 
@@ -416,6 +445,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("publish", help="check + test + bench, then the registry.yaml entry")
     p.add_argument("path", nargs="?", default=".")
     p.set_defaults(func=cmd_publish)
+    p = sub.add_parser("init", help="write a dreamkit.yaml with the default plugins (never overwrites one)")
+    p.add_argument("path", nargs="?", default="dreamkit.yaml")
+    p.set_defaults(func=cmd_init)
     p = sub.add_parser("new", help="scaffold a plugin package that already passes the standard")
     p.add_argument("name")
     p.add_argument("--kind", choices=["observe", "modify", "control"], default="observe")

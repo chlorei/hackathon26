@@ -50,6 +50,31 @@ keeps the history with videos, recaps and harvested datasets.
 > Its numbers (failure rates, "recovery 20% → 100%") say that the *mechanism* works, nothing about Dream-1. Mock runs
 > carry a **mock: scripted failures** badge in the panel and the report. Real numbers come from runs without `--mock`.
 
+## Quickstart
+
+See it first: `./demo.sh` opens the panel; on **Live**, **Try demo** runs a free simulated arm that drops the apple
+on purpose, so you watch the plugins notice it and recovery step in. Then, for your own robot, the same three steps
+as on that page:
+
+1. **Install dreamkit and make a config**
+   ```bash
+   pip install dreamkit && dreamkit init      # dreamkit.yaml: success-check, failure-monitor, camera-check,
+                                              # recovery, reliability, monitor-stats (an existing one is kept)
+   ```
+2. **Wrap your Dream-1 client: one line**
+   ```python
+   import dream, dreamkit
+   client = dreamkit.wrap(dream.DreamClient())          # the one line
+   with client.episode("put apple into the bowl", env=env):
+       reply = client.get_action()                       # plugins run around the model
+       env.step(left, right)                             # each row of the reply
+       client.step(env, command=(left, right))           # robot: state=... instead of env
+   ```
+3. **Run your loop**: `python my_robot.py`, and `dreamkit ui` (Live comes alive with it).
+
+Keys go in `.env` next to `dreamkit.yaml`: `DREAM_API_KEY` for Dream-1, `GEMINI_API_KEY` for monitor-stats and the
+Create tab.
+
 ## On a real robot
 
 dreamkit does not need the simulator. Give `step()` what your robot reports instead of an env:
