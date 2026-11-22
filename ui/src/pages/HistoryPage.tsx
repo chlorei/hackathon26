@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
@@ -45,18 +45,25 @@ const field = (e: EpisodeResult, key: string) => (e as unknown as Record<string,
 const isReal = (r: RunInfo) => r.kind === 'dream' && !r.mock
 const costText = (r: RunInfo) => (!isReal(r) ? 'free' : r.cost_usd == null ? DASH : `$${r.cost_usd.toFixed(2)}`)
 /** What a run's camera judge (monitor-stats) did: off, judged (and agreed), or not judged and why. */
-function judgeText(r: RunInfo): string {
-  if (!(r.plugins ?? []).includes('monitor-stats')) return 'off in this run'
+const GO_PLUGINS = (name: string) => <a href={`#/plugins/${name}`} className="text-signal hover:underline">switch it on in Plugins</a>
+/** A failure of the camera judge, and what to do about it. */
+function judgeHint(why: string): string {
+  if (/quota|429|exhausted/i.test(why)) return 'the Gemini quota ran out: it resets tomorrow, or add ANTHROPIC_API_KEY to .env'
+  if (/GEMINI_API_KEY|api key/i.test(why)) return 'no model key: add GEMINI_API_KEY to .env'
+  return why
+}
+function judgeText(r: RunInfo): ReactNode {
+  if (!(r.plugins ?? []).includes('monitor-stats')) return <>off in this run · {GO_PLUGINS('monitor-stats')}</>
   const eps = (r.episodes ?? []).filter(valid)
   const judged = eps.filter((e) => typeof field(e, 'monitor-stats')?.success === 'boolean' && typeof e.success === 'boolean')
   const agree = judged.filter((e) => field(e, 'monitor-stats')!.success === e.success).length
   const why = [...new Set(eps.map((e) => field(e, 'monitor-stats')?.error as string | undefined).filter(Boolean))]
   const parts = [judged.length ? `${agree} of ${judged.length} agree with success-check` : '']
-  if (why.length) parts.push(`${eps.length - judged.length} not judged: ${why.join('; ')}`)
+  if (why.length) parts.push(`${eps.length - judged.length} not judged: ${[...new Set(why.map((w) => judgeHint(w ?? "")))].join('; ')}`)
   return parts.filter(Boolean).join(' · ') || 'no verdict recorded'
 }
-function savesText(r: RunInfo): string {
-  if (!(r.plugins ?? []).includes('recovery')) return 'off in this run'
+function savesText(r: RunInfo): ReactNode {
+  if (!(r.plugins ?? []).includes('recovery')) return <>off in this run · {GO_PLUGINS('recovery')}</>
   const helped = (r.episodes ?? []).filter((e) => recoveriesOf(e) > 0)
   return helped.length ? `${helped.filter((e) => e.success).length} of ${helped.length} attempts it stepped in` : 'never needed'
 }
@@ -369,7 +376,7 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
 function RunFacts({ r, onPage }: { r: RunInfo; onPage: (plugin: string) => void }) {
   const eps = r.episodes ?? []
   const lat = latencyMs(eps)
-  const facts: [string, string][] = [
+  const facts: [string, ReactNode][] = [
     ['Policy', r.mock ? 'mock (scripted failures)' : r.model || 'unknown'],
     ['Cost', costText(r)],
     ['Avg model latency', lat == null ? (r.mock ? 'mock: no model' : DASH) : ms(lat)],
@@ -380,7 +387,7 @@ function RunFacts({ r, onPage }: { r: RunInfo; onPage: (plugin: string) => void 
   const says = (r.plugins ?? []).map((name) => {
     const badges = [...new Set(eps.flatMap((e) => ((e.ui?.[name]?.badges ?? []) as { text: string }[]).map((b) => b.text)))]
     const verdicts = eps.flatMap((e) => (((e as unknown as { verdicts?: { by?: string; reason: string }[] }).verdicts) ?? []).filter((v) => v.by === name))
-    const text = [verdicts.length ? `${count(verdicts.length, 'verdict')}: ${[...new Set(verdicts.map((v) => reasonLabel(v.reason)))].join(', ')}` : '', badges.slice(0, 3).join(' · ')].filter(Boolean).join(' — ')
+    const text = [verdicts.length ? `called ${count(verdicts.length, 'failure')}: ${[...new Set(verdicts.map((v) => reasonLabel(v.reason)))].join(', ')}` : '', badges.slice(0, 3).join(' · ')].filter(Boolean).join(' — ')
     return { name, text }
   })
   return (

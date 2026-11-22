@@ -104,7 +104,13 @@ export default function PluginsPage({ focus }: { focus?: string | null }) {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-[26px] font-bold tracking-[-0.015em]">Plugins</h1>
-            <p className="mt-1 text-dim">{on} of {list.length} on. Changes apply the next time your loop starts.</p>
+            <p className="mt-1 text-dim">{(() => {
+              // the one-line answer: what the plugins that are on do for the run
+              const has = (n: string) => list.some((p) => p.name === n && p.enabled)
+              const does = [has('failure-monitor') || has('success-check') ? 'watch every attempt' : '', has('recovery') ? 'rescue failing ones' : '',
+                has('harvester') || has('fine-tune') ? 'keep good ones for training' : ''].filter(Boolean)
+              return `${on} of ${list.length} on${does.length ? `: they ${does.join(', ')}` : ''}. Changes apply the next time your loop starts.`
+            })()}</p>
           </div>
           <a href="#/plugins/create" className="inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-3.5 py-1.5 text-[13px] font-medium hover:bg-raised">
             <Sparkles className="h-4 w-4" strokeWidth={1.75} /> Create with AI
@@ -173,8 +179,8 @@ function StatusLine({ plugin, className }: { plugin: PluginInfo; className?: str
   const text = !plugin.enabled ? 'off'
     : plugin.refused || s?.disabled ? 'not running'
     : s?.errors ? count(s.errors, 'error')
-    : s ? `${s.ms_per_step.toFixed(2)} ms/step` : 'no run yet'
-  const why = plugin.refused ?? s?.disabled ?? s?.last_error ?? (s ? 'healthy in the last run' : undefined)
+    : s ? 'working' : 'no run yet'
+  const why = plugin.refused ?? s?.disabled ?? s?.last_error ?? (s ? `healthy in the last run: ${s.ms_per_step.toFixed(2)} ms a step of the 1 ms budget` : 'it runs the next time your loop starts')
   return (
     <div className={clsx('flex items-center gap-2 text-[13px] tabular-nums', className)} title={why}>
       <StatusDot tone={tone} />
