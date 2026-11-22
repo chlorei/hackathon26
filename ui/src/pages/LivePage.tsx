@@ -35,7 +35,7 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
     if (id && id !== runId) setRunId(id) // a newer run took over
   }, [live.data?.id, runId])
 
-  const [showCams, setShowCams] = useState(() => localStorage.getItem('dk-cams') === '1')
+  const [showCams, setShowCams] = useState(() => localStorage.getItem('dk-cams') !== '0')  // the robot is what people watch: on unless hidden
   const stream = useRunStream(runId, showCams)
   const running = Boolean(live.data?.id) && live.data?.id === runId
   const current = stream.current
@@ -54,6 +54,15 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0 space-y-4">
         <NowCard events={stream.events} episodes={stream.episodes} current={current} running={running} live={stream.live} />
+        <Panel>
+          <PanelTitle right={<Button variant="quiet" onClick={toggleCams}>{showCams ? 'Hide cameras' : 'Show cameras'}</Button>}>
+            Cameras
+          </PanelTitle>
+          {showCams ? <div className="px-4 pb-4"><Cameras live={stream.live} running={running} /></div> : (
+            <p className="px-5 pb-4 text-dim">Hidden: you watch the arm itself (the robot, or the simulator window). Open them to check
+              what the model sees; the loop renders frames for the panel only while they are open.</p>
+          )}
+        </Panel>
         <Panel>
           <PanelTitle right={current && <LiveClock live={stream.live} />}>
             {current ? `Attempt ${current.episode}, scene ${current.scene + 1}${current.attempt > 1 ? `, retry ${current.attempt - 1}` : ''}` : running ? 'Between attempts' : 'This run has ended'}
@@ -83,15 +92,6 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
           </div>
         </Panel>
         <Attempts episodes={stream.episodes} current={current} onOpen={(ep) => onOpenRun(runId, ep)} />
-        <Panel>
-          <PanelTitle right={<Button variant="quiet" onClick={toggleCams}>{showCams ? 'Hide cameras' : 'Show cameras'}</Button>}>
-            Cameras
-          </PanelTitle>
-          {showCams ? <div className="px-4 pb-4"><Cameras live={stream.live} running={running} /></div> : (
-            <p className="px-5 pb-4 text-dim">Hidden: you watch the arm itself (the robot, or the simulator window). Open them to check
-              what the model sees; the loop renders frames for the panel only while they are open.</p>
-          )}
-        </Panel>
       </div>
 
       <div className="space-y-4 xl:sticky xl:top-[68px] xl:self-start">
@@ -173,7 +173,17 @@ function NowCard({ events, episodes, current, running, live }: {
     : tone === 'recover' ? recovering!.message
     : verdict ? verdict.message.replace(/^verdict: /, '')
     : last ? last.message : 'Running, nothing wrong so far'
+  // the moment it goes wrong, said big for a few seconds: what failed, when, and what recovery does about it
+  const fresh = verdict && current && Date.now() / 1000 - (verdict.ts ?? 0) < 8
+  const fix = fresh ? [...mine].find((e) => e.plugin === 'recovery' && e.data?.action && (tOf(e) ?? 0) >= (tOf(verdict) ?? 0)) : undefined
   return (
+    <>
+    {fresh && (
+      <div role="alert" className="flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl border border-bad/50 bg-bad-soft px-6 py-3.5">
+        <span className="text-[20px] font-semibold text-bad">Attempt {current!.episode}: {verdict!.message.replace(/^verdict: /, '')}</span>
+        {fix && <span className="text-[16px] text-signal">→ recovery: {fix.message.replace(/^[^:]+: /, '')}</span>}
+      </div>
+    )}
     <Panel className={clsx('px-6 py-5', tone === 'bad' && 'border-bad/50', tone === 'recover' && 'border-signal/50')}>
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <span className="text-[14px] font-semibold text-dim">
@@ -192,6 +202,7 @@ function NowCard({ events, episodes, current, running, live }: {
         </p>
       )}
     </Panel>
+    </>
   )
 }
 

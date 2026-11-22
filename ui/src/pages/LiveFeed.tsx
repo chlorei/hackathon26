@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { tOf, type EpisodeResult, type EventRecord } from '../api'
+import { recoveriesOf, tOf, type EpisodeResult, type EventRecord } from '../api'
 import { LEVEL_TONE, Panel, PanelTitle, PluginIcon } from '../ui'
 
 /** One line of the feed: a single event, or the same event repeated (collapsed, with a count and the mean). */
@@ -121,10 +121,11 @@ export default function Feed({ events, episodes, current, running, onWatch, page
                 <span className="text-[13px] font-semibold">{ep == null ? 'Run' : `Attempt ${ep}`}</span>
                 {r && <span className={clsx('text-[12px]', r.success ? 'text-ok' : r.success === false ? 'text-bad' : 'text-dim')}>{r.success ? '✓ success' : r.success === false ? `✗ ${(r.reason ?? 'failed').replace(/_/g, ' ')}` : 'unknown'}</span>}
                 {live && <span className="text-[12px] text-signal">running</span>}
-                {r && <span className="text-[12px] text-faint">{r.duration_s.toFixed(1)} s{typeof r.cost_usd === 'number' ? ` · $${r.cost_usd.toFixed(2)}` : ''}</span>}
+                {r && <span className="text-[12px] text-faint">{r.duration_s.toFixed(1)} s{typeof r.cost_usd === 'number' && r.cost_usd > 0 ? ` · $${r.cost_usd.toFixed(2)}` : ''}</span>}
+                {r && r.success && recoveriesOf(r) > 0 && <span className="text-[12px] text-signal">saved by recovery</span>}
                 <span className="ml-auto text-[11px] text-faint">{evs.length}</span>
               </button>
-              {pinned.length > 0 && (
+              {pinned.length > 0 && expanded && (
                 <div className="flex flex-wrap gap-1.5 px-4 pb-2 pl-9">
                   {pinned.map((e) => (
                     <button key={e.plugin} onClick={() => onPage(e.plugin, e.episode ?? null)} title={`${e.plugin}: ${e.message}`}
