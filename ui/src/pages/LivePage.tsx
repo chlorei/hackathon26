@@ -8,6 +8,8 @@ import { useLive, useRunStream, type LiveStore } from '../useRunStream'
 import Feed from './LiveFeed'
 import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginPageDrawer, Tag, type Mark, type PluginPage } from '../ui'
 
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+
 
 // The same API as README.md: five lines, the loop around them is yours.
 const SNIPPET = `import dream, dreamkit
@@ -353,7 +355,7 @@ function Attempts({ episodes, current, onOpen }: {
   const ok = episodes.filter((e) => e.success).length
   return (
     <Panel>
-      <PanelTitle right={<span className="text-[13px] text-dim">{ok} of {episodes.length} worked, {new Set(episodes.map((e) => e.scene)).size} scenes so far</span>}>
+      <PanelTitle right={<span className="text-[13px] text-dim">{ok} of {episodes.length} worked, {plural(new Set(episodes.map((e) => e.scene)).size, 'scene')} so far</span>}>
         Attempts
       </PanelTitle>
       <ul className="divide-y divide-line border-t border-line">

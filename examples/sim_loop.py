@@ -59,6 +59,8 @@ def main(argv: list[str] | None = None) -> int:
                         "world (positions, contacts); normally it gets what a real arm reports")
     parser.add_argument("--no-world", action="store_true", help=argparse.SUPPRESS)  # the default now; kept for old scripts
     parser.add_argument("--fake-rtt-ms", type=float, help="mock only: report this model round trip")
+    parser.add_argument("--without", action="append", default=[], metavar="PLUGIN",
+                        help="leave this plugin of the config out of this run (repeatable)")
     args = parser.parse_args(argv)
 
     if args.viewer and sys.platform == "darwin" and os.environ.get("DREAMKIT_UNDER_MJPYTHON") != "1":
@@ -97,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- the one line dreamkit asks for ----------------------------------------------------------------------
     overrides = {"light": True} if args.light else {}
+    if args.without:  # e.g. the panel's free demo: no plugin that calls an outside model
+        overrides["plugins"] = dk_config.dump_plugins([s for s in cfg.plugins if s.name not in args.without])
     if args.with_world:
         overrides["evaluation"] = True  # the evaluation tools (success-check, world-judge) may load and judge
     if args.fault_camera:

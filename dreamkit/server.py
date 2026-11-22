@@ -56,7 +56,10 @@ class DemoRequest(BaseModel):
 
 SIM_LOOP = Path(__file__).resolve().parent.parent / "examples" / "sim_loop.py"  # a source checkout has it
 DEMO_ARGS = {
-    "mock": ["--mock", "--episodes", "3", "--behaviors", "dropped,success,dropped"],
+    # the free demo: scripted arm in the simulator, judged by the simulator's world (so recovery can be seen to work),
+    # and no plugin that calls an outside model (no network, no credits, nothing to time out on camera)
+    "mock": ["--mock", "--episodes", "3", "--behaviors", "dropped,success,dropped", "--with-world",
+             "--without", "monitor-stats"],
     "dream": ["--episodes", "2", "--seconds", "30"],
 }
 
