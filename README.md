@@ -25,7 +25,7 @@ three attempts 107 s. Python 3.11–3.13 and [uv](https://docs.astral.sh/uv/) ne
 | Recording demonstrations for fine-tuning | **harvester** turns good attempts into LeRobot datasets that pass Dream Labs' `validate_dataset`; the **Data** tab records, checks, uploads and fine-tunes (`dreamkit datasets train`) |
 
 **Results** (7 real Dream-1 runs, 178 attempts — 33% success where the model worked — and 12 recorded scenarios): [docs/RESULTS.md](docs/RESULTS.md) ·
-**[Robustness](#robustness)** · **Video:** VIDEO_LINK · **Slides:** SLIDES_LINK
+**[Robustness](#robustness)** · **Video:** [videos](https://drive.google.com/drive/folders/1Tyy9TcRGSyALO_dw00nKWr6Cd13Twz2e?usp=share_link) · **Slides:** [slides](https://drive.google.com/file/d/1FrqWa2waPzraOg6Fz0TMMLulfFov3gCK/view?usp=sharing)
 
 ## How it fits
 
