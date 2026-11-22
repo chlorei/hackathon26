@@ -184,8 +184,8 @@ and **Prompt Tuner** (same seeds, McNemar's test), **Data & fine-tune** and **Te
 Tick **Recovery on vs off** to measure recovery itself: the same seeds without and with it, McNemar on the pairs.
 
 ```bash
-dreamkit install ./plugins-external/dreamgym     # check + tests, then pip; restart dreamkit ui -> tab "Gym"
-dreamkit gym arena --task banana_plate --policy scripted --n 10 --recovery-ab
+dreamkit install ./plugins-external/dreamgym     # check + tests, then pip; restart dreamkit ui -> tab "Data"
+dreamkit dreamgym arena --task banana_plate --policy scripted --n 10 --recovery-ab
 ```
 
 App plugins (a page, an API and commands of their own) are in [PLUGIN_STANDARD.md §13](docs/PLUGIN_STANDARD.md).

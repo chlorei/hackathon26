@@ -41,8 +41,8 @@ def dreamkit_config(tmp_path, monkeypatch):
 
 def test_app_meets_the_standard():
     assert check_app(app) == []
-    assert app.manifest.kind == "app" and app.title == "Gym" and "world" in app.manifest.needs
-    assert "gym" in app.aliases
+    assert app.manifest.kind == "app" and app.title == "Data" and "world" in app.manifest.needs
+    assert "dreamgym" in app.aliases and "data" in app.aliases
 
 
 def test_failure_labels_are_dreamkit_codes():
@@ -75,6 +75,10 @@ def test_api_under_the_panel(tmp_path):
     assert client.get("/apps/dreamgym/api/runs").json() == []
     bad = client.post("/apps/dreamgym/api/launch", json={"task": "no_such_task"})
     assert bad.status_code == 400 and "unknown task" in bad.json()["detail"]
+    assert client.get("/apps/dreamgym/api/datasets").json() == []
+    assert client.get("/apps/dreamgym/api/dataset/nothing_here").status_code == 404
+    bad = client.post("/apps/dreamgym/api/record", json={"name": "fruit", "mix": {}})
+    assert bad.status_code == 400 and "at least one task" in bad.json()["detail"]
 
 
 class HoldStill:

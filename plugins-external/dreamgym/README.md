@@ -1,31 +1,32 @@
 # DreamGym — a dreamkit app plugin
 
-A reliability gym for Dream-1 in Dream Labs' YAM MuJoCo simulator, as the **Gym** tab of dreamkit's panel
-(PLUGIN_STANDARD.md §13). DreamGym drives the simulator — many seeded episodes, a judge, statistics, datasets — but
-every episode goes **through `dreamkit.wrap`**: the loop plugins of `dreamkit.yaml` (failure-monitor, recovery,
-harvester, …) run inside Arena, Compare, Record and Teleop, and every run lands in History with a **Gym** badge.
+The **Data** tab of dreamkit's panel (PLUGIN_STANDARD.md §13): everything needed to fine-tune Dream-1 on your
+own demonstrations, and nothing else (live runs, History and the loop plugins are dreamkit's own tabs). Every
+episode still goes **through `dreamkit.wrap`**, so the loop plugins of `dreamkit.yaml` run while you record.
 
 ```bash
 dreamkit install ./plugins-external/dreamgym   # check + its tests, then pip install
-dreamkit ui                                     # restart the panel: tab "Gym"
+dreamkit ui                                     # restart the panel: tab "Data"
 ```
 
-| tab | what it does |
-|---|---|
-| **Runs → Arena** | N seeded episodes of a task with scene randomisation (object positions, yaw, lighting); success judged from the physics; success rate with a Wilson 95% interval, failure reasons in dreamkit's shared codes (`not_reached`, `released_off_target`, `still_held`, `fell_off_table`, …), time and cost per success, a GIF of every failure |
-| **Runs → Compare** | two or more variants (models × prompts) on **the same seeds**, McNemar's exact test: "B is better, and it is not luck" or "could be luck" |
-| **Runs → Prompt Tuner** | paraphrases of the task's prompt on the same seeds, ranked, the baseline first |
-| **Data & fine-tune** | scripted demos (an IK expert, free), **Harvester** (Dream-1's own successes), datasets with **Check** (`validate_dataset`), **Upload & train**, job status, **Compare vs base** when the model is ready |
-| **Teleop** | drive the arms from the keyboard in the browser (IK on the gripper), record demonstrations into a LeRobot v2.1 dataset |
+One dataset, four steps on one page:
 
-The same from the terminal (`dreamkit gym …` = `dreamgym …`):
+| step | what it does |
+|---|---|
+| **1 · Collect** | pick tasks and how many episodes of each; source: **scripted expert** (IK, free), **Dream-1** (its successes, uses credits) or **Teleop** (keyboard). Tasks take turns, prompts are paraphrased, objects and lighting randomised. Only successes are kept. Progress per task is live, Stop keeps what was saved |
+| **2 · Review** | episodes appear the moment they are saved: balance per task (aim ≥ 20 each), warnings, every episode with its source, seed and prompt, ▶ its three camera videos, remove the ones not to learn from (the dataset is renumbered and stays valid) |
+| **3 · Train** | Check (`validate_dataset`, local), then Upload & fine-tune (about $200, 7–8 h; asks first), job status, the model id |
+| **4 · Evaluate** | base Dream-1 vs the fine-tune on the same scenes for every task of the dataset, McNemar: "better, and not luck" or "could be luck" |
+
+The same from the terminal (`dreamkit dreamgym …` = `dreamgym …`):
 
 ```bash
-dreamkit gym arena --task banana_plate --policy scripted --n 10 --recovery-ab   # recovery off vs on, same seeds
+dreamkit dreamgym arena --task banana_plate --policy scripted --n 10 --recovery-ab   # recovery off vs on, same seeds
 dreamgym tasks
 dreamgym arena   --task banana_plate --policy dream-1 --n 30
 dreamgym compare --task apple_bowl --policy dream-1 --prompt "put apple into the bowl" --prompt "place the apple into the bowl"
 dreamgym record  --task banana_plate --n 30                       # scripted demos -> gym/data/banana_plate
+dreamgym record  --task banana_plate --mix banana_plate:30,apple_bowl:30,orange_bowl:30 --vary-prompts --out gym/data/fruit
 dreamgym finetune gym/data/banana_plate --validate-only           # then without the flag: upload + train; --status
 ```
 
@@ -43,7 +44,7 @@ scratch copy of the model data and send joint rows through `env.step` like any p
 
 **Code:** `core.py` (Task / Policy contracts) · `tasks.py` (pick-and-place tasks, prompt paraphrases) ·
 `policies/` (Dream-1, scripted IK expert) · `kit.py` (dreamkit.wrap around any policy) · `runner.py` (one episode through dreamkit) · `arena.py` / `compare.py` · `stats.py`
-(Wilson, McNemar, Fisher) · `lerobot_writer.py` · `finetune.py` · `web/` (router, page, teleop) · `app.py` (the app plugin).
+(Wilson, McNemar, Fisher) · `lerobot_writer.py` · `dataset.py` (balance, live progress, removing episodes) · `finetune.py` · `web/` (router, page, teleop) · `app.py` (the app plugin).
 
 Known limits: the scripted expert plans `banana_plate`, `apple_bowl` and `orange_bowl` (round fruit: each arm grips at the yaw its wrist reaches; carry and retreat over the bowl stay within ~0.14 m, the highest gripper-down pose the arm reaches there; if the nearer arm cannot reach every pose the other arm is used);
 recovery acts on Dream-1 and on the scripted expert (a new plan from where the arms are), not on Teleop; the success thresholds in `scene.py` come from the scene geometry; Teleop's key directions follow the

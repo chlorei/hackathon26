@@ -1,7 +1,7 @@
 [project]
 name = "dreamkit-dreamgym"
 version = "0.2.0"
-description = "DreamGym: a dreamkit app plugin — Arena, Compare, Prompt Tuner, datasets and Teleop for Dream-1 in the simulator"
+description = "DreamGym: the Data tab of dreamkit — collect, review and fine-tune on demonstrations, compare base vs fine-tune"
 requires-python = ">=3.11"
 dependencies = ["dreamkit>=0.2,<0.4", "numpy", "pillow>=10", "fastapi>=0.110"]
 
@@ -13,8 +13,8 @@ dreamgym = "dreamgym.cli:main"
 
 [tool.dreamkit]
 kind = "app"
-title = "Gym"
-icon = "Dumbbell"
+title = "Data"
+icon = "Database"
 needs = ["robot", "world"]
 
 [build-system]

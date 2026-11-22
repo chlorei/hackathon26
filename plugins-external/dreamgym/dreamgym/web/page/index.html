@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>DreamGym</title>
+<title>Data</title>
 <link rel="stylesheet" href="/theme/dreamkit-theme.css">
 <style>
 :root{
@@ -163,478 +163,385 @@ kbd{display:inline-block;min-width:24px;text-align:center;padding:1px 6px;border
 .btn.save{background:var(--ok);color:var(--panel);border-color:var(--ok)}
 .field.check{display:flex;align-items:center;gap:8px;font-weight:500;margin:6px 0}
 .focusnote{font-size:12.5px;color:var(--muted);margin-top:8px}
+/* --- Data tab --- */
+.dsitem{display:block;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;cursor:pointer}
+.dsitem:hover{border-color:var(--dk-faint)}
+.dsitem.sel{border-color:var(--ink);box-shadow:0 0 0 1px var(--ink)}
+.dsitem .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.dsitem .nm{font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsitem .sub{color:var(--muted);font-size:12.5px;margin-top:3px}
+.stepcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;margin-top:16px}
+.stephead{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.stephead .num{width:26px;height:26px;border-radius:50%;background:var(--ink);color:var(--panel);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:none}
+.stephead .num.off{background:var(--soft);color:var(--muted)}
+.stephead h2{margin:0;font-size:17px}
+.stephead .state{margin-left:auto;color:var(--muted);font-size:13px}
+.taskrows{display:grid;grid-template-columns:auto 1fr 110px;gap:8px 12px;align-items:center;margin-bottom:12px}
+.taskrows input[type=checkbox]{width:auto}
+.taskrows .tn{font-weight:600}
+.taskrows .tp{color:var(--muted);font-size:12.5px}
+.bal{display:grid;grid-template-columns:140px 1fr 150px;gap:10px;align-items:center;margin:6px 0}
+.bal .bar{height:16px;background:var(--soft);border-radius:5px;overflow:hidden;position:relative}
+.bal .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ok);opacity:.85}
+.bal .bar b{position:absolute;top:0;bottom:0;border-left:2px dashed var(--muted)}
+.bal .bar i.goal{background:var(--run);opacity:.35}
+.warn{background:var(--dk-warn-soft, var(--soft));color:var(--ink);border-left:3px solid var(--warn);padding:8px 12px;border-radius:6px;margin-top:8px;font-size:13px}
+.big3{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:14px}
+.big3 .v{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.big3 .l{color:var(--muted);font-size:12.5px}
+tr.new td{background:var(--ok-soft);transition:background 2s}
+td .play{border:0;background:var(--soft);border-radius:6px;cursor:pointer;padding:2px 8px}
+.check{display:flex;align-items:center;gap:10px;margin:8px 0}
+.vid{width:min(760px,94vw)}
+.vid video{width:100%;display:block;background:#000}
+.vid .bar2{display:flex;gap:6px;padding:10px 14px;align-items:center}
+.cmp{display:grid;grid-template-columns:150px 1fr;gap:10px 16px;align-items:center;padding:10px 0;border-bottom:1px solid var(--soft)}
+.cmp:last-child{border-bottom:0}
+.lock{color:var(--muted);font-size:13px}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand">Gym<span>Arena, Compare, datasets: every episode runs through dreamkit's plugins</span></div>
-  <nav class="tabsnav" id="nav">
-    <button data-view="runs" class="on">Runs</button>
-    <button data-view="data">Data &amp; fine-tune</button>
-    <button data-view="teleop">Teleop</button>
-  </nav>
+  <div class="brand">Data<span>Collect demonstrations, check them, fine-tune Dream-1 on them, prove it got better</span></div>
   <div class="spacer"></div>
-  <div class="spend" id="spend"></div>
-  <button class="btn primary" id="newBtn">New run</button>
+  <button class="btn primary" id="newDs">New dataset</button>
 </header>
-<main id="runsView">
-  <aside id="list"></aside>
+<main>
+  <aside id="dsList"></aside>
   <section class="detail" id="detail">
-    <div class="empty"><h2>No run selected</h2>Start one with <b>New run</b>, or pick a run on the left.</div>
+    <div class="empty"><h2>No dataset yet</h2>Press <b>New dataset</b>, pick tasks, and record. Episodes appear here as they are saved.</div>
   </section>
 </main>
 
-<section class="view hidden" id="dataView"><div class="pad">
-  <h1>Data &amp; fine-tune</h1>
-  <p class="lead">Make demonstrations three ways, check them, and send them to Dream-1 fine-tuning. Then compare the fine-tune with the base model in Runs. A job takes about 7–8 hours.</p>
-  <div class="cards3">
-    <div class="card"><h4>Scripted demos</h4><p class="grow">An IK expert that knows where things are does the task. Free and offline; only successful episodes are kept.</p>
-      <div class="row2"><div class="field"><label>Task</label><select class="taskSel" id="sTask"></select></div>
-      <div class="field"><label>Episodes to keep</label><input id="sN" type="number" value="30" min="1" max="500"></div></div>
-      <div class="field"><label>Dataset name</label><input id="sName" placeholder="auto: &lt;task&gt;_demos"></div>
-      <button class="btn primary" id="sGo">Record scripted demos</button></div>
-    <div class="card"><h4>Harvester</h4><p class="grow">Dream-1 does the task; its successful episodes become training data. Costs API credits; data the model can already produce.</p>
-      <div class="row2"><div class="field"><label>Task</label><select class="taskSel" id="hTask"></select></div>
-      <div class="field"><label>Successes to keep</label><input id="hN" type="number" value="10" min="1" max="500"></div></div>
-      <div class="row2"><div class="field"><label>Policy</label><input id="hPolicy" value="dream-1"></div>
-      <div class="field"><label>Dataset name</label><input id="hName" placeholder="auto: &lt;task&gt;_harvest"></div></div>
-      <button class="btn primary" id="hGo">Harvest successes</button><div class="hint" id="hEst" style="margin-top:6px"></div></div>
-    <div class="card"><h4>Teleop</h4><p class="grow">Drive the arms with the keyboard in the browser and record your own demonstrations, the way a teleoperator would on a real station.</p>
-      <button class="btn primary" id="tGoTab">Open Teleop</button></div>
-  </div>
-  <div class="error" id="dataErr"></div>
-  <h2 style="margin-top:30px;font-size:18px">Datasets</h2>
-  <div id="datasets"></div>
-</div></section>
+<dialog id="vidDlg" class="vid">
+  <video id="vid" controls autoplay muted playsinline></video>
+  <div class="bar2"><span id="vidTitle" class="hint" style="flex:1"></span>
+    <button class="btn sm" data-role="overhead">Overhead</button><button class="btn sm" data-role="wrist_l">Left wrist</button>
+    <button class="btn sm" data-role="wrist_r">Right wrist</button><button class="btn sm" id="vidClose">Close</button></div>
+</dialog>
 
-<section class="view hidden" id="teleopView"><div class="pad">
-  <h1>Teleop</h1>
-  <p class="lead">Keys move the gripper; IK turns that into joint angles. Record, do the task, Save. Episodes go into a LeRobot dataset in <b>Data &amp; fine-tune</b>.</p>
-  <div class="tele" style="margin-top:16px">
-    <div><div class="screen" id="screen"><img id="frame" alt=""><div class="off" id="screenOff">Pick a task and press Start session.<br>The first start loads the simulator (a few seconds).</div></div>
+<template id="teleopTpl">
+  <div class="tele" style="margin-top:6px">
+    <div><div class="screen" id="screen"><img id="frame" alt=""><div class="off" id="screenOff"></div></div>
       <div class="focusnote">Keys work while this page has focus: click the picture once if nothing moves.</div></div>
     <div>
-      <div class="card" style="margin-top:0">
-        <div class="field"><label>Task</label><select class="taskSel" id="tTask"></select></div>
-        <div class="field"><label>Dataset name</label><input id="tName" placeholder="auto: &lt;task&gt;_teleop"></div>
-        <div class="bigbtns"><button class="btn primary" id="tStart">Start session</button><button class="btn" id="tStop">Stop</button></div>
+      <div class="field"><label>Task</label><select class="taskSel" id="tTask"></select></div>
+      <div class="bigbtns"><button class="btn primary" id="tStart">Start session</button><button class="btn" id="tStop">Stop session</button></div>
+      <div class="kv" id="tStatus" style="margin-top:12px">No session.</div>
+      <div class="bigbtns" style="margin-top:10px">
+        <button class="btn rec" id="tRec">● Record</button><button class="btn save" id="tSave">Save</button>
+        <button class="btn" id="tDiscard">Discard</button><button class="btn" id="tReset">New scene</button>
+        <button class="btn" id="tArm">Switch arm (Tab)</button><button class="btn" id="tGrip">Gripper (Space)</button>
       </div>
-      <div class="card">
-        <div class="kv" id="tStatus">No session.</div>
-        <div class="bigbtns" style="margin-top:12px">
-          <button class="btn rec" id="tRec">● Record</button><button class="btn save" id="tSave">Save</button>
-          <button class="btn" id="tDiscard">Discard</button><button class="btn" id="tReset">New scene</button>
-          <button class="btn" id="tArm">Switch arm (Tab)</button><button class="btn" id="tGrip">Gripper (Space)</button>
-        </div>
-        <div class="kv" id="tMsg" style="margin-top:10px"></div>
-      </div>
-      <div class="card"><h3>Keys</h3><div class="keys">
+      <div class="kv" id="tMsg" style="margin-top:10px"></div>
+      <div class="keys" style="margin-top:12px">
         <span><kbd>W</kbd><kbd>S</kbd></span><span>away from / toward the robot</span>
         <span><kbd>A</kbd><kbd>D</kbd></span><span>left / right (top camera)</span>
         <span><kbd>R</kbd><kbd>F</kbd></span><span>up / down</span>
         <span><kbd>Q</kbd><kbd>E</kbd></span><span>turn the gripper</span>
         <span><kbd>Space</kbd></span><span>open / close the gripper</span>
-        <span><kbd>Tab</kbd></span><span>switch arm</span>
-        <span><kbd>Shift</kbd></span><span>move faster</span>
         <span><kbd>Enter</kbd></span><span>Record, then Save</span>
-      </div></div>
+      </div>
     </div>
   </div>
-</div></section>
-
-<dialog id="dlg">
-  <form class="form" id="form" method="dialog">
-    <h2>New run</h2>
-    <div class="seg" id="modeSeg">
-      <button type="button" data-mode="arena" class="on">Arena · one policy</button>
-      <button type="button" data-mode="compare">Compare · A vs B</button>
-      <button type="button" data-mode="tune">Prompt Tuner</button>
-    </div>
-    <div class="grid2">
-      <div class="field"><label>Task</label><select id="fTask"></select></div>
-      <div class="field"><label>Episodes per variant</label><input id="fN" type="number" min="1" max="500" value="10"></div>
-    </div>
-    <div class="field">
-      <label id="polLabel">Policy</label>
-      <textarea id="fPolicies" rows="2">dream-1</textarea>
-      <div class="hint">One per line: <code>dream-1</code>, <code>dream:&lt;model id&gt;</code> (flash, your fine-tune), <code>scripted</code> (free, offline)</div>
-    </div>
-    <div class="field">
-      <label>Prompts (optional)</label>
-      <textarea id="fPrompts" rows="2" placeholder="Leave empty for the task's own prompt. In Compare, each prompt is crossed with each policy."></textarea>
-    </div>
-    <div class="grid4">
-      <div class="field"><label>Seed</label><input id="fSeed" type="number" value="0"></div>
-      <div class="field"><label>Jitter, m</label><input id="fJitter" type="number" step="0.01" min="0" placeholder="0.03"></div>
-      <div class="field"><label>Lighting ±</label><input id="fLight" type="number" step="0.05" min="0" placeholder="0.15"></div>
-      <div class="field"><label>Max sim s</label><input id="fMax" type="number" min="5" value="60"></div>
-    </div>
-    <div class="field"><label>GIFs</label>
-      <select id="fGifs"><option value="failures">Failures only</option><option value="all">All episodes</option><option value="none">None</option></select>
-    </div>
-    <label class="field check" title="Each variant twice on the same seeds: dreamkit's recovery plugin off (the baseline), then on; McNemar says whether recovery helps or it is luck">
-      <input type="checkbox" id="fRecAB"> Recovery on vs off <span class="hint">(same seeds, McNemar)</span></label>
-    <div class="error" id="formErr"></div>
-    <div class="actions">
-      <div class="estimate hint" id="estimate"></div>
-      <div><button type="button" class="btn" id="cancelBtn">Cancel</button> <button type="submit" class="btn primary" id="goBtn">Start</button></div>
-    </div>
-  </form>
-</dialog>
+</template>
 
 <script>
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const pct = x => (x == null ? "–" : Math.round(x * 100) + "%");
 const money = x => (x == null ? "–" : "$" + (x < 1 ? x.toFixed(3) : x.toFixed(2)));
-const REASON_COLORS = {released_off_target:"var(--c1)", not_reached:"var(--c2)", still_held:"var(--c3)", timeout:"var(--c4)",
-  dropped:"var(--c7)", grasped_air:"var(--c8)", fell_off_table:"var(--c6)", model_error:"var(--c8)", camera_failure:"var(--c5)",
-  error:"var(--c5)",
-  // runs from before the shared codes (dreamkit.reasons LEGACY)
-  misplaced:"var(--c1)", untouched:"var(--c2)", not_settled:"var(--c4)", api_error:"var(--c8)", invalid_action:"var(--c5)", ik_error:"var(--c5)"};
-const color = r => REASON_COLORS[r] || "var(--c5)";
-let runs = [], selected = null, detail = null, galleryFilter = "failures", mode = "arena", tasks = [];
-
-// Every DreamGym episode is a dreamkit attempt: open its run in the panel's History (the parent page).
-function historyLinks(d) {
-  const runs = (d.dreamkit_runs || []).filter(r => r.id);
-  if (!runs.length) return "";
-  const open = id => `href="/#/history/${encodeURIComponent(id)}" target="_top"`;
-  return `<div class="hint" style="margin-top:6px">In History: ${runs.map(r =>
-    `<a ${open(r.id)}>${esc(runs.length > 1 ? r.label : "the dreamkit run")}</a>`).join(" · ")}</div>`;
-}
+const PER_EPISODE_USD = 60 / 2.4 / 2250 * 3; // a 60 s episode, one call per 2.4 s, $3 per robot-hour (2250 calls)
+const MIN_PER_TASK = 20;
+let tasks = [], list = [], sel = null, detail = null, source = "scripted", extraNames = [], chosen = new Set();
+const sig = {};
 
 async function api(path, body) {
   const res = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
-  const data = res.status === 204 ? null : await res.json();
+  const data = res.status === 204 ? null : await res.json().catch(() => null);
   if (!res.ok) throw new Error((data && (data.detail || data.error)) || res.statusText);
   return data;
 }
-
+const changed = (key, value) => { const s = JSON.stringify(value); if (sig[key] === s) return false; sig[key] = s; return true; };
+const lastLine = log => esc((log || "").trim().split("\n").slice(-1)[0] || "");
 function when(t) {
   if (typeof t !== "number") return "";
   const d = new Date(t * 1000);
   return d.toLocaleDateString([], {month:"short", day:"numeric"}) + " " + d.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
 }
 
+// ---- dataset list -------------------------------------------------------------------------------------------
 function renderList() {
-  const total = runs.reduce((a, r) => a + (r.cost_usd || 0), 0);
-  $("#spend").textContent = runs.length ? `Spent on API: ${money(total)}` : "";
-  if (!runs.length) { $("#list").innerHTML = '<div class="hint" style="padding:8px">No runs yet.</div>'; return; }
-  $("#list").innerHTML = runs.map(r => {
-    const s = r.summaries || [];
-    const best = [...s].sort((a, b) => b.success_rate - a.success_rate)[0];
-    const rates = r.mode === "tune" && best
-      ? `<span>baseline <b>${pct(s[0].success_rate)}</b></span><span>best <b>${pct(best.success_rate)}</b> <span class="hint">of ${s.length} prompts</span></span>`
-      : s.map(x => `<span title="${esc(x.policy)}"><b>${pct(x.success_rate)}</b> <span class="hint">${x.successes}/${x.episodes}</span></span>`).join("");
-    const label = r.mode === "compare" ? s.map(x => x.policy).join(" vs ") : (r.mode === "tune" ? "prompt tuner · " + (s[0]?.policy || "").split(" | ")[0] : (s[0]?.policy || ""));
-    const prog = r.status === "running" && r.total ? `<div class="mini"><i style="width:${Math.min(100, 100 * r.done / r.total)}%"></i></div>` : "";
-    return `<button class="run ${r.id === selected ? "sel" : ""}" data-id="${esc(r.id)}">
-      <div class="top"><span class="task">${esc(r.task)}</span><span class="pill ${esc(r.status)}">${esc(r.status)}</span></div>
-      <div class="sub"><span class="pill mode">${r.mode}</span> ${esc(label)}</div>
-      <div class="rates">${rates}</div>
-      <div class="sub">${when(r.created)} · ${money(r.cost_usd)}</div>${prog}</button>`;
+  const names = new Set(list.map(d => d.name));
+  const items = [...extraNames.filter(n => !names.has(n)).map(n => ({name: n, episodes: 0, minutes: 0, tasks: [], jobs: {}, fresh: true})), ...list];
+  if (!changed("list", [items, sel])) return;
+  if (!items.length) { $("#dsList").innerHTML = '<div class="hint" style="padding:8px">No datasets yet.</div>'; return; }
+  $("#dsList").innerHTML = items.map(d => {
+    const rec = d.jobs?.record?.running, ft = d.finetune?.stage;
+    const pill = rec ? '<span class="pill running">recording</span>' : (ft ? `<span class="pill done">${esc(ft)}</span>` : (d.fresh ? '<span class="pill done">new</span>' : ""));
+    return `<button class="dsitem ${d.name === sel ? "sel" : ""}" data-name="${esc(d.name)}">
+      <div class="top"><span class="nm">${esc(d.name)}</span>${pill}</div>
+      <div class="sub"><b>${d.episodes}</b> episodes · ${d.minutes} min</div></button>`;
   }).join("");
-  document.querySelectorAll(".run").forEach(b => b.onclick = () => select(b.dataset.id));
+  document.querySelectorAll(".dsitem").forEach(b => b.onclick = () => select(b.dataset.name));
 }
-
-function rateRow(s) {
-  const [lo, hi] = s.ci95;
-  return `<div class="rate-row"><div class="name" title="${esc(s.policy)}">${esc(s.policy)}</div>
-    <div class="track"><div class="fill" style="width:${s.success_rate * 100}%"></div>
-      <div class="ci" style="left:${lo * 100}%;width:${Math.max(0.5, (hi - lo) * 100)}%"></div></div>
-    <div class="num"><b>${pct(s.success_rate)}</b> ${s.successes}/${s.episodes}<span>95% CI ${pct(lo)}–${pct(hi)}</span></div></div>`;
+async function refreshList() {
+  try { list = await api("api/datasets"); renderList(); } catch (e) { console.warn(e); }
 }
-
-function verdict(p) {
-  const sig = p.p_value < 0.05, d = p.delta;
-  const cls = sig ? (d > 0 ? "sig" : "worse") : "nosig";
-  const text = sig ? (d > 0 ? "B is better, and it is not luck" : "B is worse, and it is not luck") : "No proven difference yet: could be luck";
-  return `<div class="verdict ${cls}"><div class="d">${d > 0 ? "+" : ""}${Math.round(d * 100)} pp</div>
-    <div class="t"><b>${esc(p.b)}</b> vs <b>${esc(p.a)}</b>: ${text}
-    <small>${pct(p.rate_b)} vs ${pct(p.rate_a)} on ${p.seeds} identical scenes · only B succeeded ${p.only_b_succeeded}, only A ${p.only_a_succeeded} · McNemar p = ${p.p_value}</small></div></div>`;
-}
-
-function seedsGrid(d) {
-  const all = new Set(); d.variants.forEach(v => v.episodes.forEach(e => all.add(e.seed)));
-  const seeds = [...all].sort((a, b) => a - b);
-  const rows = d.variants.map(v => {
-    const by = Object.fromEntries(v.episodes.map(e => [e.seed, e]));
-    const cells = seeds.map(s => {
-      const e = by[s];
-      if (!e) return `<div class="cell" title="seed ${s}: pending"></div>`;
-      const cls = e.success ? "ok" : (e.reason.endsWith("error") || e.reason === "invalid_action" ? "err" : "bad");
-      return `<div class="cell ${cls}" title="seed ${s}: ${esc(e.reason)}${e.success ? " in " + e.seconds_to_success + " s" : ""}"></div>`;
-    }).join("");
-    return `<div class="lab" title="${esc(v.label)}">${esc(v.label)}</div><div class="cells">${cells}</div>`;
-  }).join("");
-  return `<div class="seeds">${rows}</div>
-    <div class="legend"><span><i style="background:var(--ok)"></i>success</span><span><i style="background:var(--bad)"></i>task failure</span><span><i style="background:var(--warn)"></i>error</span><span>one column = one scene (seed), the same for every row</span></div>`;
-}
-
-function failures(d) {
-  return d.summaries.map(s => {
-    const total = s.episodes || 1;
-    const parts = [["success", s.successes], ...Object.entries(s.failures)];
-    const bar = parts.filter(p => p[1]).map(([r, n]) =>
-      `<div style="width:${100 * n / total}%;background:${r === "success" ? "var(--ok)" : color(r)}" title="${esc(r)}: ${n}"></div>`).join("");
-    const legend = parts.filter(p => p[1]).map(([r, n]) =>
-      `<span><i style="background:${r === "success" ? "var(--ok)" : color(r)}"></i>${esc(r.replaceAll("_", " "))} ${n}</span>`).join("");
-    return `<div class="fails-row"><div class="lab">${esc(s.policy)}</div><div class="stack">${bar}</div><div class="legend">${legend}</div></div>`;
-  }).join("");
-}
-
-function gallery(d) {
-  const shots = [];
-  d.variants.forEach(v => v.episodes.forEach(e => { if (e.gif) shots.push({...e, label:v.label, dir:v.dir}); }));
-  const shown = shots.filter(e => galleryFilter === "all" || (galleryFilter === "failures" ? !e.success : e.success));
-  const tabs = ["failures", "successes", "all"].map(t => `<button class="tab ${t === galleryFilter ? "on" : ""}" data-f="${t}">${t}</button>`).join("");
-  const body = shown.length ? `<div class="gallery">${shown.map(e => `<div class="shot">
-      <img loading="lazy" src="api/files/${encodeURI(e.dir)}/${encodeURI(e.gif)}" alt="seed ${e.seed}">
-      <div class="cap"><span>seed ${e.seed}${d.variants.length > 1 ? " · " + esc(e.label) : ""}</span>
-      <span class="tag ${e.success ? "ok" : "bad"}">${esc(e.reason)}</span></div></div>`).join("")}</div>`
-    : `<div class="hint">No GIFs here. Runs save failure GIFs by default; choose “All episodes” to keep successes too.</div>`;
-  return `<div class="tabs">${tabs}</div>${body}`;
-}
-
-function episodesTable(d) {
-  const rows = [];
-  d.variants.forEach(v => v.episodes.forEach(e => rows.push({...e, label:v.label})));
-  rows.sort((a, b) => a.seed - b.seed);
-  return `<table><thead><tr><th>Seed</th>${d.variants.length > 1 ? "<th>Variant</th>" : ""}<th>Result</th><th>Sim s</th><th>Calls</th><th>Cost</th><th>Wall s</th><th>Error</th></tr></thead><tbody>
-    ${rows.map(e => `<tr><td>${e.seed}</td>${d.variants.length > 1 ? `<td>${esc(e.label)}</td>` : ""}
-      <td><span class="tag ${e.success ? "ok" : "bad"}">${esc(e.reason)}</span></td><td>${e.sim_seconds}</td><td>${e.calls}</td>
-      <td>${money(e.cost_usd)}</td><td>${e.wall_seconds}</td><td class="err" title="${esc(e.error)}">${esc(e.error || "")}</td></tr>`).join("")}</tbody></table>`;
-}
-
-function ranking(d) {
-  const pv = Object.fromEntries((d.paired || []).map(p => [p.b, p]));
-  const rows = d.summaries.map((s, i) => ({...s, i, prompt: s.policy.includes(" | ") ? s.policy.split(" | ").slice(1).join(" | ") : s.policy}))
-    .sort((a, b) => b.success_rate - a.success_rate || (a.cost_per_success_usd ?? 9) - (b.cost_per_success_usd ?? 9));
-  const best = rows[0];
-  return `<div class="card"><h3>Prompt ranking</h3>${rows.map((r, k) => {
-    const p = pv[r.policy];
-    const vs = r.i === 0 ? '<span class="hint">baseline (task prompt)</span>' :
-      (p ? `<span class="hint">${p.delta > 0 ? "+" : ""}${Math.round(p.delta * 100)} pp vs baseline · p ${p.p_value}${p.p_value < 0.05 ? " ✓" : ""}</span>` : "");
-    return `<div class="rank"><div class="n">${k + 1}</div><div class="p">“${esc(r.prompt)}”${r === best && d.status !== "running" ? '<span class="best">best</span>' : ""}</div>
-      <div class="track"><div class="fill" style="width:${r.success_rate * 100}%"></div><div class="ci" style="left:${r.ci95[0] * 100}%;width:${Math.max(0.5, (r.ci95[1] - r.ci95[0]) * 100)}%"></div></div>
-      <div class="num"><b>${pct(r.success_rate)}</b> <span class="hint">${r.successes}/${r.episodes}</span></div><div>${vs}</div></div>`;
-  }).join("")}
-  <div class="hint" style="margin-top:10px">Every prompt ran on the same scenes. A lead is only real once its interval clears the baseline's (✓ = McNemar p &lt; 0.05). Re-run the top two with more episodes before you trust a winner.</div></div>`;
-}
-
-function renderDetail() {
-  const d = detail;
-  if (!d) return;
-  const s0 = d.summaries[0] || {};
-  const st = d.settings || {};
-  const chips = [["mode", d.mode], ["episodes", d.n], ["seed", st.seed ?? 0], ["jitter", st.jitter ?? "task default"],
-    ["lighting", st.lighting ?? "task default"], ["max sim s", st.max_seconds ?? 60]]
-    .map(([k, v]) => `<span class="chip">${k} <b>${esc(v)}</b></span>`).join("");
-  const running = d.status === "running";
-  const progress = running && d.total ? `<div class="progress"><i style="width:${100 * d.done / d.total}%"></i></div>
-     <div class="hint" style="margin-top:6px">${d.done} of ${d.total} episodes · updates live</div>` : "";
-  const one = d.summaries.length === 1;
-  const stats = d.mode === "tune" ? "" : one ? `<div class="card"><div class="stats">
-      <div class="stat"><div class="v big">${pct(s0.success_rate)}</div><div class="l">success · ${s0.successes}/${s0.episodes} · 95% CI ${pct(s0.ci95?.[0])}–${pct(s0.ci95?.[1])}</div></div>
-      <div class="stat"><div class="v">${s0.mean_seconds_to_success ?? "–"}<span class="hint"> s</span></div><div class="l">mean time to success (sim)</div></div>
-      <div class="stat"><div class="v">${money(s0.cost_per_success_usd)}</div><div class="l">cost per success</div></div>
-      <div class="stat"><div class="v">${money(s0.cost_usd)}</div><div class="l">${s0.calls} model calls</div></div>
-    </div><div style="margin-top:16px">${rateRow(s0)}</div></div>`
-    : `<div class="card"><h3>Success rate with 95% interval</h3>${d.summaries.map(rateRow).join("")}
-       ${(d.paired || []).map(verdict).join("")}</div>`;
-  $("#detail").innerHTML = `
-    <div class="headrow"><div style="flex:1"><h1>${esc(d.task)}</h1>
-      <div class="prompt">${esc(d.mode === "tune" ? `Prompt Tuner · ${d.summaries.length} prompts · ${(s0.policy || "").split(" | ")[0]}` : (one ? s0.prompt : d.summaries.map(s => s.policy).join("  ·  ")))}</div>
-      <div class="chips">${chips}</div>
-      ${historyLinks(d)}</div>
-      <div><span class="pill ${esc(d.status)}">${esc(d.status)}</span>
-      ${running ? `<button class="btn danger" id="stopBtn" style="margin-left:8px">Stop</button>` : ""}</div></div>
-    ${progress}
-    ${stats}
-    ${d.mode === "tune" ? ranking(d) : ""}
-    <div class="card"><h3>Every scene</h3>${seedsGrid(d)}</div>
-    <div class="card"><h3>Why it failed</h3>${failures(d)}</div>
-    <div class="card"><h3>Episodes on video</h3>${gallery(d)}</div>
-    <div class="card"><h3>Episodes</h3>${episodesTable(d)}</div>
-    ${d.log ? `<div class="card"><details ${running ? "open" : ""}><summary>Run log</summary><pre class="log" id="log">${esc(d.log)}</pre></details></div>` : ""}`;
-  document.querySelectorAll(".tab").forEach(t => t.onclick = () => { galleryFilter = t.dataset.f; renderDetail(); });
-  const stop = $("#stopBtn");
-  if (stop) stop.onclick = async () => { stop.disabled = true; await api("api/stop/" + encodeURIComponent(d.id), {}); refresh(); };
-  const log = $("#log"); if (log) log.scrollTop = log.scrollHeight;
-}
-
-async function select(id) {
-  selected = id;
-  renderList();
-  detail = await api("api/run/" + encodeURIComponent(id));
-  renderDetail();
-}
-
-async function refresh() {
-  try {
-    runs = await api("api/runs");
-    renderList();
-    if (selected) {
-      const r = runs.find(x => x.id === selected);
-      if (r && (r.status === "running" || (detail && detail.status === "running"))) {
-        const y = $("#detail").scrollTop;
-        detail = await api("api/run/" + encodeURIComponent(selected));
-        renderDetail();
-        $("#detail").scrollTop = y;
-      }
-    }
-  } catch (e) { console.warn(e); }
-}
-
-// ---- new run dialog ------------------------------------------------------------------------------------------
-function lines(id) { return $(id).value.split("\n").map(s => s.trim()).filter(Boolean); }
-function estimate() {
-  const pols = lines("#fPolicies"), prompts = lines("#fPrompts");
-  const n = +$("#fN").value || 0, maxs = +$("#fMax").value || 60;
-  const ab = $("#fRecAB").checked && mode !== "tune" ? 2 : 1;
-  const variants = ab * (mode === "arena" ? 1 : (mode === "tune" ? Math.max(1, prompts.length) : pols.length * Math.max(1, prompts.length)));
-  const perEp = maxs / 2.4 / 2250; // calls per episode / calls per hour
-  const used = mode === "compare" ? pols : [pols[0] || "dream-1"];
-  const usd = used.reduce((a, p) =>
-    a + ab * (p.startsWith("scripted") ? 0 : (p.includes("flash") ? 2 : 3)) * perEp * n * (mode === "arena" ? 1 : Math.max(1, prompts.length)), 0);
-  const mins = Math.round(variants * n * (maxs / 60) * 1.5);
-  $("#estimate").textContent = `${variants * n} episodes · at most ~${money(usd)} · roughly ${mins} min`;
-}
-async function fillPrompts() {
-  const list = await api("api/prompts?task=" + encodeURIComponent($("#fTask").value));
-  $("#fPrompts").value = list.join("\n");
-  estimate();
-}
-function setMode(m) {
-  mode = m;
-  document.querySelectorAll("#modeSeg button").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
-  $("#polLabel").textContent = m === "compare" ? "Policies (A first: the baseline)" : "Policy";
-  if (m === "compare" && lines("#fPolicies").length < 2 && lines("#fPrompts").length < 2) $("#fPolicies").value = "dream-1\nscripted";
-  if (m === "tune") { $("#fPolicies").value = lines("#fPolicies")[0] || "dream-1"; fillPrompts(); }
-  estimate();
-}
-$("#fTask").addEventListener("change", () => { if (mode === "tune") fillPrompts(); });
-document.querySelectorAll("#modeSeg button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
-["#fPolicies", "#fPrompts", "#fN", "#fMax", "#fRecAB"].forEach(id => $(id).addEventListener("input", estimate));
-$("#newBtn").onclick = () => { $("#formErr").textContent = ""; estimate(); $("#dlg").showModal(); };
-$("#cancelBtn").onclick = () => $("#dlg").close();
-$("#form").onsubmit = async ev => {
-  ev.preventDefault();
-  const body = {mode, task: $("#fTask").value, policies: lines("#fPolicies"), prompts: lines("#fPrompts"),
-    n: +$("#fN").value, seed: $("#fSeed").value, jitter: $("#fJitter").value, lighting: $("#fLight").value,
-    max_seconds: $("#fMax").value, gifs: $("#fGifs").value, recovery_ab: $("#fRecAB").checked};
-  try {
-    $("#goBtn").disabled = true;
-    const {id} = await api("api/launch", body);
-    $("#dlg").close();
-    await refresh();
-    await select(id);
-  } catch (e) { $("#formErr").textContent = e.message; }
-  finally { $("#goBtn").disabled = false; }
+$("#newDs").onclick = () => {
+  const name = (prompt("Dataset name (lowercase letters, digits, - and _):", "fruit_mix") || "").trim();
+  if (!name) return;
+  if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(name)) { alert("Use lowercase letters, digits, - and _"); return; }
+  if (!extraNames.includes(name)) extraNames.unshift(name);
+  select(name);
 };
 
-// ---- views --------------------------------------------------------------------------------------------------
-let view = "runs";
-function show(v) {
-  view = v;
-  document.querySelectorAll("#nav button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
-  $("#runsView").classList.toggle("hidden", v !== "runs");
-  $("#dataView").classList.toggle("hidden", v !== "data");
-  $("#teleopView").classList.toggle("hidden", v !== "teleop");
-  $("#newBtn").classList.toggle("hidden", v !== "runs");
-  if (v === "data") refreshData();
+// ---- one dataset: the four steps ----------------------------------------------------------------------------
+function stepHead(n, title, state, on = true) {
+  return `<div class="stephead"><div class="num ${on ? "" : "off"}">${n}</div><h2>${title}</h2><div class="state" id="state${n}">${state || ""}</div></div>`;
 }
-document.querySelectorAll("#nav button").forEach(b => b.onclick = () => show(b.dataset.view));
+async function select(name) {
+  sel = name; chosen = new Set(); for (const k in sig) delete sig[k];
+  $("#detail").innerHTML = `
+    <div class="headrow"><div style="flex:1"><h1>${esc(name)}</h1><div class="prompt" id="dsSub"></div></div></div>
+    <div class="stepcard">${stepHead(1, "Collect", "")}<div id="collectForm"></div><div id="collectLive"></div><div id="teleHost" class="hidden"></div><div class="error" id="collectErr"></div></div>
+    <div class="stepcard">${stepHead(2, "Review", "")}<div id="review"></div><div class="error" id="reviewErr"></div></div>
+    <div class="stepcard">${stepHead(3, "Train", "")}<div id="train"></div><div class="error" id="trainErr"></div></div>
+    <div class="stepcard">${stepHead(4, "Evaluate", "")}<div id="evaluate"></div><div class="error" id="evalErr"></div></div>`;
+  $("#teleHost").appendChild($("#teleopTpl").content.cloneNode(true));
+  fillTaskSelects(); bindTeleop();
+  renderList();
+  detail = null;
+  await refreshDetail();
+  if (!detail) renderAll();
+}
+async function refreshDetail() {
+  if (!sel) return;
+  try { detail = await api("api/dataset/" + encodeURIComponent(sel)); }
+  catch (e) { detail = null; }
+  renderAll();
+}
+function renderAll() {
+  const d = detail || {name: sel, episodes: 0, frames: 0, minutes: 0, balance: [], warnings: [], rows: [], jobs: {}};
+  $("#dsSub").textContent = d.episodes ? `${d.episodes} episodes · ${d.minutes} min of robot time · ${d.balance.length} task${d.balance.length === 1 ? "" : "s"}` : "Empty: record some episodes in step 1.";
+  renderCollect(d); renderReview(d); renderTrain(d); renderEvaluate(d);
+}
 
-// ---- data & fine-tune ---------------------------------------------------------------------------------------
-let datasets = [];
-function jobDot(job) {
-  if (!job) return '<span class="dot"></span>';
-  if (job.running) return '<span class="dot run"></span>';
-  return `<span class="dot ${job.status === "done" ? "ok" : (job.status === "failed" ? "bad" : "")}"></span>`;
-}
-function taskOfDataset(d) {
-  const t = tasks.find(t => d.tasks.includes(t.prompt)) || tasks.find(t => d.name.startsWith(t.name));
-  return t ? t.name : tasks[0]?.name;
-}
-function renderData() {
-  if (!datasets.length) { $("#datasets").innerHTML = '<div class="hint">No datasets yet. Record some demos above.</div>'; return; }
-  $("#datasets").innerHTML = datasets.map(d => {
-    const j = d.jobs || {}, v = d.validate, f = d.finetune || {};
-    const rec = j.record;
-    const recLine = rec ? `${jobDot(rec)} ${rec.running ? "recording…" : esc(rec.status)} <span class="hint">${esc((rec.log || "").trim().split("\n").slice(-1)[0] || "")}</span>
-      ${rec.running ? `<button class="btn sm danger" data-act="stop" data-ds="${esc(d.name)}">Stop</button>` : ""}` : '<span class="hint">–</span>';
-    const valLine = j.validate?.running ? `${jobDot(j.validate)} checking…` :
-      (v ? `<span class="dot ${v.ok ? "ok" : "bad"}"></span> ${v.ok ? `ok · ${v.episodes} episodes · ${v.fps} fps` : `<span style="color:var(--bad)">${esc(v.error)}</span>`}` : (j.validate?.status === "failed" ? `<span class="dot bad"></span> <span style="color:var(--bad)">${esc((j.validate.log || "").trim().split("\n").slice(-1)[0])}</span>` : '<span class="hint">not checked</span>'));
-    const ftJob = j.finetune;
-    let ftLine = '<span class="hint">not started</span>';
-    if (ftJob?.running) ftLine = `${jobDot(ftJob)} ${esc(f.stage || "starting")}… <span class="hint">${esc((ftJob.log || "").trim().split("\n").slice(-1)[0] || "")}</span>`;
-    else if (f.stage) ftLine = `<span class="dot ${f.stage === "done" ? "ok" : (f.stage === "failed" ? "bad" : "run")}"></span> ${esc(f.stage)}${f.error ? ` <span style="color:var(--bad)">${esc(f.error)}</span>` : ""}`;
-    else if (ftJob?.status === "failed") ftLine = `<span class="dot bad"></span> <span style="color:var(--bad)">${esc((ftJob.log || "").trim().split("\n").slice(-1)[0])}</span>`;
-    const model = f.model ? `<div style="margin-top:6px">Model: <code class="model">${esc(f.model)}</code>
-      <button class="btn sm primary" data-act="cmp" data-ds="${esc(d.name)}" data-model="${esc(f.model)}">Compare vs base</button></div>` : "";
-    const training = f.stage === "training" ? `<button class="btn sm" data-act="status" data-ds="${esc(d.name)}">Check job</button>` : "";
-    const logs = Object.entries(j).filter(([k, x]) => x.log).map(([k, x]) => `<b>${k}</b>\n${esc(x.log)}`).join("\n\n");
-    return `<div class="card"><div class="ds">
-      <div><h4>${esc(d.name)}</h4>
-        <div class="kv"><b>${d.episodes}</b> episodes · <b>${d.frames}</b> frames · ${d.minutes} min · ${d.fps || "–"} fps</div>
-        <div class="kv">${d.tasks.map(esc).join(" · ") || "no task yet"}</div></div>
-      <div class="steps"><div class="step"><span class="lbl">Recording</span>${recLine}</div></div>
-      <div class="steps">
-        <div class="step"><span class="lbl">1 · Check</span>${valLine} <button class="btn sm" data-act="validate" data-ds="${esc(d.name)}" ${d.episodes ? "" : "disabled"}>Check</button></div>
-        <div class="step"><span class="lbl">2 · Fine-tune</span>${ftLine}
-          <button class="btn sm" data-act="finetune" data-ds="${esc(d.name)}" ${v?.ok && !ftJob?.running && !f.job_id ? "" : "disabled"}>Upload &amp; train</button> ${training}</div>
-        ${model}
-      </div></div>
-      ${logs ? `<details style="margin-top:10px"><summary>Logs</summary><pre class="log">${logs}</pre></details>` : ""}</div>`;
-  }).join("");
-  document.querySelectorAll("#datasets [data-act]").forEach(b => b.onclick = () => dataAction(b.dataset.act, b.dataset.ds, b.dataset.model));
-}
-async function dataAction(act, ds, model) {
-  $("#dataErr").textContent = "";
-  try {
-    if (act === "cmp") {
-      const d = datasets.find(x => x.name === ds);
-      show("runs");
-      $("#fTask").value = taskOfDataset(d);
-      $("#fPolicies").value = "dream-1\ndream:" + model;
-      $("#fPrompts").value = "";
-      setMode("compare");
-      $("#fN").value = 30; estimate();
-      $("#dlg").showModal();
-      return;
+// 1 · Collect
+function renderCollect(d) {
+  const recording = !!d.recording;
+  if (changed("collectForm", [source, recording, tasks.length])) {
+    const seg = [["scripted", "Scripted expert · free"], ["dream-1", "Dream-1 · uses credits"], ["teleop", "Teleop · you drive"]]
+      .map(([k, l]) => `<button type="button" data-src="${k}" class="${source === k ? "on" : ""}">${l}</button>`).join("");
+    const what = {scripted: "An IK expert that knows where everything is does the task. Only successful episodes are kept.",
+      "dream-1": "Dream-1 does the task; its successful episodes are kept. You pay for every attempt, successful or not.",
+      teleop: "Drive an arm with the keyboard; press Record, do the task, Save. Every saved episode lands in this dataset."}[source];
+    let form = `<div class="seg" id="srcSeg">${seg}</div><div class="hint" style="margin:-6px 0 12px">${what}</div>`;
+    if (source !== "teleop") {
+      const def = source === "scripted" ? 30 : 10;
+      form += `<div class="taskrows">${tasks.map(t => `<input type="checkbox" class="tk" value="${esc(t.name)}" checked>
+          <div><div class="tn">${esc(t.name)}</div><div class="tp">${esc(t.prompt)}</div></div>
+          <input type="number" class="tn-n" data-task="${esc(t.name)}" min="1" max="500" value="${def}" title="episodes to keep">`).join("")}</div>
+        <div class="grid4">
+          <div class="field"><label>Object jitter, m</label><input id="cJitter" type="number" step="0.01" min="0" placeholder="task default"></div>
+          <div class="field"><label>Lighting ±</label><input id="cLight" type="number" step="0.05" min="0" placeholder="task default"></div>
+          <div class="field"><label>Max sim s / episode</label><input id="cMax" type="number" min="10" value="60"></div>
+          <div class="field" style="display:flex;align-items:flex-end"><label class="field check" style="margin:0 0 8px"><input type="checkbox" id="cVary" checked style="width:auto"> Vary prompt wording</label></div>
+        </div>
+        <div class="actions"><div class="estimate hint" id="cEst"></div>
+          <button class="btn primary" id="cGo" ${recording ? "disabled" : ""}>${recording ? "Recording…" : "Start recording"}</button></div>`;
     }
-    let body = {};
-    if (act === "finetune") {
-      if (!confirm(`Upload ${ds} and start a Dream-1 fine-tune? It uses fine-tuning credits and takes about 7–8 hours.`)) return;
-      body = {suffix: ds};
+    $("#collectForm").innerHTML = form;
+    document.querySelectorAll("#srcSeg button").forEach(b => b.onclick = () => { source = b.dataset.src; renderCollect(detail || d); });
+    if (source !== "teleop") {
+      document.querySelectorAll("#collectForm input").forEach(i => i.addEventListener("input", estimate));
+      $("#cGo").onclick = startRecording;
+      estimate();
     }
-    await api(`/api/dataset/${encodeURIComponent(ds)}/${act}`, body);
-    refreshData();
-  } catch (e) { $("#dataErr").textContent = e.message; }
+  }
+  $("#teleHost").classList.toggle("hidden", source !== "teleop");
+  if (source === "teleop") pollTeleop();
+  // live progress
+  const p = d.progress;
+  if (changed("collectLive", [p, recording])) {
+    let html = "";
+    if (p && (recording || p.status === "running")) {
+      const rows = Object.entries(p.plan || {}).map(([t, want]) => {
+        const k = p.kept[t] || 0, tr = p.tried[t] || 0;
+        return `<div class="bal"><div class="tn">${esc(t)}${p.current === t ? ' <span class="dot run"></span>' : ""}</div>
+          <div class="bar"><i style="width:${Math.min(100, 100 * k / want)}%"></i></div>
+          <div class="hint"><b style="color:var(--ink)">${k}</b> / ${want} kept · ${tr} tried</div></div>`;
+      }).join("");
+      const last = p.last ? `Last: ${esc(p.last.task)} seed ${p.last.seed} → ${esc(p.last.reason)} (${p.last.kept ? "kept" : "dropped"})` : "Loading the simulator…";
+      html = `<div class="card" style="margin-top:14px"><h3>Recording · ${esc(p.source)} · episodes appear in Review as they are saved</h3>${rows}
+        <div class="actions"><span class="hint">${last}</span><button class="btn danger" id="cStop">Stop</button></div></div>`;
+    } else if (p && p.status && p.status !== "running") {
+      const kept = Object.values(p.kept || {}).reduce((a, b) => a + b, 0), tried = Object.values(p.tried || {}).reduce((a, b) => a + b, 0);
+      html = `<div class="hint" style="margin-top:10px">Last recording ${esc(p.status)}: ${kept} kept of ${tried} tried (${esc(p.source)}), ${when(p.updated)}.</div>`;
+    }
+    const rec = d.jobs?.record;
+    if (rec && rec.status === "failed") html += `<div class="error">Recording failed: ${lastLine(rec.log)}</div>`;
+    $("#collectLive").innerHTML = html;
+    const stop = $("#cStop");
+    if (stop) stop.onclick = async () => { stop.disabled = true; await api(`api/dataset/${encodeURIComponent(sel)}/stop`, {}).catch(() => {}); refreshDetail(); };
+  }
+  $("#state1").textContent = recording ? "recording…" : (d.episodes ? `${d.episodes} episodes so far` : "");
 }
-async function refreshData() {
-  try { datasets = await api("api/datasets"); if (view === "data") renderData(); } catch (e) { console.warn(e); }
+function mixFromForm() {
+  const mix = {};
+  document.querySelectorAll("#collectForm .tk").forEach(c => {
+    if (c.checked) mix[c.value] = +document.querySelector(`.tn-n[data-task="${c.value}"]`).value || 0;
+  });
+  return mix;
 }
-async function startRecord(kind) {
-  $("#dataErr").textContent = "";
-  const p = kind === "scripted" ? "s" : "h";
-  const body = {kind, task: $(`#${p}Task`).value, n: +$(`#${p}N`).value, name: $(`#${p}Name`).value.trim()};
-  if (kind === "harvest") body.policy = $("#hPolicy").value.trim();
-  try { await api("api/record", body); refreshData(); } catch (e) { $("#dataErr").textContent = e.message; }
+function estimate() {
+  const el = $("#cEst"); if (!el) return;
+  const mix = mixFromForm(), n = Object.values(mix).reduce((a, b) => a + b, 0), maxs = +($("#cMax")?.value) || 60;
+  const per = PER_EPISODE_USD * maxs / 60;
+  el.textContent = source === "scripted"
+    ? `${n} episodes · free · roughly ${Math.round(n * 0.5)}–${n} min`
+    : `${n} successes wanted · ~${money(per)} per attempt · ~${money(n * 5 * per)} if Dream-1 succeeds 1 in 5`;
 }
-$("#sGo").onclick = () => startRecord("scripted");
-$("#hGo").onclick = () => startRecord("harvest");
-$("#tGoTab").onclick = () => show("teleop");
-const hEst = () => { $("#hEst").textContent = `~${(+$("#hN").value || 0) * 2.5 | 0}–${(+$("#hN").value || 0) * 5} attempts · up to ~${money((+$("#hN").value || 0) * 5 * 0.033)} if the model succeeds 1 in 5`; };
-$("#hN").addEventListener("input", hEst);
+async function startRecording() {
+  $("#collectErr").textContent = "";
+  const mix = mixFromForm();
+  if (!Object.keys(mix).length) { $("#collectErr").textContent = "Tick at least one task."; return; }
+  if (source !== "scripted") {
+    const n = Object.values(mix).reduce((a, b) => a + b, 0);
+    if (!confirm(`Dream-1 will run until it has ${n} successful episodes (at most ${n * 5} attempts, up to ~${money(n * 5 * PER_EPISODE_USD)}). Start?`)) return;
+  }
+  const body = {name: sel, source, mix, jitter: $("#cJitter").value, lighting: $("#cLight").value,
+                max_seconds: $("#cMax").value, vary_prompts: $("#cVary").checked};
+  try { $("#cGo").disabled = true; await api("api/record", body); await refreshDetail(); refreshList(); }
+  catch (e) { $("#collectErr").textContent = e.message; $("#cGo").disabled = false; }
+}
 
-// ---- teleop -------------------------------------------------------------------------------------------------
+// 2 · Review
+function renderReview(d) {
+  if (!changed("review", [d.rows, d.balance, d.warnings, d.busy, [...chosen]])) return;
+  $("#state2").textContent = d.warnings.length ? `${d.warnings.length} thing${d.warnings.length > 1 ? "s" : ""} to look at` : (d.episodes ? "looks balanced" : "");
+  if (!d.episodes) { $("#review").innerHTML = '<div class="hint">Nothing yet. Episodes show up here the moment they are saved.</div>'; return; }
+  const sources = [...new Set(d.rows.map(r => r.source))];
+  const goal = Math.max(MIN_PER_TASK, ...d.balance.map(t => t.episodes));
+  const bal = d.balance.map(t => `<div class="bal"><div class="tn">${esc(t.task)}</div>
+      <div class="bar"><i style="width:${100 * t.episodes / goal}%"></i><b style="left:${100 * MIN_PER_TASK / goal}%" title="aim: ${MIN_PER_TASK}"></b></div>
+      <div class="hint"><b style="color:var(--ink)">${t.episodes}</b> episodes · ${t.prompts} wording${t.prompts > 1 ? "s" : ""}</div></div>`).join("");
+  const now = Date.now() / 1000;
+  const rows = d.rows.slice(0, 300).map(r => `<tr class="${r.created && now - r.created < 8 ? "new" : ""}">
+      <td><input type="checkbox" class="pick" value="${r.index}" ${chosen.has(r.index) ? "checked" : ""} ${d.busy ? "disabled" : ""} style="width:auto"></td>
+      <td>${r.index}</td><td>${esc(r.task)}</td><td title="${esc(r.prompt)}" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.prompt)}</td>
+      <td>${esc(r.source)}</td><td>${r.seed ?? "–"}</td><td>${r.seconds} s</td>
+      <td><button class="play" data-i="${r.index}" title="watch">▶</button></td></tr>`).join("");
+  $("#review").innerHTML = `
+    <div class="big3"><div><div class="v">${d.episodes}</div><div class="l">episodes</div></div>
+      <div><div class="v">${d.minutes}</div><div class="l">minutes of demonstrations</div></div>
+      <div><div class="v">${d.balance.length}</div><div class="l">tasks</div></div>
+      <div><div class="v" style="font-size:18px;padding-top:6px">${sources.map(esc).join(", ")}</div><div class="l">sources</div></div></div>
+    ${bal}
+    ${d.warnings.map(w => `<div class="warn">${esc(w)}</div>`).join("")}
+    <details id="epList" style="margin-top:14px" ${(reviewOpen ?? d.episodes <= 60) ? "open" : ""}><summary>Episodes (newest first)</summary>
+      <table style="margin-top:8px"><thead><tr><th></th><th>#</th><th>Task</th><th>Prompt</th><th>Source</th><th>Seed</th><th>Length</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="actions"><span class="hint">${d.busy ? "Recording into this dataset: removing waits until it stops." : "Tick episodes you do not want the model to learn from."}</span>
+        <button class="btn danger" id="rmBtn" ${chosen.size && !d.busy ? "" : "disabled"}>Remove ${chosen.size || ""} selected</button></div></details>`;
+  $("#epList").ontoggle = () => { reviewOpen = $("#epList").open; };
+  document.querySelectorAll("#review .pick").forEach(c => c.onchange = () => {
+    c.checked ? chosen.add(+c.value) : chosen.delete(+c.value);
+    $("#rmBtn").disabled = !chosen.size; $("#rmBtn").textContent = `Remove ${chosen.size || ""} selected`;
+  });
+  document.querySelectorAll("#review .play").forEach(b => b.onclick = () => openVideo(+b.dataset.i));
+  $("#rmBtn").onclick = async () => {
+    if (!confirm(`Delete ${chosen.size} episode(s) from ${sel}? This cannot be undone.`)) return;
+    try { await api(`api/dataset/${encodeURIComponent(sel)}/remove`, {indices: [...chosen]}); chosen = new Set(); refreshDetail(); refreshList(); }
+    catch (e) { $("#reviewErr").textContent = e.message; }
+  };
+}
+let vidIndex = 0, reviewOpen = null;
+function openVideo(i, role = "overhead") {
+  vidIndex = i;
+  $("#vid").src = `api/dataset/${encodeURIComponent(sel)}/video/${i}?role=${role}`;
+  $("#vidTitle").textContent = `episode ${i} · ${role}`;
+  if (!$("#vidDlg").open) $("#vidDlg").showModal();
+}
+document.querySelectorAll("#vidDlg [data-role]").forEach(b => b.onclick = () => openVideo(vidIndex, b.dataset.role));
+$("#vidClose").onclick = () => { $("#vid").pause(); $("#vidDlg").close(); };
+
+// 3 · Train
+function renderTrain(d) {
+  const j = d.jobs || {}, v = d.validate, f = d.finetune || {};
+  if (!changed("train", [d.episodes, d.warnings, d.busy, j.validate, j.finetune, j.status, v, f])) return;
+  const enough = d.episodes >= MIN_PER_TASK;
+  const checking = j.validate?.running, training = j.finetune?.running;
+  const checkLine = checking ? '<span class="dot run"></span> checking…' :
+    (v ? (v.ok ? `<span class="dot ok"></span> ready: ${v.episodes} episodes, ${v.frames} frames at ${v.fps} fps` : `<span class="dot bad"></span> <span style="color:var(--bad)">${esc(v.error)}</span>`)
+       : (j.validate?.status === "failed" ? `<span class="dot bad"></span> <span style="color:var(--bad)">${lastLine(j.validate.log)}</span>` : '<span class="dot"></span> not checked since the last change'));
+  let ftLine = '<span class="dot"></span> not started';
+  if (training) ftLine = `<span class="dot run"></span> ${esc(f.stage || "starting")}… <span class="hint">${lastLine(j.finetune.log)}</span>`;
+  else if (f.stage) ftLine = `<span class="dot ${f.stage === "done" ? "ok" : (f.stage === "failed" ? "bad" : "run")}"></span> ${esc(f.stage)}${f.error ? ` <span style="color:var(--bad)">${esc(f.error)}</span>` : ""}${f.started ? ` <span class="hint">since ${when(f.started)}</span>` : ""}`;
+  else if (j.finetune?.status === "failed") ftLine = `<span class="dot bad"></span> <span style="color:var(--bad)">${lastLine(j.finetune.log)}</span>`;
+  $("#state3").textContent = f.model ? "fine-tune ready" : (f.stage || (v?.ok ? "ready to train" : ""));
+  $("#train").innerHTML = `
+    <div class="check"><span class="dot ${enough ? "ok" : ""}"></span> Enough data: ${d.episodes} episodes${d.warnings.length ? ` <span class="hint">(${d.warnings.length} warning${d.warnings.length > 1 ? "s" : ""} in Review)</span>` : ""}</div>
+    <div class="check">${checkLine} <button class="btn sm" id="tCheck" ${d.episodes && !d.busy && !checking ? "" : "disabled"}>Check format</button></div>
+    <div class="check">${ftLine}
+      <button class="btn sm primary" id="tTrain" ${v?.ok && !d.busy && !training && !f.job_id ? "" : "disabled"}>Upload &amp; fine-tune</button>
+      ${f.stage === "training" ? '<button class="btn sm" id="tJob">Check job</button>' : ""}</div>
+    ${f.model ? `<div class="check"><span class="dot ok"></span> Model <code class="model">${esc(f.model)}</code></div>` : ""}
+    <div class="hint" style="margin-top:6px">The check runs locally and sends nothing. Fine-tuning uploads the dataset, uses fine-tuning credits (about $200 a job) and takes about 7–8 hours.</div>`;
+  const act = async (a, body) => { $("#trainErr").textContent = ""; try { await api(`api/dataset/${encodeURIComponent(sel)}/${a}`, body || {}); refreshDetail(); } catch (e) { $("#trainErr").textContent = e.message; } };
+  $("#tCheck").onclick = () => act("validate");
+  $("#tTrain").onclick = () => { if (confirm(`Upload ${sel} (${d.episodes} episodes) and start a Dream-1 fine-tune? It uses fine-tuning credits (about $200) and takes about 7–8 hours.`)) act("finetune", {suffix: sel}); };
+  const job = $("#tJob"); if (job) job.onclick = () => act("status");
+}
+
+// 4 · Evaluate
+function verdict(p) {
+  const sig = p.p_value < 0.05, dd = p.delta;
+  const text = sig ? (dd > 0 ? "the fine-tune is better, and it is not luck" : "the fine-tune is worse, and it is not luck") : "no proven difference yet: could be luck";
+  return `<b>${dd > 0 ? "+" : ""}${Math.round(dd * 100)} pp</b> · ${text} <span class="hint">(McNemar p = ${p.p_value}, ${p.seeds} identical scenes)</span>`;
+}
+function renderEvaluate(d) {
+  const f = d.finetune || {}, ev = d.evaluate;
+  if (!changed("evaluate", [f.model, ev, d.balance.length])) return;
+  const model = f.model || "";
+  const nTasks = Math.max(1, d.balance.length);
+  const running = ev?.results?.some(r => r.run?.running || r.run?.status === "running");
+  $("#state4").textContent = running ? "running…" : (ev ? "done" : "");
+  let html = `<div class="hint" style="margin-bottom:10px">Base Dream-1 and the fine-tune on the same scenes, every task of this dataset. A difference counts only when McNemar says it is not luck.</div>
+    <div class="grid2"><div class="field"><label>Fine-tuned model</label><input id="eModel" value="${esc(model)}" placeholder="appears after training; or paste a model id"></div>
+      <div class="field"><label>Scenes per task</label><input id="eN" type="number" min="5" max="200" value="${ev?.n || 20}"></div></div>
+    <div class="actions"><span class="hint" id="eEst"></span><button class="btn primary" id="eGo" ${running ? "disabled" : ""}>Compare base vs fine-tune</button></div>`;
+  if (ev?.results?.length) {
+    html += `<div style="margin-top:14px">${ev.results.map(r => {
+      const run = r.run;
+      if (!run) return `<div class="cmp"><b>${esc(r.task)}</b><span class="hint">run not found</span></div>`;
+      const [a, b] = run.summaries;
+      const p = (run.paired || [])[0];
+      const prog = run.status === "running" ? ` <span class="hint">${run.done}/${run.total} episodes…</span>` : "";
+      const link = (run.dreamkit_runs || []).filter(x => x.id).map(x => `<a href="/#/history/${encodeURIComponent(x.id)}" target="_top">${esc(x.label)}</a>`).join(" · ");
+      return `<div class="cmp"><div><b>${esc(r.task)}</b>${prog}</div><div>
+        base <b>${pct(a?.success_rate)}</b> <span class="hint">${a?.successes ?? 0}/${a?.episodes ?? 0}</span> → fine-tune <b>${pct(b?.success_rate)}</b> <span class="hint">${b?.successes ?? 0}/${b?.episodes ?? 0}</span>
+        ${p && p.seeds ? `<div>${verdict(p)}</div>` : ""}${link ? `<div class="hint">In History: ${link}</div>` : ""}</div></div>`;
+    }).join("")}</div>`;
+  }
+  $("#evaluate").innerHTML = html;
+  const est = () => { const n = +$("#eN").value || 0; $("#eEst").textContent = `${2 * n * nTasks} episodes · up to ~${money(2 * n * nTasks * PER_EPISODE_USD)}`; };
+  $("#eN").oninput = est; est();
+  $("#eGo").onclick = async () => {
+    $("#evalErr").textContent = "";
+    const m = $("#eModel").value.trim(), n = +$("#eN").value || 20;
+    if (!m) { $("#evalErr").textContent = "No fine-tuned model yet: train in step 3, or paste a model id."; return; }
+    if (!confirm(`Run base Dream-1 and ${m} on ${n} scenes for each of ${nTasks} task(s): ${2 * n * nTasks} episodes, up to ~${money(2 * n * nTasks * PER_EPISODE_USD)}. Start?`)) return;
+    try { await api(`api/dataset/${encodeURIComponent(sel)}/evaluate`, {model: m, n}); refreshDetail(); }
+    catch (e) { $("#evalErr").textContent = e.message; }
+  };
+}
+
+// ---- teleop (a source in Collect) ----------------------------------------------------------------------------
 let tState = {status: "off"}, keysDown = new Set(), lastKeys = "", framePending = false;
 const TELE_KEYS = new Set(["KeyW","KeyA","KeyS","KeyD","KeyR","KeyF","KeyQ","KeyE","ArrowUp","ArrowDown","ArrowLeft","ArrowRight","ShiftLeft","ShiftRight","PageUp","PageDown"]);
-const teleActive = () => view === "teleop" && tState.status === "running" && !["INPUT","SELECT","TEXTAREA"].includes(document.activeElement?.tagName);
-const tcmd = c => api("api/teleop/cmd", {cmd: c}).catch(e => $("#tMsg").textContent = e.message);
+const teleVisible = () => source === "teleop" && !!$("#screen");
+const teleActive = () => teleVisible() && tState.status === "running" && !["INPUT","SELECT","TEXTAREA"].includes(document.activeElement?.tagName);
+const tcmd = c => api("api/teleop/cmd", {cmd: c}).catch(e => { if ($("#tMsg")) $("#tMsg").textContent = e.message; });
 window.addEventListener("keydown", e => {
   if (!teleActive()) return;
   if (TELE_KEYS.has(e.code)) { keysDown.add(e.code); e.preventDefault(); }
@@ -650,63 +557,71 @@ setInterval(() => {
   if (k !== lastKeys || k) { lastKeys = k; api("api/teleop/keys", {keys: [...keysDown]}).catch(() => {}); }
 }, 100);
 function pullFrame() {
-  if (view !== "teleop" || tState.status !== "running") { framePending = false; return; }
+  if (!teleVisible() || tState.status !== "running") { framePending = false; return; }
   framePending = true;
   const img = $("#frame");
   img.onload = img.onerror = () => setTimeout(pullFrame, 70);
   img.src = "api/teleop/frame?t=" + Date.now();
 }
 function renderTeleop() {
-  const s = tState, on = s.status === "running";
+  if (!$("#screen")) return;
+  const s = tState, here = s.dataset && s.dataset.split("/").slice(-1)[0] === sel;
+  const on = s.status === "running" && here;
   $("#screenOff").classList.toggle("hidden", on);
   $("#screenOff").innerHTML = s.status === "error" ? `<div><b style="color:var(--dk-bad-soft)">Teleop stopped</b><br>${esc(s.error)}</div>` :
-    (s.status === "starting" ? "Loading the simulator…" : "Pick a task and press Start session.<br>The first start loads the simulator (a few seconds).");
-  let badges = $("#screen").querySelectorAll(".rec,.ok"); badges.forEach(b => b.remove());
+    (s.status === "starting" ? "Loading the simulator…" :
+     (s.status === "running" && !here ? `A teleop session is recording into <b>${esc(s.dataset.split("/").slice(-1)[0])}</b>. Stop it or start one here.` :
+      "Pick a task and press Start session.<br>The first start loads the simulator (a few seconds)."));
+  $("#screen").querySelectorAll(".rec,.ok").forEach(b => b.remove());
   if (on && s.recording) $("#screen").insertAdjacentHTML("beforeend", `<div class="rec">● REC ${s.record_seconds}s · ${s.frames} frames</div>`);
   if (on && s.success) $("#screen").insertAdjacentHTML("beforeend", `<div class="ok">✓ task done</div>`);
-  $("#tStatus").innerHTML = on ? `Arm <b>${esc(s.arm)}</b> · gripper <b>${esc(s.gripper)}</b> · ${s.placed ? "<b style='color:var(--ok)'>object in place</b>" : "object not in place"}<br>
-    Dataset <b>${esc(s.dataset.split("/").slice(-1)[0])}</b>: <b>${s.episodes}</b> episodes saved` : (s.status === "starting" ? "Starting…" : "No session.");
+  $("#tStatus").innerHTML = on ? `Arm <b>${esc(s.arm)}</b> · gripper <b>${esc(s.gripper)}</b> · ${s.placed ? "<b style='color:var(--ok)'>object in place</b>" : "object not in place"} · <b>${s.episodes}</b> episodes in the dataset`
+    : (s.status === "starting" ? "Starting…" : "No session.");
   $("#tMsg").textContent = on ? (s.message || "") : "";
-  ["#tRec","#tSave","#tDiscard","#tReset","#tArm","#tGrip","#tStop"].forEach(id => $(id).disabled = !on);
+  ["#tRec","#tSave","#tDiscard","#tReset","#tArm","#tGrip"].forEach(id => $(id).disabled = !on);
+  $("#tStop").disabled = s.status !== "running";
   if (on) { $("#tRec").disabled = s.recording; $("#tSave").disabled = $("#tDiscard").disabled = !s.recording; }
   if (on && !framePending) pullFrame();
 }
 async function pollTeleop() {
+  if (!teleVisible()) return;
   try { tState = await api("api/teleop/state"); } catch (e) { tState = {status: "off"}; }
-  if (view === "teleop") renderTeleop();
+  renderTeleop();
 }
-$("#tStart").onclick = async () => {
-  try { await api("api/teleop/start", {task: $("#tTask").value, dataset: $("#tName").value.trim()}); tState = {status: "starting"}; renderTeleop(); }
-  catch (e) { $("#tMsg").textContent = e.message; }
-};
-$("#tStop").onclick = () => api("api/teleop/stop", {}).then(pollTeleop);
-$("#tRec").onclick = () => tcmd("record");
-$("#tSave").onclick = () => tcmd("save");
-$("#tDiscard").onclick = () => tcmd("discard");
-$("#tReset").onclick = () => tcmd("reset");
-$("#tArm").onclick = () => tcmd("arm");
-$("#tGrip").onclick = () => tcmd("grip");
-$("#screen").onclick = () => document.activeElement?.blur();
+function bindTeleop() {
+  $("#tStart").onclick = async () => {
+    try { await api("api/teleop/start", {task: $("#tTask").value, dataset: sel}); tState = {status: "starting", dataset: sel}; renderTeleop(); }
+    catch (e) { $("#tMsg").textContent = e.message; }
+  };
+  $("#tStop").onclick = () => api("api/teleop/stop", {}).then(pollTeleop);
+  $("#tRec").onclick = () => tcmd("record");
+  $("#tSave").onclick = () => tcmd("save");
+  $("#tDiscard").onclick = () => tcmd("discard");
+  $("#tReset").onclick = () => tcmd("reset");
+  $("#tArm").onclick = () => tcmd("arm");
+  $("#tGrip").onclick = () => tcmd("grip");
+  $("#screen").onclick = () => document.activeElement?.blur();
+  framePending = false;
+}
+function fillTaskSelects() {
+  const opts = tasks.map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.prompt)}</option>`).join("");
+  document.querySelectorAll(".taskSel").forEach(s => s.innerHTML = opts);
+}
 
 (async () => {
   tasks = await api("api/tasks");
-  const opts = tasks.map(t => `<option value="${esc(t.name)}">${esc(t.name)} — ${esc(t.prompt)}</option>`).join("");
-  document.querySelectorAll(".taskSel").forEach(sel => sel.innerHTML = opts);
-  hEst(); renderTeleop();
-  // Poll only what is on screen, and only while the tab is visible; fast while something runs, slow otherwise.
+  await refreshList();
+  if (list.length) select(list[0].name);
   const visible = () => !document.hidden;
-  const busy = () => runs.some(r => r.running || r.status === "running");
-  setInterval(() => { if (visible() && view === "data") refreshData(); }, 3000);
-  setInterval(() => { if (visible() && view === "teleop") pollTeleop(); }, 300);
-  $("#fTask").innerHTML = opts;
-  await refresh();
-  if (runs.length) select(runs[0].id);
-  let lastRefresh = Date.now();
+  const busy = () => detail && (detail.recording || detail.jobs?.validate?.running || detail.jobs?.finetune?.running ||
+    detail.evaluate?.results?.some(r => r.run?.status === "running"));
+  let last = 0;
   setInterval(() => {
-    if (!visible() || view !== "runs") return;
-    if (busy() || Date.now() - lastRefresh > 15000) { lastRefresh = Date.now(); refresh(); }
+    if (!visible() || !sel) return;
+    if (busy() || Date.now() - last > 6000) { last = Date.now(); refreshDetail(); }
   }, 2000);
-  document.addEventListener("visibilitychange", () => { if (visible() && view === "runs") { lastRefresh = Date.now(); refresh(); } });
+  setInterval(() => { if (visible()) refreshList(); }, 4000);
+  setInterval(() => { if (visible() && teleVisible()) pollTeleop(); }, 300);
 })();
 </script>
 </body>

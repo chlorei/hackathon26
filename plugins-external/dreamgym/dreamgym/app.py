@@ -1,6 +1,8 @@
-"""DreamGym as a dreamkit app plugin (PLUGIN_STANDARD.md §13): the Gym tab, its API and `dreamkit gym ...`.
+"""DreamGym as a dreamkit app plugin (PLUGIN_STANDARD.md §13): the Data tab, its API and `dreamkit dreamgym ...`.
 
-Arena, Compare and Prompt Tuner run seeded episodes in Dream Labs' simulator through dreamkit.wrap, so the loop
+The tab is for fine-tuning data only: collect demonstrations (scripted expert, Dream-1, teleop), review them, train,
+and compare the fine-tune with the base model. Live runs, History and the loop plugins stay in dreamkit's own tabs.
+Arena, Compare and Prompt Tuner (the command line) run seeded episodes in Dream Labs' simulator through dreamkit.wrap, so the loop
 plugins of dreamkit.yaml (failure-monitor, recovery, harvester, ...) run in every episode, and every run lands in
 History with a Gym badge. It needs the simulator's world (scene randomisation, the success judge): "sim only".
 """
@@ -20,7 +22,7 @@ def router(ctx: AppContext):
 
 
 def commands(argv: list[str]) -> int:
-    """`dreamkit gym arena ...` (or `dreamkit dreamgym ...`): DreamGym's own command line."""
+    """`dreamkit dreamgym arena ...` (or `dreamkit data ...`): DreamGym's own command line."""
     from .cli import main
 
     return main(argv)
@@ -28,10 +30,10 @@ def commands(argv: list[str]) -> int:
 
 app = App(
     name="dreamgym",
-    manifest=Manifest(kind="app", title="Gym", icon="Dumbbell", needs=["robot", "world"]),
+    manifest=Manifest(kind="app", title="Data", icon="Database", needs=["robot", "world"]),
     router=router,
     page=Path(__file__).parent / "web" / "page",
     commands=commands,
-    description="Arena, Compare, Prompt Tuner, datasets and Teleop: seeded episodes in the simulator, "
-                "every one through dreamkit's plugins",
+    description="Fine-tuning data: collect demonstrations (scripted, Dream-1, teleop), review them, train Dream-1, "
+                "compare the fine-tune with the base model",
 )

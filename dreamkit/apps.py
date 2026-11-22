@@ -64,7 +64,7 @@ class App:
 
     @property
     def aliases(self) -> list[str]:
-        """`dreamkit <name>`, and `dreamkit <title>` when the title is one plain word (DreamGym: dreamkit gym)."""
+        """`dreamkit <name>`, and `dreamkit <title>` when the title is one plain word (DreamGym: dreamkit data)."""
         out = [self.name]
         t = (self.manifest.title or "").strip().lower()
         if t and t.isalpha() and t != self.name and t not in RESERVED:

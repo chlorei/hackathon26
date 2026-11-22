@@ -6,12 +6,13 @@
   dreamgym compare --task banana_plate --policy dream-1 --policy dream:dream-1-ft:xxxx --n 30
   dreamgym compare --task banana_plate --policy dream-1 --prompt "put banana on the plate" --prompt "place the banana onto the blue plate"
   dreamgym record  --task banana_plate --n 50 --out data/banana
+  dreamgym record  --task banana_plate --mix banana_plate:30,apple_bowl:30,orange_bowl:30 --vary-prompts --out data/fruit
   dreamgym record  --task banana_plate --n 20 --policy dream-1 --out data/harvest_banana   # Harvester
   dreamgym finetune data/banana --validate-only    |  dreamgym finetune data/banana  |  --status
   dreamgym report  runs/<folder>
-  dreamgym serve                       # dreamkit's panel, Gym tab (= dreamkit ui)
+  dreamgym serve                       # dreamkit's panel, Data tab (= dreamkit ui)
 
-Also as `dreamkit gym <command>` once installed as a dreamkit app plugin (dreamkit install plugins-external/dreamgym).
+Also as `dreamkit dreamgym <command>` once installed as a dreamkit app plugin (dreamkit install plugins-external/dreamgym).
 Every episode runs through dreamkit.wrap: the loop plugins of dreamkit.yaml run in it, History shows it (badge Gym).
 """
 
@@ -102,39 +103,93 @@ def cmd_compare(args) -> int:
     return 0
 
 
+def _mix(args) -> list[tuple[str, int]]:
+    """[(task, episodes to keep)] from --mix banana_plate:20,apple_bowl:20, else the one --task with --n."""
+    if not args.mix:
+        return [(args.task, args.n)]
+    out = []
+    for part in args.mix.split(","):
+        name, _, n = part.strip().partition(":")
+        if name not in TASKS:
+            raise SystemExit(f"unknown task {name!r} in --mix")
+        out.append((name, int(n or args.n)))
+    return out
+
+
 def cmd_record(args) -> int:
-    """Scripted demos -> LeRobot v2.1 dataset; only successful episodes are kept."""
+    """Episodes -> one LeRobot v2.1 dataset; only successful episodes are kept.
+
+    With --mix the tasks take turns (one episode each, round robin), so the dataset stays balanced while it grows and
+    a stopped recording still has every task in it. Progress is rewritten after every episode
+    (<dataset>/.dreamgym/record.progress.json): the Data tab shows the dataset growing live.
+    """
+    import numpy as np
+
+    from . import dataset
     from .lerobot_writer import LeRobotWriter
     from .policies import make_policy
     from .runner import run_episode
+    from .tasks import prompt_variants
 
-    task = _task(args)
-    out = args.out or DATA / task.name
+    plan = _mix(args)
+    out = args.out or DATA / plan[0][0]
     writer = LeRobotWriter(out, fps=args.fps)
     policy = make_policy(args.policy)
+    source = "scripted" if policy.name.startswith("scripted") else policy.name
     from .kit import PolicyClient, open_kit
 
+    tasks = {name: _task(argparse.Namespace(task=name, jitter=args.jitter, lighting=args.lighting)) for name, _ in plan}
+    rng = np.random.default_rng(args.seed)
+    want = dict(plan)
+    kept = {name: 0 for name in want}
+    tried = {name: 0 for name in want}
+    progress = {"plan": want, "kept": kept, "tried": tried, "source": source, "status": "running",
+                "started": time.time(), "last": None, "current": None}
+    dataset.write_progress(out, progress)
     env = sim.make_env()
     kit = open_kit(PolicyClient(policy), model=policy.name,
-                   info={"mode": "record", "task": task.name, "policy": policy.name, "dataset": str(out)})
-    kept, tried, seed = 0, 0, args.seed
+                   info={"mode": "record", "tasks": list(want), "policy": policy.name, "dataset": str(out)})
+    seed = args.seed
+    status = "done"
     try:
-        while kept < args.n and tried < args.max_attempts:
-            writer.begin(task.prompt)
-            result, _ = run_episode(env, task, policy, seed=seed, max_seconds=args.max_seconds,
-                                    step_hook=writer.step_hook, kit=kit)
-            ok = writer.end(keep=result.success)
-            kept += ok
-            tried += 1
-            print(f"seed {seed}: {result.reason:<15} {'kept' if ok else 'dropped'}  ({kept}/{args.n} kept)")
-            seed += 1
+        while True:
+            todo = [n for n in want if kept[n] < want[n] and tried[n] < args.max_attempts]
+            if not todo:
+                break
+            for name in todo:
+                task = tasks[name]
+                prompt = task.prompt
+                if args.vary_prompts:
+                    prompt = str(rng.choice(prompt_variants(task)))
+                progress["current"] = name
+                dataset.write_progress(out, progress)
+                writer.begin(prompt)
+                result, _ = run_episode(env, task, policy, seed=seed, prompt=prompt, max_seconds=args.max_seconds,
+                                        step_hook=writer.step_hook, kit=kit)
+                ok = writer.end(keep=result.success)
+                if ok:
+                    dataset.add_episode(out, writer, task=name, prompt=prompt, source=source, seed=seed)
+                kept[name] += ok
+                tried[name] += 1
+                progress["last"] = {"task": name, "seed": seed, "reason": result.reason, "kept": bool(ok)}
+                dataset.write_progress(out, progress)
+                print(f"{name} seed {seed}: {result.reason:<15} {'kept' if ok else 'dropped'}  "
+                      f"({sum(kept.values())}/{sum(want.values())} kept)")
+                seed += 1
+    except KeyboardInterrupt:
+        status = "stopped"
+    except Exception:
+        status = "failed"
+        raise
     finally:
         writer.end(keep=False)
+        progress.update(status=status, current=None)
+        dataset.write_progress(out, progress)
         kit.close()
         env.close()
-    print(f"\n{kept} episodes, {writer.total_frames} frames at {args.fps} fps in {out}")
+    print(f"\n{sum(kept.values())} episodes kept, {writer.total_frames} frames at {args.fps} fps in {out}")
     print(f"next: dreamgym finetune {out} --validate-only")
-    return 0 if kept else 1
+    return 0 if sum(kept.values()) else 1
 
 
 def cmd_finetune(args) -> int:
@@ -151,13 +206,13 @@ def cmd_finetune(args) -> int:
 
 
 def cmd_serve(args) -> int:
-    """DreamGym lives in dreamkit's panel now (the Gym tab): start the panel and open the tab."""
+    """DreamGym lives in dreamkit's panel now (the Data tab): start the panel and open the tab."""
     import subprocess
     import threading
     import webbrowser
 
     url = f"http://127.0.0.1:{args.port}/#/app/dreamgym"
-    print(f"DreamGym is the Gym tab of dreamkit's panel: {url}")
+    print(f"DreamGym is the Data tab of dreamkit's panel: {url}")
     if not args.no_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     return subprocess.call([sys.executable, "-m", "dreamkit.cli", "ui", "--port", str(args.port)])
@@ -197,7 +252,9 @@ def main(argv=None) -> int:
     _common(p)
     p.add_argument("--policy", default="scripted:0.004", help="scripted[:noise_m]")
     p.add_argument("--fps", type=int, default=10, choices=[10, 5])
-    p.add_argument("--max-attempts", type=int, default=200)
+    p.add_argument("--max-attempts", type=int, default=200, help="per task")
+    p.add_argument("--mix", default=None, help="several tasks into one dataset: banana_plate:20,apple_bowl:20")
+    p.add_argument("--vary-prompts", action="store_true", help="each episode gets a paraphrase of the task's prompt")
     p.set_defaults(fn=cmd_record)
 
     p = sub.add_parser("finetune", help="validate / upload + fine-tune / job status of a dataset folder")
@@ -209,7 +266,7 @@ def main(argv=None) -> int:
     p.add_argument("--steps", type=int, default=None)
     p.set_defaults(fn=cmd_finetune)
 
-    p = sub.add_parser("serve", help="dreamkit's panel with the Gym tab open (dreamkit ui)")
+    p = sub.add_parser("serve", help="dreamkit's panel with the Data tab open (dreamkit ui)")
     p.add_argument("--port", type=int, default=8800)
     p.add_argument("--no-browser", action="store_true")
     p.set_defaults(fn=cmd_serve)

@@ -282,26 +282,114 @@ def list_datasets(data: Path) -> list[dict]:
 
 
 def launch_record(root: Path, body: dict) -> dict:
+    """Starts recording into a dataset (new or existing). Body: name, source ("scripted" | "dream-1" | a policy),
+    mix {task: episodes to keep} (or task + n), jitter, lighting, vary_prompts, noise (scripted, m)."""
     data = data_root(root)
-    task = body["task"]
-    if task not in TASKS:
-        raise ValueError(f"unknown task {task}")
-    kind = body.get("kind", "scripted")
-    policy = (body.get("policy") or "").strip() or ("scripted:0.004" if kind == "scripted" else "dream-1")
-    name = (body.get("name") or "").strip() or f"{task}_{'demos' if kind == 'scripted' else 'harvest'}"
+    mix = {k: int(v) for k, v in (body.get("mix") or {}).items() if int(v or 0) > 0}
+    if not mix and body.get("task"):
+        mix = {body["task"]: int(body.get("n", 20))}
+    if not mix:
+        raise ValueError("choose at least one task and how many episodes")
+    for task, n in mix.items():
+        if task not in TASKS:
+            raise ValueError(f"unknown task {task}")
+        if not 1 <= n <= 500:
+            raise ValueError("episodes per task must be 1..500")
+    source = (body.get("source") or body.get("kind") or "scripted").strip()
+    if source == "harvest":
+        source = (body.get("policy") or "dream-1").strip()
+    scripted = source.startswith("scripted")
+    policy = f"scripted:{float(body.get('noise') or 0.006)}" if source == "scripted" else source
+    first = next(iter(mix))
+    name = (body.get("name") or "").strip() or (f"{first}_demos" if len(mix) == 1 else "mixed_demos")
     if not SAFE.match(name):
         raise ValueError("dataset name: lowercase letters, digits, - and _")
-    n = int(body.get("n", 20))
-    if not 1 <= n <= 500:
-        raise ValueError("n must be 1..500")
-    attempts = int(body.get("max_attempts") or n * (3 if kind == "scripted" else 5))
-    cmd = [sys.executable, "-u", "-m", "dreamgym.cli", "record", "--task", task, "--n", str(n), "--out", str(data / name),
-           "--policy", policy, "--max-attempts", str(attempts), "--seed", str(int(body.get("seed") or 0))]
+    attempts = int(body.get("max_attempts") or max(mix.values()) * (3 if scripted else 5))
+    cmd = [sys.executable, "-u", "-m", "dreamgym.cli", "record", "--task", first,
+           "--mix", ",".join(f"{t}:{n}" for t, n in mix.items()), "--out", str(data / name), "--policy", policy,
+           "--max-attempts", str(attempts), "--seed", str(int(body.get("seed") or _next_seed(data / name)))]
     for key, flag in (("jitter", "--jitter"), ("lighting", "--lighting"), ("max_seconds", "--max-seconds")):
         if body.get(key) not in (None, ""):
             cmd += [flag, str(float(body[key]))]
+    if body.get("vary_prompts", True):
+        cmd.append("--vary-prompts")
     (data / name).mkdir(parents=True, exist_ok=True)
-    return _spawn_data_job(data, name, "record", cmd)
+    return {**_spawn_data_job(data, name, "record", cmd), "name": name}
+
+
+def _next_seed(folder: Path) -> int:
+    """New scenes for an existing dataset: continue after the highest seed it already holds."""
+    from .. import dataset
+
+    seeds = [e.get("seed") for e in dataset._jsonl(folder / ".dreamgym" / "episodes.jsonl") if e.get("seed") is not None]
+    return max(seeds) + 1000 if seeds else 0
+
+
+def _busy(data: Path, name: str) -> bool:
+    session = TELEOP["session"]
+    teleop_here = session is not None and session.running and Path(session.dataset).resolve() == (data / name).resolve()
+    return _running(f"data:{name}:record") or teleop_here
+
+
+def dataset_detail(root: Path, name: str) -> dict:
+    """One dataset for the Data tab: episodes, balance, live progress, the check, the fine-tune, the evaluation."""
+    from .. import dataset
+
+    data = data_root(root)
+    folder = data / name
+    if not SAFE.match(name) or not folder.is_dir():
+        raise KeyError("no such dataset")
+    out = dataset.describe(folder)
+    summary = next((d for d in list_datasets(data) if d["name"] == name), {})
+    out.update(jobs=summary.get("jobs", {}), validate=summary.get("validate"), finetune=summary.get("finetune"),
+               recording=_running(f"data:{name}:record"), busy=_busy(data, name))
+    ev = _read_json(folder / ".dreamgym" / "evaluate.json")
+    if ev:
+        results = []
+        for item in ev.get("runs", []):
+            run_folder = root / item["id"]
+            d = describe(root, run_folder) if run_folder.is_dir() else None
+            results.append({"task": item["task"], "id": item["id"], "run": d})
+        ev["results"] = results
+    out["evaluate"] = ev
+    return out
+
+
+def remove(root: Path, name: str, body: dict) -> dict:
+    from .. import dataset
+
+    data = data_root(root)
+    if not SAFE.match(name) or not (data / name).is_dir():
+        raise ValueError("no such dataset")
+    if _busy(data, name):
+        raise ValueError("recording into this dataset: stop it first")
+    indices = [int(i) for i in body.get("indices", [])]
+    return {"removed": dataset.remove_episodes(data / name, indices)}
+
+
+def evaluate(root: Path, name: str, body: dict) -> dict:
+    """The base model vs the fine-tune on the same scenes, one Compare per task of the dataset."""
+    from .. import dataset
+
+    data = data_root(root)
+    folder = data / name
+    ft = _read_json(folder / ".dreamgym" / "finetune.json") or {}
+    model = (body.get("model") or ft.get("model") or "").strip()
+    if not model:
+        raise ValueError("no fine-tuned model yet: train first (or paste a model id)")
+    tasks = [t["task"] for t in dataset.describe(folder)["balance"] if t["task"] in TASKS]
+    if not tasks:
+        raise ValueError("no known task in this dataset")
+    n = int(body.get("n") or 20)
+    runs = []
+    for task in tasks:
+        r = launch(root, {"mode": "compare", "task": task, "policies": ["dream-1", f"dream:{model}"], "n": n,
+                          "gifs": "failures"})
+        runs.append({"task": task, "id": r["id"]})
+        time.sleep(1.1)  # run ids carry the second they started
+    record = {"model": model, "n": n, "runs": runs, "started": time.time()}
+    (dataset.state_dir(folder) / "evaluate.json").write_text(json.dumps(record, indent=2))
+    return record
 
 
 def dataset_action(root: Path, name: str, action: str, body: dict) -> dict:
@@ -413,6 +501,32 @@ def make_router(root: Path, config_path: Path | None = None):
     @r.post("/record")
     def post_record(body: dict = Body(default_factory=dict)):
         return guard(launch_record, root, body)
+
+    @r.get("/dataset/{name}")
+    def get_dataset(name: str):
+        try:
+            return dataset_detail(root, name)
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @r.get("/dataset/{name}/video/{index}")
+    def dataset_video(name: str, index: int, role: str = "overhead"):
+        from ..lerobot_writer import CAMERA_ROLES
+
+        if not SAFE.match(name) or role not in CAMERA_ROLES.values():
+            raise HTTPException(404, "not found")
+        file = data_root(root) / name / "videos" / "chunk-000" / f"observation.images.{role}" / f"episode_{index:06d}.mp4"
+        if not file.is_file():
+            raise HTTPException(404, "not found")
+        return FileResponse(file, media_type="video/mp4")
+
+    @r.post("/dataset/{name}/remove")
+    def post_remove(name: str, body: dict = Body(default_factory=dict)):
+        return guard(remove, root, name, body)
+
+    @r.post("/dataset/{name}/evaluate")
+    def post_evaluate(name: str, body: dict = Body(default_factory=dict)):
+        return guard(evaluate, root, name, body)
 
     @r.post("/dataset/{name}/{action}")
     def post_dataset(name: str, action: str, body: dict = Body(default_factory=dict)):

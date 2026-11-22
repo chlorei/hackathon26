@@ -160,6 +160,11 @@ class TeleopSession:
                     elif cmd in ("save", "discard") and writer is not None and writer.recording:
                         frames = writer.frames_in_episode
                         kept = writer.end(keep=cmd == "save")
+                        if kept:
+                            from .. import dataset
+
+                            dataset.add_episode(self.dataset, writer, task=self.task.name, prompt=self.task.prompt,
+                                                source="teleop", seed=self.seed - 1)
                         finish(bool(self.task.success(env)) if cmd == "save" else None)
                         if cmd == "save":
                             message = f"Saved episode {len(writer.episodes)} ({frames} frames)." if kept else \
