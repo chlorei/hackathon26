@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Download, GitBranch, Loader2, Sparkles } from 'lucide-react'
 import { api, type PluginInfo, type SchemaProp } from '../api'
-import { Button, ICON_BY_PLUGIN, Input, MoreMenu, Panel, PanelTitle, PluginIcon, PluginPageDrawer, StatusDot, Toggle, type PluginPage } from '../ui'
+import { Button, ICON_BY_PLUGIN, Input, MoreMenu, Panel, PanelTitle, PluginIcon, PluginPageDrawer, StatusDot, Tag, Toggle, type PluginPage } from '../ui'
 import { count } from '../labels'
 
 /** Plugins grouped by what they are for, in the order a failure goes through them: Detect → Recover → Learn. */
@@ -12,6 +12,62 @@ const STAGES: { key: 'detect' | 'recover' | 'learn'; n: number; title: string; h
   { key: 'recover', n: 2, title: 'Recover', hint: 'Act on it: fix the attempt, or keep the robot safe', lead: 'recovery' },
   { key: 'learn', n: 3, title: 'Learn', hint: 'Keep the videos and data that come out of it', lead: 'harvester' },
 ]
+
+/** Three ready sets: most people want one of these, not a list of eleven switches. Each includes the one before. */
+const SETS: { key: string; title: string; what: string; plugins: string[] }[] = [
+  { key: 'watch', title: 'Watch', what: 'See what happens and why an attempt fails', plugins: ['success-check', 'failure-monitor', 'camera-check', 'monitor-stats'] },
+  { key: 'rescue', title: 'Rescue', what: 'Also save failing attempts and stop before the credits run out', plugins: ['success-check', 'failure-monitor', 'camera-check', 'monitor-stats', 'recovery', 'budget-guard'] },
+  { key: 'learn', title: 'Learn', what: 'Also keep videos and turn good attempts into training data', plugins: ['success-check', 'failure-monitor', 'camera-check', 'monitor-stats', 'recovery', 'budget-guard', 'recorder', 'harvester', 'fine-tune'] },
+]
+
+function Sets({ list }: { list: PluginInfo[] }) {
+  const set = useSetPlugins()
+  const [busy, setBusy] = useState<string | null>(null)
+  const installed = new Set(list.map((p) => p.name))
+  const on = new Set(list.filter((p) => p.enabled).map((p) => p.name))
+  const matches = (s: (typeof SETS)[number]) => {
+    const want = s.plugins.filter((n) => installed.has(n))
+    return want.every((n) => on.has(n)) && [...on].every((n) => want.includes(n))
+  }
+  const apply = async (s: (typeof SETS)[number]) => {
+    setBusy(s.key)
+    try {
+      let last
+      for (const p of list) {  // the set's plugins on, the others off
+        const want = s.plugins.includes(p.name)
+        if (want !== p.enabled) last = await api.updatePlugin(p.name, { enabled: want })
+      }
+      set(last)
+    } finally { setBusy(null) }
+  }
+  return (
+    <section>
+      <h2 className="mb-2.5 text-[19px] font-semibold">Start from a set</h2>
+      <div className="grid gap-3 md:grid-cols-3">
+        {SETS.map((s) => {
+          const current = matches(s)
+          const names = s.plugins.filter((n) => installed.has(n))
+          return (
+            <Panel key={s.key} className={clsx('flex flex-col gap-2 px-4 py-3.5', current && 'border-ok/50 ring-1 ring-ok/30')}>
+              <div className="flex items-center gap-2">
+                <p className="text-[16px] font-semibold">{s.title}</p>
+                {current && <Tag tone="ok">your setup</Tag>}
+              </div>
+              <p className="text-[13.5px] text-dim">{s.what}</p>
+              <p className="text-[12px] text-faint">{names.join(' · ')}</p>
+              <div className="mt-auto pt-1">
+                <Button variant={current ? 'quiet' : 'line'} disabled={current || busy !== null} onClick={() => void apply(s)}>
+                  {busy === s.key ? 'Switching…' : current ? 'In use' : `Use ${s.title}`}
+                </Button>
+              </div>
+            </Panel>
+          )
+        })}
+      </div>
+      <p className="mt-2 text-[13px] text-faint">Or switch plugins one by one below. Changes apply the next time your loop starts.</p>
+    </section>
+  )
+}
 
 function stageOf(p: PluginInfo): 'detect' | 'recover' | 'learn' {
   if (p.name === 'failure-monitor') return 'detect'
@@ -54,6 +110,7 @@ export default function PluginsPage({ focus }: { focus?: string | null }) {
             <Sparkles className="h-4 w-4" strokeWidth={1.75} /> Create with AI
           </a>
         </div>
+        <Sets list={list} />
         {STAGES.map((stage) => {
           const items = list.filter((p) => stageOf(p) === stage.key)
             .sort((a, b) => Number(b.enabled) - Number(a.enabled) || Number(b.name === stage.lead) - Number(a.name === stage.lead))
@@ -66,11 +123,14 @@ export default function PluginsPage({ focus }: { focus?: string | null }) {
                 <span className="text-dim">{stage.hint}</span>
               </div>
               <Panel>
-                {items.map((p) => (
+                {items.map((p, i) => [
+                  !p.enabled && (i === 0 || items[i - 1].enabled) ? (
+                    <p key={`off-${p.name}`} className="border-t border-line bg-base/60 px-5 py-1.5 text-[12px] text-faint first:border-0">Off — switch on to add</p>
+                  ) : null,
                   <PluginRow key={p.name} plugin={p} open={open === p.name} onOpen={() => toggle(p.name)}
                     blockedBy={p.capability === 'control' && !p.enabled && control && control !== p.name ? control : null}
-                    lastRun={lastRun} onPage={() => setPage({ plugin: p.name, runId: lastRun ?? '', episode: null })} />
-                ))}
+                    lastRun={lastRun} onPage={() => setPage({ plugin: p.name, runId: lastRun ?? '', episode: null })} />,
+                ])}
               </Panel>
             </section>
           )
