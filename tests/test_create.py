@@ -45,7 +45,11 @@ def test_a_described_plugin_is_generated_checked_and_catalogued(model, tmp_path)
     script.append(package())
     job = create.run(create.Job("j1", [{"role": "user", "text": "watch the grippers"}]), None, set())
     assert job.status == "ready", job.error
-    assert [s["text"] for s in job.steps] == ["generating", "checking", "ready"]
+    assert [s["text"] for s in job.steps] == ["generating", "checking", "trying it on recorded attempts", "ready"]
+    # what it would say on recorded attempts, before anyone reads the code
+    assert [r["fixture"] for r in job.tryout] == create.TRYOUT_FIXTURES
+    assert job.tryout[0]["success"] and not job.tryout[1]["success"]
+    assert all(isinstance(e["message"], str) for r in job.tryout for e in r["said"])
     assert all(job.checks[s]["ok"] for s in ("check", "test", "bench"))
     assert job.info["name"] == "grip-watch" and "on_step" in job.info["hooks"] and "closed_cmd" in job.info["defaults"]
     assert "watch the grippers" in calls[0] and "## 6. Reading the robot" in calls[0]  # the standard is in the prompt

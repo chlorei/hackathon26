@@ -149,6 +149,32 @@ function Preview({ job, onOpenPlugins }: { job: CreateJob | null; onOpenPlugins:
         </div>
       </Panel>
 
+      {(job.tryout ?? []).length > 0 && (
+        <Panel>
+          <PanelTitle>What it would say</PanelTitle>
+          <p className="-mt-1 px-5 pb-2 text-[13px] text-dim">Played on recorded attempts, before you read any code.</p>
+          <div className="space-y-3 px-5 pb-4">
+            {job.tryout!.map((r) => (
+              <div key={r.fixture}>
+                <p className="text-[13.5px] font-medium">
+                  {r.fixture.replace(/_/g, ' ')} <span className={r.success ? 'text-ok' : 'text-bad'}>{r.success ? '✓ worked' : '✗ failed'}</span>
+                </p>
+                {r.said.length ? (
+                  <ul className="mt-0.5 space-y-0.5 text-[13.5px]">
+                    {r.said.map((e, i) => (
+                      <li key={i} className={e.level === 'error' ? 'text-bad' : e.level === 'warn' ? 'text-warn' : 'text-ink'}>
+                        <span className="mr-2 inline-block w-12 text-right text-faint">{e.t == null ? '' : `${e.t.toFixed(1)} s`}</span>{e.message}
+                      </li>
+                    ))}
+                    {r.more > 0 && <li className="pl-14 text-faint">and {r.more} more</li>}
+                  </ul>
+                ) : <p className="pl-14 text-[13.5px] text-faint">says nothing here</p>}
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
       <Panel>
         <PanelTitle>Checks</PanelTitle>
         <div className="space-y-1 px-5 pb-4">

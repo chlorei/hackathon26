@@ -249,6 +249,31 @@ def _describe(package: Path) -> dict[str, Any]:
     return json.loads(proc.stdout.strip().splitlines()[-1]) if proc.returncode == 0 and proc.stdout.strip() else {}
 
 
+# Three recordings people recognise: one that works, one dropped, one grasping air
+TRYOUT_FIXTURES = ["success_apple_bowl", "dropped_mid_carry", "grasped_air"]
+_TRYOUT = """
+import json, sys
+from dreamkit.testing import replay
+name, out = sys.argv[1], []
+for fx in sys.argv[2:]:
+    r = replay(fx, [name])
+    said = [{"t": e.get("t_s", e.get("t")), "level": e.get("level"), "message": e.get("message")}
+            for e in r.events if e.get("plugin") == name]
+    out.append({"fixture": fx, "success": bool(r.expected.get("success")), "said": said[:8], "more": max(0, len(said) - 8)})
+print(json.dumps(out))
+"""
+
+
+def _tryout(package: Path, name: str) -> list[dict[str, Any]]:
+    """What the plugin says on a few recorded attempts, before anyone reads its code. Never fails the job."""
+    try:
+        proc = subprocess.run([sys.executable, "-c", _TRYOUT, name, *TRYOUT_FIXTURES], capture_output=True, text=True,
+                              cwd=str(package), env=_env(DREAMKIT_PLUGIN_PATH=str(package.resolve())), timeout=STEP_TIMEOUT_S)
+        return json.loads(proc.stdout.strip().splitlines()[-1]) if proc.returncode == 0 and proc.stdout.strip() else []
+    except (subprocess.TimeoutExpired, ValueError):
+        return []
+
+
 def _tail(text: str, n: int = 25) -> str:
     return "\n".join(text.splitlines()[-n:])
 
@@ -269,6 +294,7 @@ class Job:
     tries: int = 0
     error: str | None = None  # one sentence for the chat
     details: str = ""  # the checks' output behind it
+    tryout: list[dict[str, Any]] = field(default_factory=list)  # what it says on recorded attempts
     package: Path | None = None
 
     def step(self, text: str) -> None:
@@ -305,6 +331,8 @@ def run(job: Job, files: dict[str, str] | None, taken: set[str]) -> Job:
                     job.name, job.summary, job.files, job.package = (data["name"], str(data.get("summary", "")),
                                                                      data["files"], package)
                     job.info = _describe(package)
+                    job.step("trying it on recorded attempts")
+                    job.tryout = _tryout(package, data["name"])
                     job.status = "ready"
                     job.step("ready")
                     return job

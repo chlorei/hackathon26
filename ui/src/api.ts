@@ -254,6 +254,7 @@ export interface CreateJob {
   model: string | null
   tries: number
   error: string | null
+  tryout?: { fixture: string; success: boolean; said: { t: number | null; level: string; message: string }[]; more: number }[]
 }
 
 export interface Validation {
