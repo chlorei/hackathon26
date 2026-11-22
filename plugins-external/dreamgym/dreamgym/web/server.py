@@ -21,7 +21,7 @@ from pathlib import Path
 
 from ..arena import load_results, slug
 from ..stats import paired, summarize
-from ..tasks import TASKS, prompt_variants
+from ..tasks import TASKS, TASKS_FILE, prompt_variants
 
 PAGE = Path(__file__).with_name("page")
 PROCS: dict[str, subprocess.Popen] = {}
@@ -36,6 +36,8 @@ def _env() -> dict:
     env = dict(os.environ, PYTHONUNBUFFERED="1")
     if DREAMKIT["config"]:
         env["DREAMKIT_CONFIG"] = str(DREAMKIT["config"])
+    if DREAMKIT.get("tasks"):
+        env["DREAMGYM_TASKS"] = str(DREAMKIT["tasks"])  # recordings and compares see the user's own tasks
     return env
 
 
@@ -513,6 +515,11 @@ def make_router(root: Path, config_path: Path | None = None, datasets: Path | No
     root.mkdir(parents=True, exist_ok=True)
     DREAMKIT["config"] = config_path
     DATASETS["dir"] = Path(datasets).resolve() if datasets else root.parent / "datasets"
+    # the tasks typed in the Data tab: beside datasets/ in dreamkit's data folder
+    DREAMKIT["tasks"] = Path(DATASETS["dir"]).parent / TASKS_FILE
+    from .. import tasks as tasks_mod
+
+    tasks_mod.load_custom(DREAMKIT["tasks"])
     r = APIRouter()
 
     def guard(fn, *args):
@@ -541,9 +548,31 @@ def make_router(root: Path, config_path: Path | None = None, datasets: Path | No
         t = TASKS.get(task)
         return prompt_variants(t) if t else []
 
+    def task_list():
+        tasks_mod.load_custom(DREAMKIT["tasks"])  # edited by hand or by another panel meanwhile
+        return [{"name": t.name, "prompt": t.prompt, "jitter": t.jitter_m, "lighting": t.lighting, "obj": t.obj,
+                 "target": t.target, "custom": t.custom} for t in TASKS.values()]
+
     @r.get("/tasks")
     def tasks():
-        return [{"name": t.name, "prompt": t.prompt, "jitter": t.jitter_m, "lighting": t.lighting} for t in TASKS.values()]
+        return task_list()
+
+    @r.get("/task-parts")
+    def task_parts(prompt: str = ""):
+        """What a custom task can use, and what a prompt being typed seems to mean."""
+        obj, target = tasks_mod.guess_parts(prompt)
+        return {"objects": list(tasks_mod.OBJECTS), "targets": list(tasks_mod.TARGETS), "obj": obj, "target": target}
+
+    @r.post("/tasks")
+    def post_task(body: dict = Body(default_factory=dict)):
+        t = guard(tasks_mod.add_custom, body.get("prompt", ""), body.get("obj") or None, body.get("target") or None,
+                  (body.get("name") or "").strip() or None, DREAMKIT["tasks"])
+        return {"task": t.name, "tasks": task_list()}
+
+    @r.delete("/tasks/{name}")
+    def delete_task(name: str):
+        guard(tasks_mod.remove_custom, name, DREAMKIT["tasks"])
+        return {"tasks": task_list()}
 
     @r.get("/files/{path:path}")
     def files(path: str):

@@ -123,6 +123,10 @@ def uninstall(name: str, found: dict[str, dict[str, Any]]) -> subprocess.Complet
             return subprocess.CompletedProcess([name], 1, "", f"{package} is not a generated plugin's folder\n")
         shutil.rmtree(package)
         return subprocess.CompletedProcess([name], 0, f"removed {package}\n", "")
-    dist = entry["origin"].split(":")[0]
+    return uninstall_dist(entry["origin"].split(":")[0])
+
+
+def uninstall_dist(dist: str) -> subprocess.CompletedProcess:
+    """pip uninstall of one distribution (uv's pip takes no -y)."""
     return subprocess.run(pip_command("uninstall", "-y", dist) if "uv" not in pip_command()[0]
                           else pip_command("uninstall", dist), capture_output=True, text=True)

@@ -28,6 +28,9 @@ CARRY_DZ = (0.05, 0.03, 0.015)
 RETREAT_DZ = (0.10, 0.05, 0.03)
 ## Lift heights tried after the grasp.
 LIFT_DZ = (0.15, 0.12, 0.10)
+## Heights above the object to come down from. 0.14 first (as before); an arm reaching far across the table (the
+## apple to the plate on the other side) gets there only lower.
+APPROACH_DZ = (0.14, 0.10, 0.07)
 
 
 def _smooth(n: int) -> np.ndarray:
@@ -127,10 +130,12 @@ class ScriptedPickPlace:
 
         dz = GRASP_DZ.get(obj, 0.003)
         pick = p + np.r_[shift[0], 0.0]
-        move(pick + [0, 0, 0.14], 1.0, 50)  # above the object
-        move(p + [0, 0, dz], 1.0, 40)  # down
+        # round fruit can be gripped at any yaw, so a far reach may turn the gripper (the flexible fallback)
+        round_fruit = obj in ROUND
+        move_first([pick + [0, 0, h] for h in APPROACH_DZ], 1.0, 50, flexible=round_fruit)  # above the object
+        move(p + [0, 0, dz], 1.0, 40, flexible=round_fruit)  # down
         grip(1.0, 0.0, 25)  # close
-        move_first([p + [0, 0, h] for h in LIFT_DZ], 0.0, 40)  # lift
+        move_first([p + [0, 0, h] for h in LIFT_DZ], 0.0, 40, flexible=round_fruit)  # lift
         drop = goal + [0, 0, RELEASE_DZ[target]] + np.r_[shift[1], 0.0]
         move_first([drop + [0, 0, h] for h in CARRY_DZ], 0.0, 60, flexible=True)  # carry
         move(drop, 0.0, 25, flexible=True)  # lower

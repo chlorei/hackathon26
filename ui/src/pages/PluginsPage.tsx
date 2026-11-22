@@ -376,7 +376,8 @@ function AddFromGitHub() {
 function Catalogue() {
   const registry = useQuery({ queryKey: ['registry'], queryFn: api.registry })
   const install = useInstall()
-  const entries = (registry.data?.plugins ?? []).filter((p) => p.repo !== 'builtin')
+  // an installed app is a tab of its own (removed from there), not a plugin of the loop: it is not listed here
+  const entries = (registry.data?.plugins ?? []).filter((p) => p.repo !== 'builtin' && !(p.kind === 'app' && p.installed))
   return (
     <Panel>
       <PanelTitle>Catalogue</PanelTitle>
@@ -384,7 +385,10 @@ function Catalogue() {
         {entries.map((p) => (
           <div key={p.name} className="flex items-start gap-3 border-b border-line px-5 py-3 last:border-0">
             <div className="min-w-0 flex-1">
-              <p className="text-[14px] font-medium">{p.name}</p>
+              <p className="text-[14px] font-medium">
+                {p.kind === 'app' ? `${p.title ?? p.name} tab` : p.name}
+                {p.kind === 'app' && <span className="ml-2 text-[12px] font-normal text-dim">adds a tab to the top bar</span>}
+              </p>
               <p className="text-[13px] text-dim">{p.description}</p>
               <a href={p.repo} target="_blank" rel="noreferrer" className="text-[12px] text-dim underline-offset-2 hover:underline">GitHub</a>
             </div>

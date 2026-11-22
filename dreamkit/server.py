@@ -788,6 +788,25 @@ def create_app(config_path: str | Path) -> FastAPI:
             out.append(d)
         return {"apps": out, "problems": host.problems, "world": world}
 
+    @app.delete("/api/apps/{name}")
+    async def remove_app(name: str):
+        """Uninstalls an app plugin installed with pip: its tab goes (the panel finds apps again, §13)."""
+        host.refresh()
+        a = host.apps.get(name)
+        if a is None:
+            raise HTTPException(404, f"no app plugin named {name!r}")
+        origin = getattr(a, "origin", "") or ""
+        if not origin.startswith("pip "):
+            raise HTTPException(400, f"{a.title} is loaded from a folder ({origin}), not installed with pip: "
+                                     "take it out of DREAMKIT_PLUGIN_PATH instead")
+        result = await asyncio.to_thread(registry.uninstall_dist, origin.split(" ", 1)[1])
+        if result.returncode != 0:
+            raise HTTPException(400, (result.stdout + result.stderr)[-2000:])
+        host.refresh()
+        if name in host.apps:
+            raise HTTPException(400, f"{a.title} is still found after pip uninstall (another copy is installed)")
+        return {"ok": True, "title": a.title}
+
     if (UI_DIST / "index.html").is_file():
         @app.middleware("http")
         async def fresh_panel(request: Request, call_next):

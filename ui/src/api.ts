@@ -142,6 +142,8 @@ export interface SchemaProp {
 
 export interface RegistryEntry {
   name: string
+  kind?: string // "app": a tab of its own, not a loop plugin
+  title?: string // an app's tab name
   repo: string
   description: string
   tags?: string[]

@@ -236,3 +236,44 @@ def test_retrain_uploads_under_a_new_name_and_keeps_the_old_model(tmp_path, monk
     record = finetune.start(folder, log=lambda *a: None)
     assert uploaded[0].startswith("fruit-") and record["job_id"] == "j2"
     assert record["previous"] == [{"model": "m1", "job_id": "j1", "dataset_name": "fruit", "started": None}]
+
+
+def test_custom_tasks_typed_in_the_data_tab(tmp_path, monkeypatch):
+    """A prompt of your own, with the object and the place (guessed from the words), saved in <data_dir>/dreamgym-tasks.json: listed,
+    recordable (the record subprocess finds it through DREAMGYM_TASKS), forgotten again."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from dreamgym import tasks as T
+    from dreamgym.web import server
+
+    root = tmp_path / "gym" / "runs"
+    app = FastAPI()
+    app.include_router(server.make_router(root), prefix="/api")
+    client = TestClient(app)
+    try:
+        assert client.get("/api/task-parts", params={"prompt": "drop the yellow banana in the bowl"}).json()["obj"] == "banana"
+        out = client.post("/api/tasks", json={"prompt": "drop the yellow banana in the bowl"}).json()
+        assert out["task"] == "banana_bowl"
+        row = next(t for t in out["tasks"] if t["name"] == "banana_bowl")
+        assert row == {**row, "obj": "banana", "target": "bowl", "custom": True, "prompt": "drop the yellow banana in the bowl"}
+        assert json.loads((tmp_path / "gym" / T.TASKS_FILE).read_text())[0]["name"] == "banana_bowl"
+        # explicit choices win over the words; the same task twice is one task; a second wording is a second task
+        out = client.post("/api/tasks", json={"prompt": "move the fruit", "obj": "orange", "target": "plate"}).json()
+        assert out["task"] == "orange_plate"
+        assert client.post("/api/tasks", json={"prompt": "drop the yellow banana in the bowl"}).json()["task"] == "banana_bowl"
+        assert client.post("/api/tasks", json={"prompt": "do a little dance"}).status_code == 400
+        # the record command takes it, and its subprocess is told where the tasks are
+        seen = {}
+        monkeypatch.setattr(server, "_spawn_data_job", lambda data, name, kind, cmd: seen.update(cmd=cmd) or {"id": name})
+        server.launch_record(root, {"name": "mine", "mix": {"banana_bowl": 3}})
+        assert seen["cmd"][seen["cmd"].index("--mix") + 1] == "banana_bowl:3"
+        assert server._env()["DREAMGYM_TASKS"] == str(tmp_path / "gym" / T.TASKS_FILE)
+        assert T.prompt_variants(T.TASKS["banana_bowl"])[0] == "drop the yellow banana in the bowl"
+        # built-in tasks cannot be forgotten; custom ones can
+        assert client.delete("/api/tasks/apple_bowl").status_code == 400
+        names = {t["name"] for t in client.delete("/api/tasks/banana_bowl").json()["tasks"]}
+        assert "banana_bowl" not in names and "orange_plate" in names and "apple_bowl" in names
+    finally:
+        T.load_custom(tmp_path / "nothing.json")  # other tests see the built-in tasks only
+        server.DREAMKIT.pop("tasks", None)

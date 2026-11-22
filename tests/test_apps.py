@@ -140,3 +140,41 @@ def test_forget_drops_a_deleted_clone(tmp_path):
     apps.forget(src)
     shutil.rmtree(src)
     assert "ephemeral" not in sys.modules and str(src) not in sys.path
+
+
+def test_an_app_can_be_uninstalled_from_its_tab(tmp_path, monkeypatch):
+    """DELETE /api/apps/<name>: pip uninstall of the app's distribution, then the tab is gone; an app loaded from a
+    source folder is not pip's to remove and says so."""
+    import subprocess
+
+    from dreamkit import registry
+
+    cfg = tmp_path / "dreamkit.yaml"
+    cfg.write_text(yaml.safe_dump({"runs_dir": str(tmp_path / "runs")}))
+    monkeypatch.setenv("DREAMKIT_PLUGIN_PATH", str(make_app(tmp_path, "shelf", title="Shelf")))
+    client = TestClient(create_app(cfg))
+    res = client.delete("/api/apps/shelf")
+    assert res.status_code == 400 and "DREAMKIT_PLUGIN_PATH" in res.json()["detail"]
+    assert client.delete("/api/apps/nothing").status_code == 404
+
+    real_discover, removed, calls = apps.discover, [], []
+
+    def discover(extra=None):  # the same app, as if pip had installed it; gone once uninstalled
+        found, problems = real_discover(extra)
+        if removed:
+            return {}, problems
+        for a in found.values():
+            a.origin = "pip dreamkit-shelf"
+        return found, problems
+
+    def uninstall_dist(dist):
+        calls.append(dist)
+        removed.append(True)
+        return subprocess.CompletedProcess([dist], 0, "Successfully uninstalled\n", "")
+
+    monkeypatch.setattr(apps, "discover", discover)
+    monkeypatch.setattr(registry, "uninstall_dist", uninstall_dist)
+    res = client.delete("/api/apps/shelf")
+    assert res.status_code == 200 and res.json()["title"] == "Shelf" and calls == ["dreamkit-shelf"]
+    assert "shelf" not in {a["name"] for a in client.get("/api/apps").json()["apps"]}
+    assert client.get("/apps/shelf/api/ping").status_code == 404

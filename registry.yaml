@@ -22,6 +22,7 @@
   tags: [dataset, fine-tuning, learn]
 - name: dreamgym
   kind: app
+  title: Data
   repo: https://github.com/chlorei/hackathon26/tree/main/plugins-external/dreamgym
   pip: git+https://github.com/chlorei/hackathon26.git#subdirectory=plugins-external/dreamgym
   description: "Data tab: collect fine-tuning demos (scripted, Dream-1, teleop) live, review, train, compare base vs fine-tune; Arena/Compare on the command line"

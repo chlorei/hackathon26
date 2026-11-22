@@ -213,12 +213,18 @@ td .play{border:0;background:var(--soft);border-radius:6px;cursor:pointer;paddin
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}
 .vid .nav{display:flex;gap:6px;padding:0 14px 12px;align-items:center;flex-wrap:wrap}
 .vid .marked{color:var(--bad);font-weight:700}
+.badge{font-size:11px;font-weight:650;padding:1px 7px;border-radius:10px;background:var(--soft);color:var(--muted);margin-left:6px;vertical-align:1px}
+.xbtn{border:0;background:transparent;color:var(--muted);cursor:pointer;padding:0 4px;font-size:14px}
+.xbtn:hover{color:var(--bad)}
+.custom{border-top:1px solid var(--soft);padding-top:12px;margin:4px 0 12px}
+.custom .row{display:grid;grid-template-columns:1fr 130px 120px auto;gap:8px;align-items:center}
 </style>
 </head>
 <body>
 <header>
   <div class="brand">Data<span>Collect demonstrations, check them, fine-tune Dream-1 on them, prove it got better</span></div>
   <div class="spacer"></div>
+  <button class="btn sm" id="uninstall" title="remove the Data tab; datasets stay on disk">Uninstall tab</button>
   <button class="btn primary" id="newDs">New dataset</button>
 </header>
 <main>
@@ -357,6 +363,21 @@ $("#newDs").onclick = () => {
   select(name);
 };
 
+// ---- the tab itself: uninstall (pip), the panel drops the tab --------------------------------------------------
+$("#uninstall").onclick = async () => {
+  const busy = list.filter(d => Object.values(d.jobs || {}).some(j => j.running)).map(d => d.name);
+  if (busy.length || tState.status === "running") {
+    alert(`Something is still running (${busy.join(", ") || "teleop"}): stop it first.`); return;
+  }
+  if (!confirm("Uninstall the Data tab?\n\nYour datasets, runs and tasks stay on disk (dreamkit's data folder). To get the tab back: Plugins → Catalogue → Data tab → Install.")) return;
+  try {
+    const res = await fetch("../../api/apps/dreamgym", {method: "DELETE"});  // the panel's API, from /apps/dreamgym/
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(out.detail || res.statusText);
+    window.top.location.href = new URL("../../", location.href).href;  // the panel loads again without the tab
+  } catch (e) { alert("Not uninstalled: " + e.message); }
+};
+
 // ---- one dataset: the four steps ----------------------------------------------------------------------------
 function stepHead(n, title, state, on = true) {
   return `<div class="stephead"><div class="num ${on ? "" : "off"}">${n}</div><h2>${title}</h2><div class="state" id="state${n}">${state || ""}</div></div>`;
@@ -408,7 +429,8 @@ function renderCollect(d) {
     ? `<div class="actions" style="margin-top:0"><span class="hint">Nothing recorded in this dataset yet.</span><button class="btn primary" id="cOpen">Record</button></div>` : "";
   $("#collectForm").classList.toggle("hidden", closed);
   if (closed) { $("#cOpen").onclick = () => { formOpen = true; renderCollect(d); }; }
-  if (changed("collectForm", [source, recording, tasks.length, fillMode])) {
+  if (changed("collectForm", [source, recording, tasks.map(t => t.name), fillMode])) {
+    const keep = formState();
     const seg = [["scripted", "Scripted expert · free"], ["dream-1", "Dream-1 · uses credits"], ["teleop", "Teleop · you drive"]]
       .map(([k, l]) => `<button type="button" data-src="${k}" class="${source === k ? "on" : ""}">${l}</button>`).join("");
     const what = {scripted: "An IK expert that knows where everything is does the task. Only successful episodes are kept.",
@@ -422,9 +444,16 @@ function renderCollect(d) {
       form += `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div class="seg" id="modeSeg" style="margin-bottom:10px">${modes}</div>
           <span class="hint" style="margin-bottom:10px">${fillMode === "upto" ? "The number is how many each task should have in the end; only the missing ones are recorded." : "The number is how many new episodes to keep for each task."}</span></div>
         <div class="taskrows withhave">${tasks.map(t => `<input type="checkbox" class="tk" value="${esc(t.name)}" checked>
-          <div><div class="tn">${esc(t.name)}</div><div class="tp">${esc(t.prompt)}</div></div>
+          <div><div class="tn">${esc(t.name)}${t.custom ? `<span class="badge">yours</span><button type="button" class="xbtn" data-forget="${esc(t.name)}" title="forget this task (its recorded episodes stay)">✕</button>` : ""}</div><div class="tp">${esc(t.prompt)}</div></div>
           <div class="have" data-have="${esc(t.name)}"></div>
           <input type="number" class="tn-n" data-task="${esc(t.name)}" min="1" max="500" value="${def}" title="${fillMode === "upto" ? "episodes this task should have" : "new episodes to keep"}">`).join("")}</div>
+        <div class="custom"><label>Your own task</label>
+          <div class="row"><input id="ctPrompt" maxlength="200" placeholder="e.g. put the banana into the bowl">
+            <select id="ctObj"><option value="">object…</option>${parts.objects.map(o => `<option>${esc(o)}</option>`).join("")}</select>
+            <select id="ctTarget"><option value="">goes to…</option>${parts.targets.map(o => `<option>${esc(o)}</option>`).join("")}</select>
+            <button type="button" class="btn" id="ctAdd">Add task</button></div>
+          <div class="hint" style="margin-top:4px">Write the command the way you want the robot to hear it. The scene has ${parts.objects.join(", ")} and a ${parts.targets.join(" and a ")}: pick which one it moves and where, so success can be checked and the scripted expert can do it. Filled in from your words when it can tell.</div>
+          <div class="error" id="ctErr"></div></div>
         <div class="grid4">
           <div class="field"><label>Object jitter, m</label><input id="cJitter" type="number" step="0.01" min="0" placeholder="task default"></div>
           <div class="field"><label>Lighting ±</label><input id="cLight" type="number" step="0.05" min="0" placeholder="task default"></div>
@@ -435,10 +464,13 @@ function renderCollect(d) {
           <button class="btn primary" id="cGo" ${recording ? "disabled" : ""}>${recording ? "Recording…" : "Start recording"}</button></div>`;
     }
     $("#collectForm").innerHTML = form;
+    formState(keep);
+    formMode = fillMode;
     document.querySelectorAll("#srcSeg button").forEach(b => b.onclick = () => { source = b.dataset.src; renderCollect(detail || d); });
     document.querySelectorAll("#modeSeg button").forEach(b => b.onclick = () => { fillMode = b.dataset.mode; renderCollect(detail || d); });
     if (source !== "teleop") {
       document.querySelectorAll("#collectForm input").forEach(i => i.addEventListener("input", () => { showHave(); estimate(); }));
+      bindCustomTask();
       $("#cGo").onclick = startRecording;
       estimate();
     }
@@ -479,6 +511,59 @@ function renderCollect(d) {
     if (stop) stop.onclick = async () => { stop.disabled = true; await api(`api/dataset/${encodeURIComponent(sel)}/stop`, {}).catch(() => {}); refreshDetail(); };
   }
   $("#state1").textContent = recording ? "recording…" : (d.episodes ? `${d.episodes} episodes so far` : "");
+}
+// the ticks and numbers of the task list survive a re-render (a task added or forgotten, a mode switched)
+let formMode = null;  // the mode the numbers on screen were typed for: switching it means new numbers
+function formState(saved) {
+  if (!saved) {
+    const out = {__mode: formMode};
+    document.querySelectorAll("#collectForm .tk").forEach(c => { out[c.value] = {on: c.checked, n: document.querySelector(`.tn-n[data-task="${c.value}"]`)?.value}; });
+    return out;
+  }
+  Object.entries(saved).forEach(([t, v]) => {
+    const c = document.querySelector(`#collectForm .tk[value="${t}"]`), n = document.querySelector(`.tn-n[data-task="${t}"]`);
+    if (c) c.checked = v.on;
+    if (n && v.n && saved.__mode === fillMode) n.value = v.n;
+  });
+}
+let parts = {objects: ["apple", "banana", "orange"], targets: ["bowl", "plate"]};
+async function reloadTasks(fresh) {
+  tasks = fresh || await api("api/tasks");
+  fillTaskSelects();
+  renderCollect(detail || {episodes: 0, balance: [], rows: [], jobs: {}});
+}
+function bindCustomTask() {
+  const prompt = $("#ctPrompt"), obj = $("#ctObj"), target = $("#ctTarget");
+  let touched = {obj: false, target: false}, timer = null;
+  obj.onchange = () => { touched.obj = true; };
+  target.onchange = () => { touched.target = true; };
+  prompt.oninput = () => {  // what the words name fills the two boxes, unless they were picked by hand
+    clearTimeout(timer);
+    timer = setTimeout(async () => {
+      const g = await api(`api/task-parts?prompt=${encodeURIComponent(prompt.value)}`).catch(() => null);
+      if (!g) return;
+      if (!touched.obj) obj.value = g.obj || "";
+      if (!touched.target) target.value = g.target || "";
+    }, 200);
+  };
+  prompt.onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("#ctAdd").click(); } };
+  $("#ctAdd").onclick = async () => {
+    $("#ctErr").textContent = "";
+    try {
+      const keep = formState();
+      const out = await api("api/tasks", {prompt: prompt.value, obj: obj.value, target: target.value});
+      keep[out.task] = {on: true};  // the new task is ticked
+      await reloadTasks(out.tasks);
+      formState(keep);
+      showHave(); estimate();
+    } catch (e) { $("#ctErr").textContent = e.message; }
+  };
+  document.querySelectorAll("#collectForm [data-forget]").forEach(b => b.onclick = async () => {
+    const name = b.dataset.forget;
+    if (!confirm(`Forget the task ${name}? Episodes already recorded keep it as their task.`)) return;
+    try { const out = await fetch(`api/tasks/${encodeURIComponent(name)}`, {method: "DELETE"}).then(r => r.json()); await reloadTasks(out.tasks); }
+    catch (e) { $("#collectErr").textContent = e.message; }
+  });
 }
 // how many each task already has, and what this recording would add (kept fresh while episodes arrive)
 function showHave() {
@@ -771,6 +856,7 @@ function fillTaskSelects() {
 
 (async () => {
   tasks = await api("api/tasks");
+  parts = await api("api/task-parts").catch(() => parts);
   await refreshList();
   renderStorage();
   if (list.length) select(list[0].name);
