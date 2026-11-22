@@ -18,3 +18,32 @@ def test_stops_the_robot_on_a_camera_failure():
 def test_does_nothing_on_success():
     r = replay("success_apple_bowl", plugins=["failure-monitor", "recovery"])
     assert "recovery" not in r.result and not r.errors("recovery")
+
+
+class _Ctx:
+    """Just enough of an attempt's end for on_episode_end."""
+
+    def __init__(self, reason):
+        self.result = {"success": False, "reason": reason}
+        self.attempt, self.scene, self.said, self.stopped = 1, 0, [], None
+
+    def emit(self, level, message, **data):
+        self.said.append((level, message))
+
+    def stop_run(self, reason, message=""):
+        self.stopped = (reason, message)
+
+    def request_retry(self):
+        pass
+
+
+def test_ends_the_run_after_model_errors_in_a_row():
+    from dreamkit.plugins.recovery import Recovery
+
+    plugin = Recovery(stop_after_model_errors=3)
+    ends = [_Ctx(r) for r in ("model_error", "model_error", "dropped", "model_error", "model_error", "model_error")]
+    for ctx in ends:
+        plugin.on_episode_start(ctx)
+        plugin.on_episode_end(ctx)
+    assert [c.stopped is not None for c in ends] == [False, False, False, False, False, True]  # a drop breaks the streak
+    assert ends[-1].stopped[0] == "model_error" and "3 attempts in a row" in ends[-1].stopped[1]

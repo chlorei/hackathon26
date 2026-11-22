@@ -6,7 +6,7 @@ import { api, atOf, REASON_LABEL, tOf, type DemoState, type EpisodeResult, type 
 import { toast } from '../toast'
 import { useLive, useRunStream, type LiveStore } from '../useRunStream'
 import Feed from './LiveFeed'
-import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginPageDrawer, Sparkline, Tag, type Mark, type PluginPage } from '../ui'
+import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginPageDrawer, Tag, type Mark, type PluginPage } from '../ui'
 
 
 // The same API as README.md: five lines, the loop around them is yours.
@@ -60,24 +60,7 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
               <p className="pb-2 text-[13px] text-faint">{running ? 'The next attempt draws here as soon as your loop starts it.' : 'Open it in History to watch the attempts back.'}</p>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3 border-t border-line px-4 py-3 md:grid-cols-4">
-            {stream.mode?.startsWith('robot') ? (
-              <>
-                <Sparkline live={stream.live} field="grip" label="Gripper opening" unit="" scale={1} color="#2f8fb3" max={1} />
-                <Sparkline live={stream.live} field="track" label="Tracking error" unit="rad" scale={1} color="#c8402f" warnAbove={0.12} />
-                <div className="text-[12px]"><span className="text-dim">Positions</span><p className="mt-2 text-faint">Robot only: no world</p></div>
-              </>
-            ) : (
-              <>
-                <Sparkline live={stream.live} field="d" label="Hand to object" unit="cm" scale={100} color="#2f8fb3" />
-                <Sparkline live={stream.live} field="z" label="Object lifted" unit="cm" scale={100} color="#1f8a5b" max={20} />
-                <Sparkline live={stream.live} field="dt" label="Object to target" unit="cm" scale={100} color="#8a5cc2" />
-              </>
-            )}
-            {live.data?.mock ? (
-              <div className="text-[12px]"><span className="text-dim">Model round trip</span><p className="mt-2 text-faint">Mock: no model calls</p></div>
-            ) : <Sparkline live={stream.live} field="rtt" label="Model round trip" unit="ms" color="#d9822b" warnAbove={700} />}
-          </div>
+          {current && <RobotNow live={stream.live} robotOnly={Boolean(stream.mode?.startsWith('robot'))} mock={Boolean(live.data?.mock)} />}
         </Panel>
         <Attempts episodes={stream.episodes} current={current} onOpen={(ep) => onOpenRun(runId, ep)} />
       </div>
@@ -152,7 +135,7 @@ function NowCard({ events, episodes, current, running, live }: {
   const mine = events.filter((e) => e.episode === ep && e.plugin !== 'dreamkit')
   const verdict = [...mine].reverse().find((e) => e.data?.kind === 'verdict' || (e.level === 'error' && e.data?.reason))
   const recovering = [...mine].reverse().find((e) => e.plugin === 'recovery' && e.data?.action)
-  const last = [...mine].reverse().find((e) => e.level !== 'info' || e.plugin === 'failure-monitor')
+  const last = [...mine].reverse().find((e) => (e.level !== 'info' || e.plugin === 'failure-monitor') && !/model round trip/.test(e.message))
   const done = episodes.length
   const ok = episodes.filter((e) => e.success).length
   const tone = !current ? 'idle' : recovering && (!verdict || (tOf(recovering) ?? 0) >= (tOf(verdict) ?? 0)) ? 'recover'
@@ -335,6 +318,32 @@ function LiveStrip({ live, marks }: { live: LiveStore; marks: Mark[] }) {
   return <AttemptStrip duration={span} marks={marks} playhead={live.t} live />
 }
 
+/** An attempt's failure in a few plain words: no 'at 0.0 s', a chain of moments cut to its first and last. */
+function whyFailed(e: EpisodeResult): string {
+  if (e.success == null) return `ran ${e.duration_s.toFixed(0)} s; did it work? The arm alone cannot tell: mark it in History`
+  if (e.reason === 'model_error') return 'the model did not answer'
+  const at = atOf(e)
+  let text = e.recap?.headline?.replace(/^Attempt \d+: /, '') ?? `${e.message ?? REASON_LABEL[e.reason ?? 'unknown']}${at ? ` at ${at.toFixed(1)} s` : ''}`
+  text = text.replace(/ at 0\.0 s\.?$/, '').replace(/\.$/, '')
+  const parts = text.split(/, (?:then )?/)
+  return parts.length > 2 ? `${parts[0]} … then ${parts[parts.length - 1]}` : text
+}
+
+/** Where the robot is right now, in one sentence (the latest point the loop sent). */
+function RobotNow({ live, robotOnly, mock }: { live: LiveStore; robotOnly: boolean; mock: boolean }) {
+  useLive(live)
+  const v = live.points[live.points.length - 1]?.v ?? {}
+  const cm = (x: number) => `${Math.round(x * 100)} cm`
+  const parts = robotOnly
+    ? [v.grip != null ? `gripper ${v.grip > 0.6 ? 'open' : v.grip < 0.15 ? 'closed' : 'half open'} (${v.grip.toFixed(2)})` : '',
+       v.track != null ? (v.track > 0.12 ? `the arm lags its commands (${v.track.toFixed(2)} rad)` : 'the arm follows its commands') : '']
+    : [v.d != null ? `hand ${cm(v.d)} from the object` : '', v.z != null ? (v.z > 0.01 ? `object lifted ${cm(v.z)}` : 'object on the table') : '',
+       v.dt != null ? `${cm(v.dt)} from the target` : '']
+  if (!mock && v.rtt != null) parts.push(`model answers in ${Math.round(v.rtt)} ms${v.rtt > 700 ? ' (slow)' : ''}`)
+  const text = parts.filter(Boolean).join(' · ')
+  return <p className="border-t border-line px-4 py-2.5 text-[13.5px] text-dim">{text ? text[0].toUpperCase() + text.slice(1) : 'Waiting for the first readings'}</p>
+}
+
 function Attempts({ episodes, current, onOpen }: {
   episodes: EpisodeResult[]
   current: { episode: number; scene: number; attempt: number } | null
@@ -353,10 +362,10 @@ function Attempts({ episodes, current, onOpen }: {
             <button onClick={() => onOpen(e.episode)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-raised/50">
               <Outcome success={e.success} />
               <span className="w-24 shrink-0 text-[13px] text-dim">Scene {e.scene + 1}{e.attempt > 1 ? `, retry ${e.attempt - 1}` : ''}</span>
-              <span className={clsx('min-w-0 flex-1 truncate text-[13px]', e.success ? 'text-ink' : 'text-bad')}>
-                {e.success ? `Done in ${e.duration_s.toFixed(1)} s` : e.recap?.headline?.replace(/^Attempt \d+: /, '') ?? `${e.message ?? REASON_LABEL[e.reason ?? 'unknown']}${atOf(e) != null ? ` at ${atOf(e)!.toFixed(1)} s` : ''}`}
+              <span className={clsx('min-w-0 flex-1 truncate text-[13px]', e.success ? 'text-ink' : e.success === false ? 'text-bad' : 'text-dim')}>
+                {e.success ? `Done in ${e.duration_s.toFixed(1)} s` : whyFailed(e)}
               </span>
-              <span className="shrink-0 text-[12px] text-steel">{e.success ? 'Replay' : 'Watch the failure'}</span>
+              <span className="shrink-0 text-[12px] text-steel">{e.success ? 'Replay' : e.success === false ? 'Watch the failure' : 'Watch and mark it'}</span>
             </button>
           </li>
         ))}

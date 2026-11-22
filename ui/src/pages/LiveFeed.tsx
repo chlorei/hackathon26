@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { recoveriesOf, tOf, type EpisodeResult, type EventRecord } from '../api'
@@ -52,11 +52,43 @@ function Technical({ lines, pages, onPage, onWatch }: {
   return (
     <div className="border-t border-line/50">
       <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-4 py-1.5 pl-9 text-left text-[12px] text-faint hover:text-dim">
-        {open ? '▾' : '▸'} {n} technical {n === 1 ? 'event' : 'events'} <span className="truncate">({[...new Set(lines.map((l) => l.text.replace(/ avg .*/, '').slice(0, 28)))].join(', ')})</span>
+        <span className="shrink-0 whitespace-nowrap">{open ? '▾' : '▸'} {n} technical {n === 1 ? 'event' : 'events'}</span> <span className="min-w-0 truncate">({[...new Set(lines.map((l) => l.text.replace(/ avg .*/, '').slice(0, 28)))].join(', ')})</span>
       </button>
       {open && lines.map((line) => <FeedLine key={line.key} line={line} pages={pages} onPage={onPage} onWatch={onWatch} />)}
     </div>
   )
+}
+
+/** What to do when attempts keep failing the same way. */
+const STREAK_HINT: Record<string, string> = {
+  model_error: 'the model keeps answering with an error: check the Dream API key, the credits or the network',
+  slow_model: 'the model keeps answering too slowly: check the network, or try a lighter model',
+  camera_failure: 'a camera keeps failing: check its cable and what it sees',
+}
+
+/** Groups in feed order, with runs of 3+ finished attempts that failed for the same reason folded into one. */
+type Item = { kind: 'group'; key: string; events: EventRecord[] } | { kind: 'streak'; key: string; reason: string; first: number; last: number }
+function foldStreaks(groups: [string, EventRecord[]][], result: (ep: number) => EpisodeResult | undefined): Item[] {
+  const out: Item[] = []
+  let i = 0
+  while (i < groups.length) {
+    const r = groups[i][0] === 'run' ? undefined : result(Number(groups[i][0]))
+    let j = i
+    while (r && r.success === false && j + 1 < groups.length) {
+      const n = groups[j + 1][0] === 'run' ? undefined : result(Number(groups[j + 1][0]))
+      if (!n || n.success !== false || n.reason !== r.reason) break
+      j++
+    }
+    if (r && j - i + 1 >= 3) {
+      const eps = groups.slice(i, j + 1).map(([k]) => Number(k))
+      out.push({ kind: 'streak', key: `streak-${eps[0]}`, reason: r.reason ?? 'failed', first: Math.min(...eps), last: Math.max(...eps) })
+      i = j + 1
+    } else {
+      out.push({ kind: 'group', key: groups[i][0], events: groups[i][1] })
+      i++
+    }
+  }
+  return out
 }
 
 const isVerdict = (e: EventRecord) => e.plugin === 'failure-monitor' && e.level === 'error' && Boolean(e.data.reason)
@@ -78,19 +110,16 @@ export default function Feed({ events, episodes, current, running, onWatch, page
   const groups = useMemo(() => {
     const by = new Map<string, EventRecord[]>()
     for (const e of shown) {
-      const k = e.episode == null ? 'run' : String(e.episode)
+      const k = !e.episode ? 'run' : String(e.episode)
       if (!by.has(k)) by.set(k, [])
       by.get(k)!.push(e)
     }
-    return [...by.entries()]
+    const all = [...by.entries()]
+    return [...all.filter(([k]) => k !== 'run').reverse(), ...all.filter(([k]) => k === 'run')]  // newest attempt on top
   }, [shown])
-  useEffect(() => {
-    const el = box.current
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight
-  }, [shown.length])
 
   const result = (ep: number) => episodes.find((e) => e.episode === ep)
-  const isOpen = (k: string) => open[k] ?? (k === 'run' || (running && k === String(current)) || !result(Number(k)))
+  const isOpen = (k: string) => open[k] ?? (k !== 'run' && ((running && k === String(current)) || !result(Number(k))))
   const chip = (k: string, label: ReactNode) => (
     <button key={k} onClick={() => setOnly(k)} aria-pressed={only === k}
       className={clsx('rounded-md px-2 py-0.5 text-[12px]', only === k ? 'bg-raised text-ink' : 'text-faint hover:text-ink')}>{label}</button>
@@ -101,15 +130,31 @@ export default function Feed({ events, episodes, current, running, onWatch, page
       <PanelTitle>What the plugins say</PanelTitle>
       <div className="flex flex-wrap items-center gap-1 px-4 pb-2" role="toolbar" aria-label="Show">
         {chip('all', 'All')}{chip('problems', 'Problems')}
-        <span className="mx-1 h-4 w-px bg-line" aria-hidden />
-        {plugins.map((p) => chip(p, <span className="flex items-center gap-1"><PluginIcon name={p} className="!h-3 !w-3" />{p}</span>))}
+        {plugins.length > 0 && (
+          <select aria-label="One plugin" value={plugins.includes(only) ? only : ''} onChange={(e) => setOnly(e.target.value || 'all')}
+            className={clsx('ml-1 rounded-md border border-line bg-panel px-1.5 py-0.5 text-[12px]', plugins.includes(only) ? 'text-ink' : 'text-faint')}>
+            <option value="">One plugin…</option>
+            {plugins.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
       </div>
       <div ref={box} className="flex-1 overflow-y-auto border-t border-line">
         {groups.length === 0 && <p className="px-4 py-8 text-center text-[13px] text-faint">{events.length ? 'Nothing here with this filter.' : 'Plugins report here as they see things happen.'}</p>}
-        {groups.map(([k, evs]) => {
+        {foldStreaks(groups, result).map((item) => {
+          if (item.kind === 'streak') {
+            const n = item.last - item.first + 1
+            return (
+              <section key={item.key} className="border-b border-line bg-bad-soft/40 px-4 py-2">
+                <p className="text-[13px]"><span className="font-semibold">Attempts {item.first}–{item.last}</span>{' '}
+                  <span className="text-bad">✗ {item.reason.replace(/_/g, ' ')} ×{n}</span></p>
+                {STREAK_HINT[item.reason] && <p className="mt-0.5 text-[12px] text-dim">{n} in a row: {STREAK_HINT[item.reason]}</p>}
+              </section>
+            )
+          }
+          const [k, evs] = [item.key, item.events]
           const ep = k === 'run' ? null : Number(k)
           const r = ep == null ? undefined : result(ep)
-          const live = ep != null && !r
+          const live = ep != null && !r && running && ep === current
           // pinned in the header: each plugin's last success/error say on this attempt
           const pinned = [...new Map(evs.filter((e) => e.level === 'success' || e.level === 'error').map((e) => [e.plugin, e])).values()]
           const expanded = isOpen(k)

@@ -38,6 +38,8 @@ class Params(BaseModel):
                                          "gripper opens on the way", json_schema_extra={"unit": "rad"})
     retry_attempts: int = Field(1, ge=0, le=10, description="Retries of a failed scene once recoveries are used up",
                                 json_schema_extra={"unit": ""})
+    stop_after_model_errors: int = Field(5, ge=0, le=100, description="End the run after this many attempts in a "
+                                         "row fail with a model error (0: never)", json_schema_extra={"unit": ""})
     retry_reasons: list[str] = Field(["dropped", "released_early", "grasped_air", "collision", "stalled"],
                                      description="Final reasons worth a retry",
                                      json_schema_extra=CHOICES)
@@ -155,6 +157,13 @@ class Recovery(Plugin):
         return rows
 
     def on_episode_end(self, ctx: PluginContext) -> None:
+        # the model failing attempt after attempt: more attempts only spin (the key, credits or network is the cause)
+        streak = getattr(self, "model_errors", 0) + 1 if ctx.result.get("reason") == "model_error" else 0
+        self.model_errors = streak
+        if 0 < self.params.stop_after_model_errors <= streak:
+            ctx.stop_run("model_error", f"{streak} attempts in a row ended in a model error: the run stops "
+                         "(check the Dream API key, the credits or the network)")
+            ctx.emit("error", f"{streak} attempts in a row ended in a model error: stopping the run")
         if self.used:
             worked = ctx.result.get("success") is True
             ctx.result["recovery"] = {"count": self.used, "actions": self.actions, "worked": worked}
