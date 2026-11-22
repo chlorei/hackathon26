@@ -114,6 +114,7 @@ class Context:
     mock: bool = False  # a scripted client: no model, nothing billed
     emitter: Emitter | None = None
     world: World = field(default_factory=lambda: World(None))
+    eval_world: World | None = None  # the simulator's world, for evaluation tools only (Kit hide_world)
     robot: Robot = field(default_factory=Robot)
     _retry: bool = False
     _stop_run: dict[str, Any] | None = None  # set by ctx.stop_run(): {"by", "reason"}; the loop starts no new attempt
@@ -297,6 +298,7 @@ class PluginContext:
         self._plugin = plugin
         self._name = plugin.name
         self._cap = plugin.manifest.capability
+        self._evaluator = plugin.manifest.group == "evaluation"
         self._hook = hook_name
         self.ui = UI(core, self._name)
         self.files = Files(core, self._name)
@@ -333,7 +335,9 @@ class PluginContext:
     reply = property(lambda self: self._core.reply)
     store = property(lambda self: self._core.store)  # shared between plugins, by agreement
     episodes = property(lambda self: list(self._core.episodes))
-    world = property(lambda self: self._core.world)
+    ## the simulator's world: evaluation tools only (§6); working plugins get it only when the loop passes env=
+    world = property(lambda self: self._core.eval_world if self._evaluator and self._core.eval_world is not None
+                     else self._core.world)
     robot = property(lambda self: self._core.robot)
     target = property(lambda self: self._core.target)
     frames_new = property(lambda self: self._core.frames_new and self._plugin.manifest.needs_frames)

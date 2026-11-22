@@ -56,8 +56,10 @@ def test_a_crashing_plugin_becomes_an_error_event_then_is_switched_off():
 
 def test_builtins_are_discovered_and_retry_is_merged():
     manager = PluginManager([PluginSpec(name=n) for n in ("success-check", "failure-monitor", "retry", "nope")])
-    assert manager.names == ["success-check", "failure-monitor"]
+    assert manager.names == ["failure-monitor"]
     assert manager.missing == ["nope"] and "part of recovery" in manager.refused["retry"]
+    assert "evaluation tool" in manager.refused["success-check"]  # §6: the world is for evaluation only
+    assert PluginManager([PluginSpec(name="success-check")], evaluation=True).names == ["success-check"]
 
 
 def test_requires_orders_and_refuses():
@@ -78,7 +80,7 @@ def test_requires_orders_and_refuses():
 
 
 def test_params_are_validated_models():
-    p = PluginManager([PluginSpec(name="failure-monitor", params={"reach_m": 0.05})]).plugins[0]
-    assert isinstance(p.params, BaseModel) and p.params.reach_m == 0.05
-    bad = PluginManager([PluginSpec(name="failure-monitor", params={"reach_m": -1})])
+    p = PluginManager([PluginSpec(name="failure-monitor", params={"track_err_rad": 0.2})]).plugins[0]
+    assert isinstance(p.params, BaseModel) and p.params.track_err_rad == 0.2
+    bad = PluginManager([PluginSpec(name="failure-monitor", params={"track_err_rad": -1})])
     assert not bad.plugins and "invalid settings" in bad.failed[0]

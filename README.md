@@ -59,7 +59,7 @@ as on that page:
 1. **Install dreamkit and make a config**
    ```bash
    pip install dreamkit && dreamkit init      # dreamkit.yaml: success-check, failure-monitor, camera-check,
-                                              # recovery, reliability, monitor-stats (an existing one is kept)
+                                              # recovery, reliability, vision-judge (an existing one is kept)
    ```
 2. **Wrap your Dream-1 client: one line**
    ```python
@@ -72,7 +72,7 @@ as on that page:
    ```
 3. **Run your loop**: `python my_robot.py`, and `dreamkit ui` (Live comes alive with it).
 
-Keys go in `.env` next to `dreamkit.yaml`: `DREAM_API_KEY` for Dream-1, `GEMINI_API_KEY` for monitor-stats and the
+Keys go in `.env` next to `dreamkit.yaml`: `DREAM_API_KEY` for Dream-1, `GEMINI_API_KEY` for vision-judge and the
 Create tab.
 
 ## On a real robot

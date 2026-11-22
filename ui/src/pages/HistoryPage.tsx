@@ -30,7 +30,7 @@ const field = (e: EpisodeResult, key: string) => (e as unknown as Record<string,
 /** A real run bills the model's time; mock and scripted ones bill nothing. */
 const isReal = (r: RunInfo) => r.kind === 'dream' && !r.mock
 const costText = (r: RunInfo) => (!isReal(r) ? 'free' : r.cost_usd == null ? DASH : `$${r.cost_usd.toFixed(2)}`)
-/** What a run's camera judge (monitor-stats) did: off, judged (and agreed), or not judged and why. */
+/** What a run's camera judge (vision-judge) did: off, judged (and agreed), or not judged and why. */
 const GO_PLUGINS = (name: string) => <a href={`#/plugins/${name}`} className="text-signal hover:underline">switch it on in Plugins</a>
 /** A failure of the camera judge, and what to do about it. */
 function judgeHint(why: string): string {
@@ -39,11 +39,11 @@ function judgeHint(why: string): string {
   return why
 }
 function judgeText(r: RunInfo): ReactNode {
-  if (!(r.plugins ?? []).includes('monitor-stats')) return <>off in this run · {GO_PLUGINS('monitor-stats')}</>
+  if (!(r.plugins ?? []).includes('vision-judge')) return <>off in this run · {GO_PLUGINS('vision-judge')}</>
   const eps = (r.episodes ?? []).filter(valid)
-  const judged = eps.filter((e) => typeof field(e, 'monitor-stats')?.success === 'boolean' && typeof e.success === 'boolean')
-  const agree = judged.filter((e) => field(e, 'monitor-stats')!.success === e.success).length
-  const why = [...new Set(eps.map((e) => field(e, 'monitor-stats')?.error as string | undefined).filter(Boolean))]
+  const judged = eps.filter((e) => typeof field(e, 'vision-judge')?.success === 'boolean' && typeof e.success === 'boolean')
+  const agree = judged.filter((e) => field(e, 'vision-judge')!.success === e.success).length
+  const why = [...new Set(eps.map((e) => field(e, 'vision-judge')?.error as string | undefined).filter(Boolean))]
   const parts = [judged.length ? `${agree} of ${judged.length} agree with success-check` : '']
   if (why.length) parts.push(`${eps.length - judged.length} not judged: ${[...new Set(why.map((w) => judgeHint(w ?? "")))].join('; ')}`)
   return parts.filter(Boolean).join(' · ') || 'no verdict recorded'

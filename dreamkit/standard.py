@@ -13,7 +13,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 API_VERSION = "1"
-GROUPS = ("core", "diagnosis", "safety", "output")
+GROUPS = ("core", "diagnosis", "safety", "output", "evaluation")
 CAPABILITIES = ("observe", "modify_actions", "control")
 HOOKS = ("on_run_start", "on_episode_start", "before_model", "after_model", "on_step", "on_episode_end",
          "on_run_end")
@@ -51,7 +51,9 @@ class Manifest(BaseModel):
     kind: Literal["loop", "app"] = "loop"
     ## The tab's label of an app plugin ("Gym"); loop plugins show their name.
     title: str | None = None
-    group: Literal["core", "diagnosis", "safety", "output"] = "diagnosis"
+    ## "evaluation": a tool that measures dreamkit in the simulator (dreamkit doctor --sim, replay tests), never part of
+    ## the working loop; only these may need the world (§6).
+    group: Literal["core", "diagnosis", "safety", "output", "evaluation"] = "diagnosis"
     icon: str = "Plug"  # a lucide-react icon name
     capability: Literal["observe", "modify_actions", "control"] = "observe"
     hooks: list[str] = Field(default_factory=list)
@@ -59,8 +61,8 @@ class Manifest(BaseModel):
     needs_frames: bool = False
     requires: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
-    ## What it reads: "robot" (state, gripper, command, cameras — every robot) and/or "world" (positions,
-    ## contacts — only the simulator). A plugin that needs the world is off on a real robot ("sim only").
+    ## What it reads: "robot" (state, gripper, command, cameras: what a real arm reports). "world" (positions,
+    ## contacts: the simulator only) is for evaluation tools alone (group "evaluation"), never for the working loop.
     needs: list[Literal["robot", "world"]] = Field(default_factory=lambda: ["robot"])
     ## §7a: an optional page shown in the panel, relative to the plugin's module folder ("ui/index.html").
     ui: str | None = None
@@ -139,6 +141,10 @@ def check_class(cls: type) -> list[Problem]:
     out: list[Problem] = []
     name = getattr(cls, "name", None)
     m0 = getattr(cls, "manifest", None)
+    if isinstance(m0, Manifest) and "world" in m0.needs and m0.group != "evaluation":
+        out.append(Problem("§6", _where(cls, "manifest"), 'needs "world" in a working-loop plugin',
+                           "dreamkit works from what a real arm reports (ctx.robot); the world is for evaluation tools "
+                           '(group="evaluation") only. Judge from the gripper, joints, commands and cameras.'))
     if isinstance(m0, Manifest) and m0.kind != "loop":
         out.append(Problem("§13", _where(cls, "manifest"), 'a Plugin class with kind="app"',
                            "App plugins are dreamkit.sdk.App objects under the dreamkit.apps entry point."))

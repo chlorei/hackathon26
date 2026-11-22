@@ -1,9 +1,9 @@
-"""monitor-stats: a vision model judges every attempt from its camera frames, and keeps the statistics across runs.
+"""vision-judge: a vision model judges every attempt from its camera frames, and keeps the statistics across runs.
 
 success-check decides from the simulator's object positions; this plugin decides from what the camera saw, so it also
 works on a real robot, says why in words, and tells how often it agrees with success-check. Per attempt it keeps a
 thinned buffer of one camera's frames (cheap, on_step), and on_episode_end sends evenly picked frames + the task to
-Gemini (or Claude) on the ctx.defer worker. The frames it saw and its verdicts go to run_dir/monitor-stats/
+Gemini (or Claude) on the ctx.defer worker. The frames it saw and its verdicts go to run_dir/vision-judge/
 (ep003_f0.jpg…, attempts.json) for the plugin's page (ui/index.html). At the end of a run it aggregates every judged attempt in runs/: success
 rate with a Wilson interval, by task, top failure reasons, agreement with success-check, and which task needs more
 demonstrations.
@@ -29,13 +29,14 @@ from dreamkit.standard import Manifest
 
 from . import judge as judge_mod
 
-KEY = "monitor-stats"
+KEY = "vision-judge"
 
 
 class Params(BaseModel):
     camera: str = Field("top", description="Camera the judge looks at (the first one if it is missing)",
                         json_schema_extra={"choices": ["top", "left", "right"]})
-    frames: int = Field(10, ge=2, le=16, description="Frames per try sent to the judge (each recovery starts a new try)",
+    frames: int = Field(1, ge=1, le=16, description="Frames per try sent to the judge, the last one always among them "
+                        "(1: the last frame, what the scene ends as; each recovery starts a new try)",
                         json_schema_extra={"unit": ""})
     image_width: int = Field(512, ge=64, le=1280, description="Frames are scaled down to at most this many pixels "
                              "wide", json_schema_extra={"unit": ""})
@@ -123,7 +124,7 @@ def _past_episodes(runs_dir: Path, this_run: Path) -> list[dict[str, Any]]:
 
 # --- the plugin ------------------------------------------------------------------------------------------------------
 
-class MonitorStats(Plugin):
+class VisionJudge(Plugin):
     """Judges each attempt from camera frames with a vision model and keeps stats across runs."""
 
     name = KEY
@@ -171,7 +172,8 @@ class MonitorStats(Plugin):
         if not self.buf:
             return
         n = min(self.params.frames, len(self.buf))
-        picked = [self.buf[round(i * (len(self.buf) - 1) / max(1, n - 1))] for i in range(n)]
+        picked = ([self.buf[-1]] if n == 1  # the last frame: how the scene ended
+                  else [self.buf[round(i * (len(self.buf) - 1) / (n - 1))] for i in range(n)])
         self.buf = []
         try_no = self.segment + 1
         ctx.emit("info", "judging attempt" if final else f"judging try {try_no}", frames=n, try_no=try_no)

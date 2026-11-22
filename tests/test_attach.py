@@ -16,17 +16,19 @@ SIM = ROOT.parent / "dreamlabs" / "dream_library" / "examples" / "yam_mujoco"
 def test_overlay_on_dream_labs_loop_recovers_and_reports(tmp_path):
     cfg = tmp_path / "dreamkit.yaml"
     cfg.write_text(yaml.safe_dump({"runs_dir": str(tmp_path / "runs"),
-                                   "plugins": ["success-check", "failure-monitor", "recovery"]}))
+                                   "plugins": ["failure-monitor", "recovery"]}))
     out = subprocess.run([sys.executable, "-m", "dreamkit.cli", "-c", str(cfg), "run", "--no-panel", "--mock",
                           "grasped_air", "--", "python", str(SIM / "dream_control.py"), "--headless", "--seconds",
                           "45", "--quiet"], capture_output=True, text=True, timeout=600, cwd=tmp_path)
-    assert "dreamkit: attempt 1 ✓ success" in out.stdout, out.stdout + out.stderr
+    assert "dreamkit: attempt 1" in out.stdout, out.stdout + out.stderr
     run = next((tmp_path / "runs").iterdir())
     events = [json.loads(line) for line in (run / "events.jsonl").read_text().splitlines()]
     said = [(e.get("plugin"), e.get("message", "")) for e in events]
     assert any(p == "failure-monitor" and "grasped air" in m for p, m in said)
     assert any(p == "recovery" and "grasped air" in m for p, m in said)
-    assert json.loads((run / "run.json").read_text())["episodes"][0]["success"] is True
+    ep = json.loads((run / "run.json").read_text())["episodes"][0]
+    assert ep["success"] is None  # the arm's signals cannot tell done from not: vision-judge or a person decides
+    assert json.loads((run / "run.json").read_text())["mode"] == "robot only (no world)"
 
 
 class _FakeDream:

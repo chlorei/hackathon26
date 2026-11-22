@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>monitor-stats</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>vision-judge</title></head>
 <body>
 <!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
      dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
 <script src="/theme/dreamkit-page.js"></script>
 <script>
-// monitor-stats: what the camera judge saw in each try (its frames and verdicts), and how often it agreed.
+// vision-judge: what the camera judge saw in each try (its frames and verdicts), and how often it agreed.
 const judged = (r) => typeof r.success === 'boolean'
 const isFinal = (r) => r.final !== false
 // this machine's model calls today (dreamkit counts its own; Gemini's free tier allows about 20 a model a day)
@@ -23,7 +23,7 @@ dk.plugin({
     usageLine(dk.INFO.llm_usage),
   ],
   numbers: async (c) => {
-    c.rows = (await dk.json('monitor-stats/attempts.json')) || []
+    c.rows = (await dk.json('vision-judge/attempts.json')) || []
     const finals = c.rows.filter(isFinal), j = finals.filter(judged), ok = j.filter((r) => r.success).length
     const both = j.filter((r) => typeof r.check === 'boolean'), agree = both.filter((r) => r.check === r.success).length
     const caught = c.rows.filter((r) => !isFinal(r) && judged(r) && !r.success).length
@@ -43,7 +43,7 @@ dk.plugin({
         judged(r) && typeof r.check === 'boolean' ? dk.h('span', { class: r.check === r.success ? 'dk-faint' : 'dk-warn' }, r.check === r.success ? 'agrees with success-check' : `success-check says ${r.check ? 'success' : 'failed'}`) : null),
       r.reason || r.error ? dk.h('p', { class: 'dk-faint' }, r.reason || r.error) : null,
       dk.h('div', { class: 'dk-frames' }, (r.frames || []).map((f, i) => dk.h('figure', { class: f.status === 'error' ? 'bad' : '' },
-        f.file ? dk.h('img', { src: dk.media(`monitor-stats/${f.file}`), alt: `frame ${i + 1}`, loading: 'lazy' }) : null,
+        f.file ? dk.h('img', { src: dk.media(`vision-judge/${f.file}`), alt: `frame ${i + 1}`, loading: 'lazy' }) : null,
         dk.h('figcaption', {}, `${f.t_s != null ? dk.fmt(f.t_s) + ' s' : ''}${f.comment ? ' · ' + f.comment : ''}`))))))
   },
   download: false,  // its Data card below has JSON and CSV
@@ -64,13 +64,13 @@ dk.plugin({
       const lines = rows.map((r) => [r.episode, r.try ?? 1, r.task, judged(r) ? r.success : '', r.score, r.reason_code, r.reason, r.check,
         ((r.frames || []).find((f) => f.status === 'error') || {}).t_s, r.model_s, r.error].map(cell).join(','))
       const url = URL.createObjectURL(new Blob([['episode,try,task,judge_success,score,reason_code,reason,success_check,first_error_s,model_s,error', ...lines].join('\n') + '\n'], { type: 'text/csv' }))
-      const a = dk.h('a', { href: url, download: `monitor-stats_${dk.RUN}.csv` }); document.body.append(a); a.click(); a.remove()
+      const a = dk.h('a', { href: url, download: `vision-judge_${dk.RUN}.csv` }); document.body.append(a); a.click(); a.remove()
     }
     return [
       dk.card('Score of each try', dk.bars(rows.filter(judged).map((r) => ({ label: rows.filter((x) => x.episode === r.episode).length > 1 ? `${r.episode}.${r.try}` : `${r.episode}`, value: r.score, tone: r.success ? 'ok' : 'bad', title: `attempt ${r.episode}, try ${r.try ?? 1}: score ${r.score}` })), { max: 100 })),
       Object.keys(counts).length ? dk.card('Why the camera says it failed', dk.hbars(Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([label, value]) => ({ label, value, tone: 'bad' })))) : null,
       bins.some((b) => b.value) ? dk.card('First flagged frame of a failed try', dk.bars(bins), dk.h('p', { class: 'dk-faint' }, 'frames are spread evenly over the try: 1 is its start')) : null,
-      dk.card('Data', dk.row(dk.downloadButton('monitor-stats', () => rows), dk.h('button', { class: 'dk-btn', on: { click: csv } }, 'Download CSV'))),
+      dk.card('Data', dk.row(dk.downloadButton('vision-judge', () => rows), dk.h('button', { class: 'dk-btn', on: { click: csv } }, 'Download CSV'))),
     ]
   },
 })

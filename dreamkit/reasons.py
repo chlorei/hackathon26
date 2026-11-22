@@ -8,6 +8,7 @@ REASONS: dict[str, str] = {
     "dropped": "dropped",
     "released_off_target": "released off target",
     "grasped_air": "grasped air",
+    "released_early": "let go too early",
     "not_reached": "not reached",
     "collision": "collision",
     "fell_off_table": "fell off table",
@@ -25,7 +26,7 @@ REASONS: dict[str, str] = {
     "budget_exhausted": "credit budget used up",  # budget-guard: the run stops safely before the money runs out
 }
 ## Codes for a failure of the task itself (what failure-monitor diagnoses and recovery can act on).
-FAILURES = ("dropped", "released_off_target", "grasped_air", "not_reached", "collision",
+FAILURES = ("dropped", "released_early", "released_off_target", "grasped_air", "not_reached", "collision",
             "fell_off_table", "stalled", "still_held", "slow_model", "camera_failure", "timeout")
 ## Codes written by runs before the standard, still read by the panel.
 LEGACY = {"stopped_by_plugin": "camera_failure", "missed_target": "released_off_target",

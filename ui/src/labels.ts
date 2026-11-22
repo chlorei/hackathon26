@@ -23,6 +23,7 @@ export const REASON_LABEL: Record<string, string> = {
   released_off_target: 'released off target',
   camera_failure: 'camera failure',
   grasped_air: 'grasped air',
+  released_early: 'let go too early',
   collision: 'collision',
   stalled: 'stalled',
   still_held: 'still held at the end',

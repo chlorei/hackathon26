@@ -1,6 +1,6 @@
 """The one place dreamkit's numbers come from: how sure is "7 of 10", is A really better than B, what a success costs.
 
-History, the Data tab (DreamGym), reliability and monitor-stats all call these functions, so the same attempts give
+History, the Data tab (DreamGym), reliability and vision-judge all call these functions, so the same attempts give
 the same numbers on every screen. Dependency-free (math only).
 
 Which attempts count: an attempt whose outcome is known (success True or False) and whose task dreamkit could read

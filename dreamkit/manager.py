@@ -21,7 +21,7 @@ from .config import PluginSpec
 from .plugin import Context, EndEpisode, Plugin, PluginContext, StopEpisode
 from .standard import HOOKS, PluginStandardError, Problem
 
-BUILTIN_MODULES = ("success_check", "failure_monitor", "camera_check", "recovery", "recorder", "harvester", "budget_guard")
+BUILTIN_MODULES = ("failure_monitor", "camera_check", "recovery", "recorder", "harvester", "budget_guard")
 LOCAL_DIRS = (Path("~/.dreamkit/plugins").expanduser(), Path("plugins"))
 GENERATED_DIR = "plugins-generated"  # the Create tab's checked packages, beside the config's plugins/ folder
 ## Hooks that run inside a control step and count against the budget (§5).
@@ -45,6 +45,11 @@ def _classes_in(module) -> list[type[Plugin]]:
             if issubclass(obj, Plugin) and obj is not Plugin and obj.__module__.startswith(module.__name__)]
 
 
+## Evaluation tools: they read the simulator's world, so they never run in the working loop (only in dreamkit doctor
+## --sim and the replay tests, where the Kit is told evaluation=True).
+EVALUATION_MODULES = ("dreamkit.evaluate.success_check", "dreamkit.evaluate.world_judge")
+
+
 def discover(extra_dirs: list[Path] | None = None) -> tuple[dict[str, dict[str, Any]], list[str]]:
     """Every plugin that imports, by name: {"cls", "source", "origin"}. A plugin that breaks the standard does not
     import (PluginStandardError) and is listed in problems with the rule and the fix."""
@@ -65,6 +70,9 @@ def discover(extra_dirs: list[Path] | None = None) -> tuple[dict[str, dict[str, 
         if importlib.util.find_spec(name) is None:
             continue
         take(lambda name=name: _classes_in(importlib.import_module(name)), "builtin", name)
+    for name in EVALUATION_MODULES:  # tools that measure dreamkit in the simulator (doctor --sim, replay tests)
+        if importlib.util.find_spec(name) is not None:
+            take(lambda name=name: _classes_in(importlib.import_module(name)), "evaluation", name)
     for ep in entry_points(group="dreamkit.plugins"):
         if ep.value.startswith("dreamkit.plugins."):
             continue
@@ -159,8 +167,9 @@ class Stats:
 class PluginManager:
     """The plugins of one run, in load order, each with its own scoped context."""
 
-    def __init__(self, specs: list[PluginSpec], extra_dirs: list[Path] | None = None):
+    def __init__(self, specs: list[PluginSpec], extra_dirs: list[Path] | None = None, evaluation: bool = False):
         self.available, self.problems = discover(extra_dirs)
+        self.evaluation = evaluation
         self.plugins: list[Plugin] = []
         self.refused: dict[str, str] = {}
         self.missing: list[str] = []
@@ -182,6 +191,10 @@ class PluginManager:
             entry = self.available.get(spec.name)
             if entry is None:
                 self.missing.append(spec.name)
+                continue
+            if entry["source"] == "evaluation" and not evaluation:
+                self.refused[spec.name] = ("an evaluation tool (it reads the simulator's world): only dreamkit doctor "
+                                           "--sim uses it; success comes from vision-judge or a person")
                 continue
             try:
                 candidates.append(entry["cls"](**spec.params))

@@ -240,7 +240,7 @@ def replay(fixture: str | Path, plugins: list[Any], keep: bool = False, extra_di
     env = ReplayEnv(fx, world=world)
     tmp = Path(tempfile.mkdtemp(prefix="dreamkit-replay-"))
     specs = [p if isinstance(p, (str, dict)) else str(p) for p in plugins]
-    kit = Kit(ReplayClient(fx), config=None, console=False, data_dir=str(tmp), plugins=specs,
+    kit = Kit(ReplayClient(fx), config=None, console=False, data_dir=str(tmp), plugins=specs, evaluation=True,
               plugin_dirs=[Path(d) for d in extra_dirs or []])
     call_steps = [c["step"] for c in fx.calls]
     with kit.episode(fx.task, env=env, images=fx.frames_at(0)):

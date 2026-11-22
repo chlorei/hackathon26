@@ -33,13 +33,13 @@ def test_what_the_robot_cannot_know_stays_unknown(fixture):
     assert r.result["success"] is None and not r.result.get("reason")
 
 
-def test_robot_and_world_agree_where_the_robot_can_tell():
+def test_the_monitor_agrees_with_world_judge_where_the_arm_can_tell():
+    """failure-monitor (the arm's signals) against world-judge (the simulator's world): same reason, same second."""
     for fixture in ("grasped_air", "dropped_mid_carry", "collision_table", "stalled"):
-        w = replay(fixture, plugins=PLUGINS).result
-        r = replay(fixture, plugins=PLUGINS, world=False).result
+        w = replay(fixture, plugins=["success-check", "world-judge"]).result["world-judge"]
+        r = replay(fixture, plugins=["failure-monitor"], world=False).result
         assert w["reason"] == r["reason"], fixture
         assert abs(w["at_s"] - r["at_s"]) <= 0.5, fixture
-        assert w["details"]["source"] == "world" if fixture != "stalled" else True
 
 
 def test_recovery_works_without_the_simulator():
@@ -71,12 +71,17 @@ class Fake:
         return {"q_l_chunk": np.zeros((48, 7)).tolist(), "q_r_chunk": np.zeros((48, 7)).tolist()}
 
 
-def test_sim_only_plugins_are_off_on_a_robot(tmp_path):
+def test_a_working_plugin_may_not_need_the_world_and_evaluation_tools_stay_out(tmp_path):
+    """§6: the world is for evaluation tools; the working loop refuses them, and a plugin that needs it."""
     (tmp_path / "plugins").mkdir()
     (tmp_path / "plugins" / "needs_world.py").write_text(SIM_ONLY)
     cfg = tmp_path / "dreamkit.yaml"
-    cfg.write_text(yaml.safe_dump({"runs_dir": str(tmp_path / "runs"), "plugins": ["needs-world", "harvester"]}))
+    cfg.write_text(yaml.safe_dump({"runs_dir": str(tmp_path / "runs"),
+                                   "plugins": ["needs-world", "success-check", "world-judge", "harvester"]}))
     client = dreamkit.wrap(Fake(), config=cfg, console=False)
+    assert any("needs_world.py" in p and "§6" in p for p in client.manager.problems)  # refused by the standard
+    assert "evaluation tool" in client.manager.refused["success-check"]
+    assert "evaluation tool" in client.manager.refused["world-judge"]
     state = {"left": np.zeros(7), "right": np.zeros(7)}
     with client.episode("put apple into the bowl", state=state):
         client.get_action()
@@ -86,7 +91,6 @@ def test_sim_only_plugins_are_off_on_a_robot(tmp_path):
     assert "world_steps" not in client.ctx.store
     run = json.loads(next((tmp_path / "runs").glob("*/run.json")).read_text())
     assert run["mode"] == "robot only (no world)"
-    assert "sim only" in run["plugin_stats"]["needs-world"]["inactive"]
     assert run["episodes"][0]["success"] is None  # nobody could judge it
 
 

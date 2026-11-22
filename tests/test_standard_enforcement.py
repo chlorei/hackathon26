@@ -133,7 +133,7 @@ def test_a_plugin_page_in_the_theme_passes(tmp_path):
     (tmp_path / "ui" / "index.html").write_text(
         '<style>.x { color: var(--dk-ok); border: 1px solid var(--dk-line); font-family: var(--dk-font-mono) }'
         ' #grid:hover { fill: var(--dk-bad) }</style><div class="dk-card" style="background: var(--dk-panel)"></div>'
-        '<script>fetch(`/media/${run}/monitor-stats/results.json`); el.style.color = "var(--dk-bad)"</script>'
+        '<script>fetch(`/media/${run}/vision-judge/results.json`); el.style.color = "var(--dk-bad)"</script>'
         '<a href="/media/r/x/results.csv" download>csv</a>')
     assert check_ui(tmp_path, "ui/index.html") == []
 

@@ -1,7 +1,7 @@
 [project]
-name = "dreamkit-monitor-stats"
+name = "dreamkit-vision-judge"
 version = "0.1.0"
-description = "monitor-stats: a vision model judges every attempt from camera frames; stats across runs"
+description = "vision-judge: a vision model judges every attempt from camera frames; stats across runs"
 requires-python = ">=3.11"
 dependencies = ["dreamkit>=0.3,<0.4", "google-genai>=1.0", "pillow>=10"]
 
@@ -10,7 +10,7 @@ claude = ["anthropic>=1.0"]
 dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
 
 [project.entry-points."dreamkit.plugins"]
-monitor-stats = "monitor_stats:MonitorStats"
+vision-judge = "vision_judge:VisionJudge"
 
 [tool.dreamkit]
 api = "1"
@@ -29,7 +29,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["monitor_stats"]
+packages = ["vision_judge"]
 
 [tool.ruff]
 line-length = 119
@@ -42,7 +42,7 @@ select = ["E", "F", "I", "UP", "B", "N"]
 python_version = "3.11"
 strict = true
 ignore_missing_imports = true
-files = ["monitor_stats"]
+files = ["vision_judge"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

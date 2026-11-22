@@ -408,3 +408,23 @@ def refresh(root: Path, *, suffix: str | None = None, log: Any = print) -> dict[
     if model:
         log(f"fine-tune ready: {model}")
     return rec["finetune"]
+
+
+def resolve_pending(datasets_dir: Path, harvested: dict[str, Any] | None, success: bool) -> dict[str, Any] | None:
+    """An attempt the harvester kept waiting (.pending/) gets its answer: ✓ appends it to its dataset, ✗ drops it.
+    Returns the attempt's new harvester record (or the old one when nothing was waiting)."""
+    h = harvested or {}
+    if not (h.get("pending") and h.get("dataset")):
+        return harvested
+    root = Path(datasets_dir) / h["dataset"]
+    pending = root / ".pending" / h["pending"]
+    if not pending.is_dir():
+        return harvested
+    try:
+        if success:
+            link = json.loads((pending / "link.json").read_text()) if (pending / "link.json").is_file() else {}
+            index = append_episode(root, pending, source="harvester", **link)
+            return {"dataset": h["dataset"], "index": index, "frames": h.get("frames")}
+        return {"dataset": None, "dropped": True}
+    finally:
+        shutil.rmtree(pending, ignore_errors=True)

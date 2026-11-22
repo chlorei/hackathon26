@@ -15,9 +15,9 @@ const STAGES: { key: 'detect' | 'recover' | 'learn'; n: number; title: string; h
 
 /** Three ready sets: most people want one of these, not a list of eleven switches. Each includes the one before. */
 const SETS: { key: string; title: string; what: string; plugins: string[] }[] = [
-  { key: 'watch', title: 'Watch', what: 'See what happens and why an attempt fails', plugins: ['success-check', 'failure-monitor', 'camera-check', 'monitor-stats'] },
-  { key: 'rescue', title: 'Rescue', what: 'Also save failing attempts and stop before the credits run out', plugins: ['success-check', 'failure-monitor', 'camera-check', 'monitor-stats', 'recovery', 'budget-guard'] },
-  { key: 'learn', title: 'Learn', what: 'Also keep videos and turn good attempts into training data', plugins: ['success-check', 'failure-monitor', 'camera-check', 'monitor-stats', 'recovery', 'budget-guard', 'recorder', 'harvester', 'fine-tune'] },
+  { key: 'watch', title: 'Watch', what: 'See what happens and why an attempt fails', plugins: ['vision-judge', 'failure-monitor', 'camera-check', 'gripper-check'] },
+  { key: 'rescue', title: 'Rescue', what: 'Also save failing attempts and stop before the credits run out', plugins: ['vision-judge', 'failure-monitor', 'camera-check', 'gripper-check', 'recovery', 'budget-guard'] },
+  { key: 'learn', title: 'Learn', what: 'Also keep videos and turn good attempts into training data', plugins: ['vision-judge', 'failure-monitor', 'camera-check', 'gripper-check', 'recovery', 'budget-guard', 'recorder', 'harvester'] },
 ]
 
 function Sets({ list }: { list: PluginInfo[] }) {
@@ -107,7 +107,7 @@ export default function PluginsPage({ focus }: { focus?: string | null }) {
             <p className="mt-1 text-dim">{(() => {
               // the one-line answer: what the plugins that are on do for the run
               const has = (n: string) => list.some((p) => p.name === n && p.enabled)
-              const does = [has('failure-monitor') || has('success-check') ? 'watch every attempt' : '', has('recovery') ? 'rescue failing ones' : '',
+              const does = [has('failure-monitor') ? 'watch every attempt' : '', has('recovery') ? 'rescue failing ones' : '',
                 has('harvester') || has('fine-tune') ? 'keep good ones for training' : ''].filter(Boolean)
               return `${on} of ${list.length} on${does.length ? `: they ${does.join(', ')}` : ''}. Changes apply the next time your loop starts.`
             })()}</p>

@@ -35,7 +35,7 @@ class Params(BaseModel):
                                 json_schema_extra={"unit": ""})
 
 
-# the one statistics module (History, Data, monitor-stats use it too)
+# the one statistics module (History, Data, vision-judge use it too)
 wilson, mcnemar_exact, fisher_exact = stats.wilson, stats.mcnemar_exact, stats.fisher_exact
 
 

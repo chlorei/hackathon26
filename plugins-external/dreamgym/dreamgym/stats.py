@@ -6,7 +6,7 @@ from collections import Counter
 from typing import Iterable, Mapping
 
 
-# the one statistics module: History, reliability and monitor-stats use the same functions
+# the one statistics module: History, reliability and vision-judge use the same functions
 from dreamkit.stats import fisher_exact, mcnemar_exact, wilson  # noqa: E402,F401
 
 

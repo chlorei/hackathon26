@@ -108,6 +108,8 @@ class Session:
             while True:
                 self._attempt(task)
                 last = client.episodes[-1] if client.episodes else {}
+                if last and last.get("success") is None and not self.stop:
+                    self._ask_done(last)  # nobody could tell (no vision key): the person at the arm says
                 verdict = "succeeded" if last.get("success") else (
                     "outcome unknown" if last.get("success") is None else f"failed: {last.get('reason')}"
                     + (f" at {last['at_s']} s" if last.get("at_s") is not None else ""))
@@ -117,6 +119,20 @@ class Session:
                 print("recovery asked for a retry from here", flush=True)
         finally:
             signal.signal(signal.SIGINT, previous)
+
+    def _ask_done(self, last: dict) -> None:
+        """After an attempt nobody judged: done? [y/n/skip] -> client.label (History shows it as a person's mark)."""
+        if self.args.no_ask or not sys.stdin.isatty():
+            return
+        try:
+            answer = input(f"attempt {last.get('episode', '?')}: done? [y/n/skip] ").strip().lower()
+        except EOFError:
+            return
+        if answer in ("y", "yes"):
+            self.client.label(True, by="person")
+        elif answer in ("n", "no"):
+            self.client.label(False, by="person")
+        last.update(self.client.episodes[-1])
 
     def _interrupt(self, *_):
         if self.stop:  # second Ctrl-C during an attempt: leave for real
@@ -135,7 +151,7 @@ class Session:
             images = dc.capture(env, windows, keep=steps % dc.FRAME_EVERY_STEPS == 0)
             steps += 1
         self.show()
-        world = {} if args.no_world else {"env": env}
+        world = {"env": env} if args.with_world else {}  # a real arm's signals only; the world is for evaluation
         with client.episode(task, images=images, state=env.state(), seed=self.seed, interactive=True, **world):
             dc.feed(client, env, windows, task, self.model, steps, every=0, station=self.poses)
             while client.t < self.seconds and not self.stop:
@@ -214,8 +230,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="mock only: what goes wrong, one per attempt, cycled")
     parser.add_argument("--viewer", action="store_true", help="open the simulator's MuJoCo window "
                         "(macOS: re-runs itself under mjpython)")
-    parser.add_argument("--no-world", action="store_true", help="give dreamkit only what a real robot reports")
+    parser.add_argument("--with-world", action="store_true", help="evaluation only: give dreamkit the simulator's world")
+    parser.add_argument("--no-world", action="store_true", help=argparse.SUPPRESS)  # the default now
     parser.add_argument("--fast", action="store_true", help="no real-time pacing")
+    parser.add_argument("--no-ask", action="store_true", help="do not ask 'done?' after an attempt nobody judged")
     args = parser.parse_args(argv)
 
     if args.viewer and sys.platform == "darwin" and os.environ.get("DREAMKIT_UNDER_MJPYTHON") != "1":

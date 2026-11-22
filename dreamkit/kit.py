@@ -109,7 +109,8 @@ class Kit:
 
     def __init__(self, client: Any, config: str | Path | None = "dreamkit.yaml", *, console: bool = True,
                  run_id: str | None = None, record: str | Path | None = None,
-                 plugin_dirs: list[Path] | None = None, **overrides: Any):
+                 plugin_dirs: list[Path] | None = None, evaluation: bool = False, hide_world: bool = False,
+                 **overrides: Any):
         path = Path(config) if config is not None else None
         if path is not None and not path.is_file():
             path = None  # no config file: built-in defaults, no plugins
@@ -118,7 +119,11 @@ class Kit:
             cfg = cfg.model_copy(update={"render_every": 4, "stream_fps": min(cfg.stream_fps, 5)})
         self.config = cfg
         self.client = client
-        self.manager = PluginManager(cfg.plugins, extra_dirs=[base / "plugins", *(plugin_dirs or [])])
+        # evaluation=True: evaluation tools (success-check, world-judge) may load (doctor --sim, replay tests).
+        # hide_world=True: the env is passed only so they can measure; working plugins see what a real arm reports.
+        self.evaluation, self.hide_world = evaluation, hide_world
+        self.manager = PluginManager(cfg.plugins, extra_dirs=[base / "plugins", *(plugin_dirs or [])],
+                                     evaluation=evaluation)
         root = cfg.runs_path(base)
         self.datasets_dir = cfg.datasets_path(base)
         self.run_id = run_id or storage.new_run_id()
@@ -299,7 +304,7 @@ class Kit:
             self._begin(ctx.task, env, images, state=state)
         if env is not None and env is not ctx.env:
             ctx.env = env
-            ctx.world = _world(env)
+            self._set_world(env)
             self._announce_world()
         ctx.step += 1
         ctx.t = ctx.step * STEP_S
@@ -323,19 +328,35 @@ class Kit:
         if ctx.result.get("success") is True:  # success-check said so: the attempt is done
             raise EndEpisode("success", "success-check")
 
-    def label(self, success: bool, episode: int | None = None) -> None:
-        """The outcome, from your loop (a sensor, an operator): for a robot without a world, success is not measured.
-        During an attempt it sets this attempt's outcome; afterwards, the given (or the last) attempt's."""
+    def label(self, success: bool, episode: int | None = None, by: str = "loop") -> None:
+        """The outcome, from your loop (a sensor, an operator at the arm): a real arm does not measure success itself.
+        During an attempt it sets this attempt's outcome; afterwards, the given (or the last) attempt's, and the
+        harvester's waiting episode follows (✓ joins its dataset, ✗ is dropped). by: "loop" or "person"."""
         if self._in_episode and episode in (None, self.ctx.episode):
             self.ctx.result["success"] = bool(success)
-            self.ctx.result["labeled_by"] = "loop"
+            self.ctx.result["labeled_by"] = by
             return
         ep = next((e for e in reversed(self.ctx.episodes) if episode in (None, e["episode"])), None)
         if ep is not None:
-            ep["success"], ep["labeled_by"] = bool(success), "loop"
+            from . import datasets
+
+            ep["success"], ep["labeled_by"], ep["judged_by"] = bool(success), by, by
             if success:
                 ep["reason"] = None
+            elif not ep.get("reason"):
+                ep["reason"], ep["message"] = "marked_failed", "marked failed by a person"
+            if ep.get("harvester"):
+                ep["harvester"] = datasets.resolve_pending(self.datasets_dir, ep["harvester"], bool(success))
+            storage.write_json(self.run_dir / f"ep{ep['episode']:03d}" / "result.json", ep)
             self._save()
+
+    def _set_world(self, env: Any) -> None:
+        """ctx.world for the plugins; with hide_world only evaluation tools get it (ctx.eval_world)."""
+        world = _world(env)
+        if self.hide_world:
+            self.ctx.eval_world, self.ctx.world = world, World(None)
+        else:
+            self.ctx.eval_world, self.ctx.world = None, world
 
     def _announce_world(self) -> None:
         off = self.manager.set_world(self.ctx.world.available)
@@ -393,7 +414,7 @@ class Kit:
         self.info["task"] = self.info["task"] or ctx.task
         if env is not None:
             ctx.env = env
-        ctx.world = _world(ctx.env)
+        self._set_world(ctx.env)
         ctx.step, ctx.t = 0, 0.0
         ctx.result, ctx.actions, ctx.command, ctx.timing, ctx.reply = {}, None, None, None, None
         ctx._retry, ctx._telemetry, ctx._override, ctx._ui = False, {}, None, {}
@@ -465,7 +486,8 @@ class Kit:
         r = ctx.result
         self._judge_success(ctx)  # world -> vision -> a person (PLUGIN_STANDARD.md §7b)
         if r.get("success") is not True and not r.get("reason"):  # no failure-monitor: the first live verdict, if any
-            first = (ctx.store.get("verdicts") or [None])[0]
+            last_try = ctx.store.get("segment", 0)  # earlier tries were taken over by recovery: not this outcome
+            first = next((v for v in ctx.store.get("verdicts") or [] if v.get("segment", 0) == last_try), None)
             r["success"] = False if first or r.get("success") is False else r.get("success")
             if first:
                 r.update(reason=first["reason"], at_s=first["at_s"], message=first["message"])
@@ -500,7 +522,7 @@ class Kit:
 
     def _judge_success(self, ctx: Any) -> None:
         """Who decides success, in this order: the world (success-check, physics) -> a vision judge (a plugin result
-        with judge "vision", e.g. monitor-stats) -> a person (✓/✗ in History, or client.label()).
+        with judge "vision", e.g. vision-judge) -> a person (✓/✗ in History, or client.label()).
         When physics and vision disagree, the world's answer stands; the disagreement is a warning and a mark."""
         r = ctx.result
         if r.get("labeled_by"):
@@ -521,9 +543,15 @@ class Kit:
             name, v = vision
             r["success"], r["judged_by"] = v["success"], "vision"
             if not v["success"] and not r.get("reason"):
+                # the monitor saw nothing physical; a slow model is then the likeliest cause, else the judge's code
+                slow = (r.get("failure-monitor") or {}).get("if_failed")
                 code = v.get("reason_code")
-                r["reason"] = code if code and reasons.is_reason(code) else "judged_failed"
-                r["message"] = r.get("message") or v.get("reason")
+                if slow:
+                    r.update(reason=slow["reason"], at_s=slow["at_s"], message=f"model too slow "
+                             f"(mean round trip {slow['mean_rtt_ms']} ms)")
+                else:
+                    r["reason"] = code if code and reasons.is_reason(code) else "judged_failed"
+                    r["message"] = r.get("message") or v.get("reason")
         elif r.get("success") is not None:
             r["judged_by"] = "loop"  # client.label() from the loop, or a plugin without a world
 

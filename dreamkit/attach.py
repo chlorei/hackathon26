@@ -2,7 +2,7 @@
 
 The program (Dream Labs' own simulator, a station script, anything on `dream.DreamClient`) runs unchanged.
 When it imports `dream`, its `DreamClient` gains dreamkit's plugins; when it imports Dream Labs' `yam_env`, every
-`YamEnv.step()` becomes a dreamkit step with the simulator's world. Without `yam_env` (a real robot) the steps come
+`YamEnv.step()` becomes a dreamkit step with what a real arm would report (state, command, cameras). Without `yam_env` (a real robot) the steps come
 from the observations the program sends, robot data only.
 
     one policy() ... close()  = one attempt
@@ -88,7 +88,8 @@ class _Session:
             self.pending = False
             self.kit.ctx.task = task
             self.kit.info["task"] = self.kit.info["task"] or task
-            self.kit._begin(task, self.env, None)
+            state = self.env.state() if self.env is not None else None  # the arm's state, not the simulator
+            self.kit._begin(task, None, None, state=state)
             self.active, self.attempts = True, self.attempts + 1
 
     def end(self, why: str = "loop", final: bool = False) -> None:
@@ -294,7 +295,9 @@ def _patch_yam_env(module: Any) -> None:
         out = step(self, left, right)
         if SESSION.active and self is SESSION.env:
             frames, SESSION.frames = SESSION.frames, None
-            SESSION.step(env=self, images=frames, command=(np.asarray(left, float), np.asarray(right, float)))
+            # what a real arm reports: its state, the command it ran, the cameras (the world stays in the simulator)
+            SESSION.step(state=self.state(), images=frames,
+                         command=(np.asarray(left, float), np.asarray(right, float)))
         return out
 
     def images_(self: Any) -> Any:

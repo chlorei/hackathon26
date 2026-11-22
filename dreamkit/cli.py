@@ -225,9 +225,9 @@ INIT_YAML = """\
 sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator, relative to this file
 data_dir: dreamkit-data                                   # runs/ and datasets/: everything dreamkit saves
 prices: {dream-1: 3.0, flash: 2.0}                         # dollars per robot-hour of the model (Live, History)
-plugins:                 # the working set: every one is on (monitor-stats needs a vision key: add it when you have one)
+plugins:                 # the working set: what a real arm reports is enough for every one of them
   - camera-check       # a black, uniform or frozen camera, before the model is asked again
-  - success-check      # was the task done: the object rests in the target, the gripper let go
+  - vision-judge       # was the task done: a vision model looks at the last frame (GEMINI_API_KEY or ANTHROPIC_API_KEY)
   - failure-monitor    # why an attempt failed, and at which second: the one final verdict
   - recovery           # the one control plugin: takes over a failing attempt (arms home, ask again)
   - recorder           # every camera of every attempt to MP4 (History plays it)
@@ -244,9 +244,11 @@ def cmd_init(args) -> int:
         print(f"{path} already exists: left as it is (edit it, or use the panel's Plugins page)")
         return 1
     path.write_text(INIT_YAML)
-    print(f"wrote {path}: success-check, failure-monitor, camera-check, recovery, reliability, monitor-stats")
+    print(f"wrote {path}: camera-check, vision-judge, failure-monitor, recovery, recorder, harvester, gripper-check, "
+          "budget-guard")
     print("next: client = dreamkit.wrap(dream.DreamClient()) in your loop, and dreamkit ui to watch it")
-    print("reliability and monitor-stats are add-ons: dreamkit install reliability monitor-stats (or switch them off)")
+    print("vision-judge and gripper-check are add-ons: dreamkit install vision-judge gripper-check; without a vision key "
+          "you mark each attempt done or not (History, or the loop's prompt)")
     return 0
 
 

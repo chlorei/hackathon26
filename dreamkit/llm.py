@@ -1,4 +1,4 @@
-"""One call to a model, for whatever in dreamkit asks one: monitor-stats' judge, the panel's Create tab.
+"""One call to a model, for whatever in dreamkit asks one: vision-judge' judge, the panel's Create tab.
 
 Keys come from the environment or the nearest .env (the loop's folder or above), never from code. Gemini models are
 tried in the order given; a 429 (quota), 503 or timeout moves straight on to the next one, nothing waits. When no

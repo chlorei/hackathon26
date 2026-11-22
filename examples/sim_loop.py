@@ -5,6 +5,10 @@ This is dream_control.main's loop written the way a Dream-1 user writes theirs: 
 `client = dreamkit.wrap(...)`, plus `with client.episode(...)` and `client.step(...)` for the plugins that read the
 robot. Watch it in the panel (`dreamkit ui`, Live page) while it runs.
 
+The simulator plays a real arm: dreamkit gets only what a real arm reports (joint and gripper state, the commands that
+ran, the cameras, the model's timing), never positions or contacts. `--with-world` hands it the simulator's world
+too, for evaluation only (dreamkit doctor --sim measures the monitor against it).
+
     python examples/sim_loop.py --mock                    # scripted arm, no API calls, no credits
     python examples/sim_loop.py --episodes 5              # Dream-1 (uses credits)
 """
@@ -51,8 +55,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--light", action="store_true", help="fewer camera frames, less CPU")
     parser.add_argument("--viewer", action="store_true", help="open the simulator's own MuJoCo window: watch the arm "
                         "like a real one on the table (macOS: re-runs itself under mjpython)")
-    parser.add_argument("--no-world", action="store_true", help="give dreamkit only state, images and commands — what "
-                        "a real robot reports — not the simulator (no positions, no contacts)")
+    parser.add_argument("--with-world", action="store_true", help="evaluation only: also give dreamkit the simulator's "
+                        "world (positions, contacts); normally it gets what a real arm reports")
+    parser.add_argument("--no-world", action="store_true", help=argparse.SUPPRESS)  # the default now; kept for old scripts
     parser.add_argument("--fake-rtt-ms", type=float, help="mock only: report this model round trip")
     args = parser.parse_args(argv)
 
@@ -119,8 +124,8 @@ def main(argv: list[str] | None = None) -> int:
                 images = dc.capture(env, windows, keep=steps % dc.FRAME_EVERY_STEPS == 0)
                 steps += 1
 
-            # a real robot reports only its state, cameras and the commands it ran: --no-world plays exactly that
-            world = {} if args.no_world else {"env": env}
+            # a real arm reports only its state, cameras and the commands it ran; the world is for evaluation only
+            world = {"env": env} if args.with_world else {}
             with client.episode(args.task, images=images, state=env.state(), seed=seed, positions=positions, **world):
                 dc.feed(client, env, windows, args.task, args.model, steps, every=0, station=poses)
                 while client.t < args.seconds:

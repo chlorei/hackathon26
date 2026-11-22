@@ -1,4 +1,4 @@
-# dreamkit-monitor-stats
+# dreamkit-vision-judge
 
 A [dreamkit](https://github.com/chlorei/hackathon26) plugin that **judges every attempt from what the camera saw**
 and keeps the statistics across runs: how often the robot really succeeds, at which task, and why it fails.
@@ -17,14 +17,14 @@ Nothing slow runs in the control loop: `on_step` only keeps a thinned buffer of 
 `max_wait_s`), so the next attempt is not held up. If no model answers, the attempt gets `not judged` and the run goes on.
 
 ```bash
-dreamkit install https://github.com/chlorei/hackathon26/tree/main/plugins-external/monitor-stats
-export GEMINI_API_KEY=...          # or GEMINI_API_KEY=... in a .env next to your loop (or a folder above); or provider: claude with ANTHROPIC_API_KEY (pip install "dreamkit-monitor-stats[claude]")
+dreamkit install https://github.com/chlorei/hackathon26/tree/main/plugins-external/vision-judge
+export GEMINI_API_KEY=...          # or GEMINI_API_KEY=... in a .env next to your loop (or a folder above); or provider: claude with ANTHROPIC_API_KEY (pip install "dreamkit-vision-judge[claude]")
 ```
 
 ```yaml
 plugins:
   - success-check                  # optional: lets the plugin measure how often the judge agrees
-  - monitor-stats                  # or: - monitor-stats: {camera: top, frames: 10}
+  - vision-judge                  # or: - vision-judge: {camera: top, frames: 10}
 ```
 
 Gemini Flash-Lite answers first (`gemini-3.5-flash-lite`, fast and cheap); on a 503 ("high demand") or a timeout,
@@ -41,24 +41,24 @@ long attempt is not lost. The attempt's verdict is its last try's; earlier ones 
 - Per attempt: `judging attempt` in the feed, then `camera verdict: success, score 87, …` (success, with `model_s`: how long the model took) or
   `camera verdict: dropped the apple while carrying it (score 25)` (error); a badge `camera: success · 87`, timeline
   marks (`ctx.ui.mark`) at the frames the judge flagged, metrics `judged success` and `judge score`.
-- **Its own page** (`ui/index.html`, PLUGIN_STANDARD §7a): click a monitor-stats line in Live or History. A summary
+- **Its own page** (`ui/index.html`, PLUGIN_STANDARD §7a): click a vision-judge line in Live or History. A summary
   (attempts, successes, agreement with success-check), three charts (score of each attempt, why attempts fail, in
   which frame a failed attempt first goes wrong), every try with its 10 frames and the judge's comment on each, and
   *Download JSON / CSV*.
 - At the end of a run, in the feed: overall rate with its interval, agreement with success-check, the recommendation.
-- `run.json`, each attempt: `"monitor-stats": {"success", "score", "reason", "reason_code", "frames": [{"index",
+- `run.json`, each attempt: `"vision-judge": {"success", "score", "reason", "reason_code", "frames": [{"index",
   "status", "comment", "t_s"}], "model_s", "tries": [...]}` (or `{"error": ...}` when not judged).
-- `runs/<id>/monitor-stats/`: the judged frames `ep003_t1_f0.jpg …` (per try) (512 px wide) and `attempts.json`
+- `runs/<id>/vision-judge/`: the judged frames `ep003_t1_f0.jpg …` (per try) (512 px wide) and `attempts.json`
   (this run's verdicts, what the page reads).
-- `runs/<id>/monitor-stats/summary.json`: `overall`, `by_task`, `reasons` (code, label, count, share, examples),
+- `runs/<id>/vision-judge/summary.json`: `overall`, `by_task`, `reasons` (code, label, count, share, examples),
   `agreement`, `recommendation`.
 
 Example events:
 
 ```json
-{"plugin": "monitor-stats", "level": "error", "message": "camera verdict: dropped the apple while carrying it (score 25)",
+{"plugin": "vision-judge", "level": "error", "message": "camera verdict: dropped the apple while carrying it (score 25)",
  "data": {"score": 25, "frames_off": 2, "reason": "dropped"}}
-{"plugin": "monitor-stats", "level": "warn",
+{"plugin": "vision-judge", "level": "warn",
  "message": "record more demonstrations of 'put apple into the bowl': 2 of 5 judged successful, mostly dropped"}
 ```
 

@@ -1,4 +1,8 @@
-"""success-check: whether the task was done, from the simulator's physics (PLUGIN_STANDARD.md)."""
+"""success-check: whether the task was done, from the simulator's physics — an evaluation tool (PLUGIN_STANDARD.md §6).
+
+It reads the world (where the object is), which a real arm does not report, so it never runs in the working loop:
+only dreamkit doctor --sim and the replay tests use it, as the right answer to measure against. In the working loop
+success comes from vision-judge or a person."""
 
 from __future__ import annotations
 
@@ -30,9 +34,9 @@ class SuccessCheck(Plugin):
 
     name = "success-check"
     Params = Params
-    manifest = Manifest(group="diagnosis", icon="CircleCheck", capability="observe",
+    manifest = Manifest(group="evaluation", icon="CircleCheck", capability="observe",
                         hooks=["on_episode_start", "on_step", "on_episode_end"], step_rate_hz=20,
-                        ui="ui/index.html")
+                        needs=["robot", "world"], ui="ui/index.html")
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.obj, self.target = ctx.target["object"], ctx.target["target"]

@@ -536,20 +536,10 @@ def create_app(config_path: str | Path) -> FastAPI:
             ep["reason"] = "marked_failed"
             ep["message"] = "marked failed by a person"
         # the harvester kept this attempt waiting in its dataset's .pending/: ✓ appends it, ✗ drops it
-        h = ep.get("harvester") or {}
-        if h.get("pending") and h.get("dataset"):
-            from . import datasets
+        from . import datasets
 
-            root = datasets_root() / h["dataset"]
-            pending = root / ".pending" / h["pending"]
-            if pending.is_dir():
-                if body.success:
-                    link = json.loads((pending / "link.json").read_text()) if (pending / "link.json").is_file() else {}
-                    index = datasets.append_episode(root, pending, source="harvester", **link)
-                    ep["harvester"] = {"dataset": h["dataset"], "index": index, "frames": h.get("frames")}
-                else:
-                    ep["harvester"] = {"dataset": None, "dropped": True}
-                shutil.rmtree(pending, ignore_errors=True)
+        if ep.get("harvester"):
+            ep["harvester"] = datasets.resolve_pending(datasets_root(), ep["harvester"], body.success)
         from .kit import _summary
 
         info["summary"] = _summary(info["episodes"])
@@ -775,7 +765,7 @@ def create_app(config_path: str | Path) -> FastAPI:
             row = next((p for p in plugin_list()["plugins"] if p["name"] == name), {"name": name})
         except Exception:  # noqa: BLE001 - the page still shows, with only its name
             row = {"name": name}
-        if name == "monitor-stats":  # its page tells how many model calls this machine made today
+        if name == "vision-judge":  # its page tells how many model calls this machine made today
             from . import llm
 
             row = {**row, "llm_usage": llm.usage_today()}

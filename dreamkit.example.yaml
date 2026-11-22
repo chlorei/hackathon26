@@ -4,7 +4,7 @@ sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulat
 data_dir: dreamkit-data                                    # runs/ and datasets/: everything dreamkit saves
 plugins:
   - camera-check
-  - success-check
+  - vision-judge                                           # done or not: a vision model, last frame
   - failure-monitor: {slow_ms: 700}
   - recovery: {max_recoveries: 3, retry_attempts: 1}       # the one control plugin
   - recorder: {video_fps: 10}

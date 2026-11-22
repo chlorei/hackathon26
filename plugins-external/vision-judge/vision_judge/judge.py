@@ -42,7 +42,7 @@ def ask(images: list[bytes], prompt: str, provider: str, timeout_s: float, deadl
                 if error.quota:
                     raise Unavailable("quota", quota=True) from error
                 raise
-            print(f"[monitor-stats] {error}; asking {CLAUDE_FALLBACK}", file=sys.stderr)
+            print(f"[vision-judge] {error}; asking {CLAUDE_FALLBACK}", file=sys.stderr)
             return _ask_claude(images, prompt, timeout_s, deadline, CLAUDE_FALLBACK)
     if provider == "claude":
         return _ask_claude(images, prompt, timeout_s, deadline)
