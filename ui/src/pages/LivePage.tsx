@@ -1,14 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { CameraOff, FolderOpen } from 'lucide-react'
+import { FolderOpen } from 'lucide-react'
 import { api, atOf, REASON_LABEL, tOf, type DemoState, type EpisodeResult, type EventRecord } from '../api'
 import { toast } from '../toast'
 import { useLive, useRunStream, type LiveStore } from '../useRunStream'
 import Feed from './LiveFeed'
 import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginPageDrawer, Sparkline, Tag, type Mark, type PluginPage } from '../ui'
 
-const CAMS: Record<string, string> = { top: 'Overhead', left: 'Left wrist', right: 'Right wrist' }
 
 // The same API as README.md: five lines, the loop around them is yours.
 const SNIPPET = `import dream, dreamkit
@@ -35,12 +34,10 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
     if (id && id !== runId) setRunId(id) // a newer run took over
   }, [live.data?.id, runId])
 
-  const [showCams, setShowCams] = useState(() => localStorage.getItem('dk-cams') !== '0')  // the robot is what people watch: on unless hidden
-  const stream = useRunStream(runId, showCams)
+  const stream = useRunStream(runId, false)  // no camera frames: people watch the arm itself; videos are in History
   const running = Boolean(live.data?.id) && live.data?.id === runId
   const current = stream.current
   const marks = useMemo<Mark[]>(() => (current ? marksFrom(stream.events, current.episode) : []), [stream.events, current])
-  const toggleCams = () => { localStorage.setItem('dk-cams', showCams ? '0' : '1'); setShowCams(!showCams) }
 
   if (!runId) return <Waiting demo={demo.data} onDemo={(policy) => startDemo.mutate(policy)} />
 
@@ -54,15 +51,6 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0 space-y-4">
         <NowCard events={stream.events} episodes={stream.episodes} current={current} running={running} live={stream.live} />
-        <Panel>
-          <PanelTitle right={<Button variant="quiet" onClick={toggleCams}>{showCams ? 'Hide cameras' : 'Show cameras'}</Button>}>
-            Cameras
-          </PanelTitle>
-          {showCams ? <div className="px-4 pb-4"><Cameras live={stream.live} running={running} /></div> : (
-            <p className="px-5 pb-4 text-dim">Hidden: you watch the arm itself (the robot, or the simulator window). Open them to check
-              what the model sees; the loop renders frames for the panel only while they are open.</p>
-          )}
-        </Panel>
         <Panel>
           <PanelTitle right={current && <LiveClock live={stream.live} />}>
             {current ? `Attempt ${current.episode}, scene ${current.scene + 1}${current.attempt > 1 ? `, retry ${current.attempt - 1}` : ''}` : running ? 'Between attempts' : 'This run has ended'}
@@ -292,54 +280,6 @@ function marksFrom(events: EventRecord[], episode: number): Mark[] {
     .filter((e) => e.episode === episode && tOf(e) != null && e.plugin !== 'dreamkit')
     .filter((e) => e.plugin !== 'failure-monitor' || e.data.kind)
     .map((e) => ({ t: tOf(e)!, label: `${e.plugin}: ${e.message}`, tone: e.level === 'error' ? 'bad' : e.level === 'warn' ? 'warn' : e.level === 'success' ? 'ok' : 'info' }))
-}
-
-/** One big camera and two small ones; click a small one to swap. Frames are written straight into <img>. */
-function Cameras({ live, running }: { live: LiveStore; running: boolean }) {
-  const [main, setMain] = useState('top')
-  const others = Object.keys(CAMS).filter((c) => c !== main)
-  return (
-    <div className="grid gap-3 md:grid-cols-[minmax(0,3fr)_minmax(0,1fr)]">
-      <CameraView live={live} cam={main} running={running} large />
-      <div className="grid grid-cols-2 content-start gap-3 md:grid-cols-1">
-        {others.map((c) => (
-          <button key={c} onClick={() => setMain(c)} className="block text-left" title={`Show ${CAMS[c].toLowerCase()} large`}>
-            <CameraView live={live} cam={c} running={running} />
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function CameraView({ live, cam, running, large }: { live: LiveStore; cam: string; running: boolean; large?: boolean }) {
-  const img = useRef<HTMLImageElement>(null)
-  const [has, setHas] = useState(Boolean(live.frames[cam]))
-  useEffect(() => {
-    const paint = () => {
-      const src = live.frames[cam]
-      if (!src || document.hidden) return
-      if (img.current && img.current.src !== src) img.current.src = src
-      setHas(true)
-    }
-    paint()
-    return live.subscribe(paint)
-  }, [live, cam])
-  return (
-    <div className={clsx('relative aspect-video overflow-hidden rounded-lg border border-line bg-black', !large && 'hover:border-dim')}>
-      <img ref={img} alt={CAMS[cam]} className={clsx('h-full w-full object-cover', !has && 'hidden')} />
-      {!has && (
-        <div className="flex h-full flex-col items-center justify-center gap-1.5 text-faint">
-          <CameraOff className="h-5 w-5" strokeWidth={1.5} />
-          <span className="text-[12px]">{running ? 'Waiting for frames' : 'Cameras show here during a run'}</span>
-        </div>
-      )}
-      <span className={clsx('absolute left-2 top-2 flex items-center gap-1.5 rounded-md bg-black/60 px-1.5 py-0.5 text-[12px] text-white', large && 'text-[13px]')}>
-        {running && has && <span className="h-1.5 w-1.5 rounded-full bg-signal" />}
-        {CAMS[cam]}
-      </span>
-    </div>
-  )
 }
 
 /** Money as it goes (dreamkit.cost, telemetry spent_usd); with a budget (budget-guard's budget_usd), how far in. */
