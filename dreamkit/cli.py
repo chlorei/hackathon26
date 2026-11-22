@@ -15,8 +15,15 @@ def _config_path(arg: str | None) -> str | None:
 
 
 def cmd_ui(args) -> int:
+    import socket
+
     from .server import serve
 
+    with socket.socket() as s:  # before serving: uvicorn's own message is followed by our "panel: <url>" otherwise
+        if s.connect_ex(("127.0.0.1", args.port)) == 0:
+            print(f"port {args.port} is already in use (another dreamkit ui? it is at http://127.0.0.1:{args.port}); "
+                  f"use another one: dreamkit ui --port {args.port + 1}", file=sys.stderr)
+            return 1
     serve(_config_path(args.config) or "dreamkit.yaml", host=args.host, port=args.port)
     return 0
 

@@ -84,3 +84,31 @@ def test_params_are_validated_models():
     assert isinstance(p.params, BaseModel) and p.params.track_err_rad == 0.2
     bad = PluginManager([PluginSpec(name="failure-monitor", params={"track_err_rad": -1})])
     assert not bad.plugins and "invalid settings" in bad.failed[0]
+
+
+class Slow(Plugin):
+    """Takes 2 ms a step, twice the 1 ms budget: switched off, not waited for."""
+
+    name = "slow"
+    manifest = Manifest(group="diagnosis", icon="Plug", capability="observe", hooks=["on_step"])
+
+    def on_step(self, ctx):
+        import time
+
+        time.sleep(0.002)
+
+
+def test_a_plugin_over_its_time_budget_is_switched_off():
+    from dreamkit import manager as mgr
+
+    manager = PluginManager([])
+    manager.plugins = [Slow()]
+    manager.stats = {"slow": mgr.Stats()}
+    core = Context(env=None, task="t", model="m", run_id="r", emitter=Emitter(console=False))
+    for step in range(mgr.BUDGET_WINDOW * mgr.MAX_OVER_BUDGET + 5):
+        core.step = step
+        manager.call("on_step", core)
+    said = [(r["level"], r["message"]) for r in core.emitter.records if r["type"] == "event" and r["plugin"] == "slow"]
+    assert said[0][0] == "warn" and said[0][1].startswith("over budget")
+    assert said[-1][0] == "error" and said[-1][1].startswith("switched off")
+    assert manager.stats["slow"].disabled  # the steps after it no longer wait for the plugin
