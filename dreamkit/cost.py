@@ -14,11 +14,12 @@ CALLS_PER_HOUR = 2250  # model calls billed as one robot-hour (1.6 s of actions 
 
 
 def price_per_hour(model: str | None, mock: bool = False, prices: Mapping[str, float] | None = None) -> float:
-    """Dollars per robot-hour for this model; 0 for a mock run. A flash model by name, else Dream-1's price."""
-    if mock:
+    """Dollars per robot-hour for this model; 0 for a mock run or a policy that is not Dream Labs' (scripted,
+    an expert plan). A flash model by name, else Dream-1's price."""
+    name = (model or "").lower()
+    if mock or "dream" not in name:  # only Dream Labs' models bill: a scripted or expert policy calls nothing
         return 0.0
     table = {**PRICES, **(prices or {})}
-    name = (model or "").lower()
     for key in sorted(table, key=len, reverse=True):  # the most specific name first
         if key != "dream-1" and key in name:
             return float(table[key])
