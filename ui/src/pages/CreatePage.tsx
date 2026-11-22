@@ -39,7 +39,7 @@ export default function CreatePage({ onOpenPlugins }: { onOpenPlugins: () => voi
       setReady(j)
       setMessages((m) => [...m, { role: 'assistant', text: `Made ${j.name}: ${j.summary} Check, test and bench passed${j.tries > 1 ? ` on try ${j.tries}` : ''}. Ask for changes, or keep it.` }])
     } else {
-      setMessages((m) => [...m, { role: 'assistant', text: `Could not make a plugin that passes the checks: ${j.error ?? 'unknown error'}` }])
+      setMessages((m) => [...m, { role: 'assistant', text: `Could not make the plugin: ${j.error ?? 'unknown error'}.` }])
     }
   }, [job.data])
 

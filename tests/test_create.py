@@ -133,3 +133,24 @@ def test_names_and_files_are_checked_before_anything_runs():
     assert "kebab" in create.validate({**data, "name": "Bad Name"}, set())[0]
     extra = {**data, "files": {**data["files"], "../evil.py": "x = 1"}}
     assert any("unexpected file ../evil.py" in p for p in create.validate(extra, set()))
+
+
+def test_a_failure_reads_as_a_sentence_in_the_chat(monkeypatch):
+    from dreamkit import llm
+
+    def busy(prompt):
+        raise llm.Unavailable("no Gemini model available (gemini-3.6-flash: 429)", quota=True)
+
+    monkeypatch.setattr(create, "ask", busy)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    job = create.run(create.Job("q", [{"role": "user", "text": "x"}]), None, set())
+    assert job.status == "failed" and job.error.startswith("Gemini quota exhausted for today")
+    hung = llm.Unavailable("no Gemini model available (gemini-3.8-flash: 504; out of time)")
+    assert create.friendly(hung).startswith("Gemini did not answer in time")
+
+
+def test_checks_that_keep_failing_name_the_check(model):
+    calls, script = model
+    script += [package(**{"tests/test_grip_watch.py": ("def test", "def test_broken():\n    assert False\n\n\ndef test")})] * 3
+    job = create.run(create.Job("c", [{"role": "user", "text": "x"}]), None, set())
+    assert job.status == "failed" and job.error.startswith("generated plugin failed test")

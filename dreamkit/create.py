@@ -31,13 +31,14 @@ from . import llm, reasons
 
 DOC = Path(__file__).resolve().parent.parent / "docs" / "PLUGIN_STANDARD.md"
 EXAMPLE = Path(__file__).resolve().parent.parent / "plugins-external" / "gripper-check"
-# strongest first; a model out of its daily quota answers 429 at once and the next one is asked
-GEMINI_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite",
+# the most reliable first (3.6-flash answered every time in 30-40 s); a model out of its daily quota answers 429 at
+# once, a hung one is cut at CALL_TIMEOUT_S, and the next one is asked
+GEMINI_MODELS = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite",
                  "gemini-3.1-flash-lite"]
 CLAUDE_MODEL = "claude-opus-5-5"  # when no Gemini model answers and ANTHROPIC_API_KEY is set
 MAX_TRIES = 3  # a package that fails the filter goes back to the model with the problems this many times in all
 MAX_REASKS = 2  # a reply that is not JSON is asked again (not counted as a try)
-CALL_TIMEOUT_S, STEP_TIMEOUT_S = 150.0, 300.0
+CALL_TIMEOUT_S, ANSWER_DEADLINE_S, STEP_TIMEOUT_S = 60.0, 240.0, 300.0  # one model call; all models for one answer
 NAME = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+){0,2}$")
 GROUPS = ("diagnosis", "safety")
 SECTIONS = ("## 2.", "## 4.", "## 5.", "## 6.", "## 7. ", "## 8.", "## 9.")  # of PLUGIN_STANDARD.md, for the prompt
@@ -134,7 +135,7 @@ def build_prompt(messages: list[dict[str, str]], files: dict[str, str] | None, p
 def ask(prompt: str) -> tuple[str, str]:
     """(text, model). Tests replace it with a fake model."""
     llm.load_env()
-    deadline = time.monotonic() + CALL_TIMEOUT_S
+    deadline = time.monotonic() + ANSWER_DEADLINE_S  # a hung model (504) must leave the next ones time to answer
     try:
         return llm.gemini([], prompt, GEMINI_MODELS, CALL_TIMEOUT_S, deadline)
     except llm.Unavailable:
@@ -266,7 +267,8 @@ class Job:
     info: dict[str, Any] = field(default_factory=dict)
     model: str | None = None
     tries: int = 0
-    error: str | None = None
+    error: str | None = None  # one sentence for the chat
+    details: str = ""  # the checks' output behind it
     package: Path | None = None
 
     def step(self, text: str) -> None:
@@ -307,12 +309,31 @@ def run(job: Job, files: dict[str, str] | None, taken: set[str]) -> Job:
                     job.step("ready")
                     return job
             files = data["files"]  # the next try fixes this package
-        job.status, job.error = "failed", "\n".join(problems or [])[:2000]
+        first = (problems or ["unknown problem"])[0]
+        job.status = "failed"
+        job.error = (f"generated plugin failed {first.removeprefix('dreamkit ')} after {MAX_TRIES} tries"
+                     if first.startswith("dreamkit ") else f"generated plugin was refused: {first}")[:2000]
+        job.details = "\n".join(problems or [])[:4000]
         job.step(f"failed after {MAX_TRIES} tries")
     except Exception as error:  # noqa: BLE001 - shown in the chat, never raised into the server
-        job.status, job.error = "failed", f"{type(error).__name__}: {error}"[:2000]
+        job.status, job.error = "failed", friendly(error)[:2000]
         job.step(f"failed: {job.error[:200]}")
     return job
+
+
+def friendly(error: BaseException) -> str:
+    """What went wrong, as the chat says it: the cause and what to do, not a traceback."""
+    text = str(error)
+    if isinstance(error, llm.Unavailable) and error.quota:
+        return "Gemini quota exhausted for today (free tier: 20 requests a model a day), try later" + \
+               ("" if os.getenv("ANTHROPIC_API_KEY") else " or add ANTHROPIC_API_KEY to .env to use Claude")
+    if isinstance(error, llm.Unavailable):
+        return f"Gemini did not answer in time (models busy or overloaded), try again in a minute ({text})"
+    if "GEMINI_API_KEY" in text:
+        return "no GEMINI_API_KEY: add it to .env in the project folder"
+    if isinstance(error, ValueError) and "valid JSON" in text:
+        return f"the model's answer was not a plugin package ({text})"
+    return f"{type(error).__name__}: {text}"
 
 
 def _answer(job: Job, prompt: str) -> dict[str, Any]:
