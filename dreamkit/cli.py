@@ -242,12 +242,26 @@ def cmd_init(args) -> int:
     if path.exists():
         print(f"{path} already exists: left as it is (edit it, or use the panel's Plugins page)")
         return 1
-    path.write_text(INIT_YAML)
-    print(f"wrote {path}: camera-check, vision-judge, failure-monitor, recovery, recorder, harvester, gripper-check, "
-          "budget-guard")
+    from .manager import discover
+
+    # an add-on that is not installed stays in the file commented out, with how to get it: listed, it would greet a
+    # new user with "plugin … is not installed" on the first run
+    found, _ = discover()
+    lines, on, missing = [], [], []
+    for line in INIT_YAML.splitlines():
+        name = line.strip()[2:].split("#")[0].strip() if line.startswith("  - ") else None
+        if name and name not in found:
+            missing.append(name)
+            line = f"  # - {name}{line[4 + len(name):]}  (add-on: dreamkit install {name})"
+        elif name:
+            on.append(name)
+        lines.append(line)
+    path.write_text("\n".join(lines) + "\n")
+    print(f"wrote {path}: {', '.join(on)}")
     print("next: client = dreamkit.wrap(dream.DreamClient()) in your loop, and dreamkit ui to watch it")
-    print("vision-judge and gripper-check are add-ons: dreamkit install vision-judge gripper-check; without a vision key "
-          "you mark each attempt done or not (History, or the loop's prompt)")
+    if missing:
+        print(f"add-ons left commented out until installed: dreamkit install {' '.join(missing)}; without a vision "
+              "judge you mark each attempt done or not (History, or the loop's prompt)")
     return 0
 
 
