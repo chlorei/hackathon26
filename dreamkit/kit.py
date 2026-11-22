@@ -119,14 +119,15 @@ class Kit:
         self.config = cfg
         self.client = client
         self.manager = PluginManager(cfg.plugins, extra_dirs=[base / "plugins", *(plugin_dirs or [])])
-        root = Path(cfg.runs_dir).expanduser()
-        root = root if root.is_absolute() else base / root
+        root = cfg.runs_path(base)
+        self.datasets_dir = cfg.datasets_path(base)
         self.run_id = run_id or storage.new_run_id()
         self.run_dir = storage.run_dir(root, self.run_id)
         self.emitter = Emitter(json_events=False, console=console)
         self.emitter.open_file(self.run_dir / "events.jsonl")
         self.live = LiveWriter(self.run_dir, fps=cfg.stream_fps)
         self.ctx = Context(env=None, task="", model="", run_id=self.run_id, run_dir=self.run_dir, config=cfg,
+                           datasets_dir=self.datasets_dir,
                            emitter=self.emitter)
         self.ctx._reset_policy = self._reset_policy
         self.deferred = Deferred(self._deferred_error)
@@ -470,9 +471,11 @@ class Kit:
             "ui": ctx._ui,
             "verdicts": ctx.store.get("verdicts", []),
         }
-        result["videos"] = sorted(
-            str(p.relative_to(self.run_dir)) for p in (self.run_dir / "recorder").glob(f"ep{ctx.episode:03d}_*.mp4"))
+        ep_dir = self.run_dir / f"ep{ctx.episode:03d}"
+        result["videos"] = sorted(str(p.relative_to(self.run_dir)) for p in ep_dir.glob("*.mp4") if p.name != "recap.mp4")
         ctx.episodes.append(_plain(result))
+        ep_dir.mkdir(parents=True, exist_ok=True)  # result.json beside the attempt's files: the folder explains itself
+        storage.write_json(ep_dir / "result.json", ctx.episodes[-1])
         self.info["cost_usd"] = round(cost.usd(self._run_calls, self._price()), 4)
         if ctx._stop_run is not None:
             self.info["stop_requested"] = ctx._stop_run

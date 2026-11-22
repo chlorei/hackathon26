@@ -1,10 +1,12 @@
-"""harvester — Learn: every attempt as a LeRobot v2.1 dataset in run_dir/harvester/ (PLUGIN_STANDARD.md).
+"""harvester — Learn: every successful attempt joins one LeRobot v2.1 dataset, <data_dir>/datasets/harvest-<task>/.
 
-The layout repeats Dream Labs' robots package (robots/rollout_episode.py, not imported: it is a hardware package):
-one LeRobot v2.1 dataset per attempt — meta/, data/chunk-000/episode_000000.parquet,
-videos/chunk-000/observation.images.<role>/episode_000000.mp4 — plus dreamkit.json with the outcome. Successes go to
-success/, failures to failed/ with the reason. State and action follow the YAM embodiment config: right arm, right
-gripper, left arm, left gripper. All encoding runs on ctx.defer."""
+Nothing goes inside the run: the attempt is recorded in <data_dir>/datasets/.incoming/ while it runs (the layout of
+Dream Labs' robots/rollout_episode.py: meta/, data/chunk-000/episode_000000.parquet,
+videos/chunk-000/observation.images.<role>/episode_000000.mp4) and, when it succeeds, appended as the next episode of
+the task's dataset (dreamkit.datasets.append_episode), whose dataset.json links it back to its run and attempt.
+A failed attempt is dropped (its videos stay in the run). An attempt nobody could judge (a robot without a world)
+waits in the dataset's .pending/ until it is marked ✓ (appended) or ✗ (dropped) in History. State and action follow
+the YAM embodiment config: right arm, right gripper, left arm, left gripper. All encoding runs on ctx.defer."""
 
 from __future__ import annotations
 
@@ -132,7 +134,8 @@ class Params(BaseModel):
                              json_schema_extra={"unit": "fps"})
     cameras: dict[str, str] = Field({"top": "overhead", "left": "wrist_l", "right": "wrist_r"},
                                     description="Camera name to the video role the YAM embodiment config expects")
-    save_failed: bool = Field(True, description="Keep failed attempts too, under failed/, with the reason")
+    dataset: str = Field("harvest-{task}", description="The dataset successful attempts join, in <data_dir>/datasets/; "
+                         "{task} is the task in a few words")
     min_frames: int = Field(10, ge=1, le=10000, description="Shorter attempts are not saved",
                             json_schema_extra={"unit": ""})
     crf: int = Field(23, ge=0, le=51, description="Video quality: lower is better and larger",
@@ -140,12 +143,17 @@ class Params(BaseModel):
 
 
 class Harvester(Plugin):
-    """Saves every attempt as a LeRobot v2.1 dataset; successful ones are ready for fine-tuning."""
+    """Adds every successful attempt to a fine-tuning dataset (LeRobot v2.1), one per task."""
 
     name = "harvester"
     Params = Params
     manifest = Manifest(group="core", icon="Database", capability="observe", needs_frames=True,
-                        hooks=["on_episode_start", "on_step", "on_episode_end", "on_run_end"], ui="ui/index.html")
+                        hooks=["on_run_start", "on_episode_start", "on_step", "on_episode_end", "on_run_end"],
+                        ui="ui/index.html")
+
+    def on_run_start(self, ctx: PluginContext) -> None:
+        self.added: dict[str, int] = {}  # dataset -> successful attempts added in this run
+        self.pending = 0
 
     def on_episode_start(self, ctx: PluginContext) -> None:
         self.states: list[np.ndarray] = []
@@ -153,8 +161,8 @@ class Harvester(Plugin):
         self.videos: dict[str, _Video] = {}  # touched only on the defer worker
         self.frames = 0
         self.next_t = 0.0
-        self.ok = isinstance(ctx.state, dict) and all(s in ctx.state for s in SIDES)
-        self.tmp = ctx.files.path(f"recording/ep{ctx.episode:03d}")
+        self.ok = isinstance(ctx.state, dict) and all(s in ctx.state for s in SIDES) and ctx.datasets_dir is not None
+        self.tmp = (ctx.datasets_dir / ".incoming" / f"{ctx.run_id}-ep{ctx.episode:03d}") if ctx.datasets_dir else None
         if not self.ok:
             ctx.emit("info", "needs env.state() with 'left' and 'right' (7 values each); nothing saved")
         elif self.tmp.exists():
@@ -188,43 +196,52 @@ class Harvester(Plugin):
     def on_episode_end(self, ctx: PluginContext) -> None:
         if not self.ok:
             return
-        outcome_known = ctx.result.get("success") is not None
-        success = ctx.result.get("success") is True
-        # no world and nobody judged it: kept as unlabeled/ until it is marked in History (or by client.label())
-        split = "success" if success else "failed" if outcome_known else "unlabeled"
-        target = ctx.files.path(f"{split}/ep{ctx.episode:03d}")
-        outcome = {
-            "run_id": ctx.run_id, "episode": ctx.episode, "scene": ctx.scene, "attempt": ctx.attempt,
-            "task": ctx.task, "model": ctx.model, "success": success if outcome_known else None,
-            "reason": None if success else ctx.result.get("reason"), "at_s": ctx.result.get("at_s"),
-            "message": ctx.result.get("message"), "frames": self.frames,
-        }
-        keep = self.frames >= self.params.min_frames and (success or not outcome_known or self.params.save_failed)
-        ctx.defer(self._finish, keep, ctx.task, np.array(self.states), np.array(self.actions), outcome, target)
-        if keep:
-            ctx.result["harvester"] = {"split": split, "path": ctx.files.relative(target), "frames": self.frames}
+        from dreamkit import datasets
 
-    def _finish(self, keep: bool, task: str, states, actions, outcome: dict[str, Any], target: Path) -> None:
+        known = ctx.result.get("success") is not None
+        success = ctx.result.get("success") is True
+        keep = self.frames >= self.params.min_frames and (success or not known)
+        name = datasets.harvest_name(ctx.task or "task", self.params.dataset)
+        link = {"run": ctx.run_id, "episode": ctx.episode, "task": ctx.task, "model": ctx.model}
+        ctx.defer(self._finish, ctx, keep, success, name, ctx.task, np.array(self.states), np.array(self.actions), link)
+
+    def _finish(self, ctx: PluginContext, keep: bool, success: bool, name: str, task: str, states, actions,
+                link: dict[str, Any]) -> None:
+        from dreamkit import datasets
+
         videos = {role: v.close() for role, v in self.videos.items()}
         self.videos = {}
         if not keep:
             shutil.rmtree(self.tmp, ignore_errors=True)
             return
         write_episode(self.tmp, task, self.params.dataset_fps, states, actions, videos)
-        (self.tmp / "dreamkit.json").write_text(json.dumps(outcome, indent=2, default=str))
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.move(str(self.tmp), target)
+        root = ctx.datasets_dir / name
+        if success:
+            index = datasets.append_episode(root, self.tmp, source="harvester", **link)
+            shutil.rmtree(self.tmp, ignore_errors=True)
+            self.added[name] = self.added.get(name, 0) + 1
+            ctx.result["harvester"] = {"dataset": name, "index": index, "frames": self.frames}
+        else:  # nobody judged it: it waits for a ✓ or ✗ in History
+            pending = root / ".pending" / self.tmp.name
+            pending.parent.mkdir(parents=True, exist_ok=True)
+            (self.tmp / "link.json").write_text(json.dumps(link, default=str))
+            if pending.exists():
+                shutil.rmtree(pending)
+            shutil.move(str(self.tmp), pending)
+            self.pending += 1
+            ctx.result["harvester"] = {"dataset": name, "pending": pending.name, "frames": self.frames}
 
     def on_run_end(self, ctx: PluginContext) -> None:
         ctx.defer(self._summary, ctx)
 
     def _summary(self, ctx: PluginContext) -> None:
-        shutil.rmtree(ctx.files.dir / "recording", ignore_errors=True)
-        ready = sorted((ctx.files.dir / "success").glob("ep*/meta/info.json"))
-        failed = sorted((ctx.files.dir / "failed").glob("ep*/meta/info.json"))
-        if ready or failed:
-            ctx.store["harvester"] = {"success": len(ready), "failed": len(failed)}
-            ctx.emit("success" if ready else "info",
-                     f"{len(ready)} successful episode{'s' if len(ready) != 1 else ''} ready for fine-tuning"
-                     f" ({len(failed)} failed kept for analysis)")
+        if ctx.datasets_dir is not None:
+            shutil.rmtree(ctx.datasets_dir / ".incoming", ignore_errors=True) if not any(
+                (ctx.datasets_dir / ".incoming").glob("*")) else None
+        total = sum(self.added.values())
+        if total or self.pending:
+            ctx.store["harvester"] = {"added": dict(self.added), "pending": self.pending}
+            where = ", ".join(self.added) or "its dataset"
+            ctx.emit("success" if total else "info",
+                     f"{total} successful attempt{'s' if total != 1 else ''} added to {where}"
+                     + (f"; {self.pending} waiting for a ✓ or ✗ in history" if self.pending else ""))

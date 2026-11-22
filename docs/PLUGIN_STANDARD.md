@@ -1,4 +1,4 @@
-# dreamkit plugin standard (v1.6)
+# dreamkit plugin standard (v1.7)
 
 Every plugin — built-in or from GitHub — follows this document. There are two kinds: **loop plugins** (§1–§12:
 hooks inside your control loop; one page each, §7a) and **app plugins** (§13: a whole tab — a page, an API and
@@ -267,8 +267,18 @@ Style — the panel's, only
 
 ## 8. Files
 
-- Write only inside `ctx.run_dir / "<plugin-name>/"`. Never outside the run folder.
-- File names: snake_case, episode-numbered: `ep03_overhead.mp4`, `ep03_trace.json`.
+Everything dreamkit saves is in one data folder (`data_dir`, default `./dreamkit-data`): `runs/<run-id>/` and
+`datasets/<name>/`. A plugin writes in three places only:
+
+| where | what | how |
+|---|---|---|
+| `ctx.episode_dir` = `runs/<run>/ep003/` | the files of an attempt: camera videos (`top.mp4`), `trace.json`, … — what anyone looking at the attempt needs. Shared by all plugins: name a file after what it is, not after the plugin | `ctx.episode_dir / "trace.json"` |
+| `ctx.files` = `runs/<run>/<plugin>/` | the plugin's own data, e.g. what its page (§7a) reads | `ctx.files.path("summary.json")` |
+| `ctx.datasets_dir` = `datasets/` | datasets only, through `dreamkit.datasets` (`append_episode`, `note_episode`, `update`), never by hand; each has `dataset.json` | the harvester appends to `datasets/harvest-<task>/` |
+
+- File names: lowercase snake_case; inside `ep003/` no episode number in the name (the folder has it).
+- Never write elsewhere (not beside the config, not in the home folder). The core writes `run.json`, `events.jsonl`,
+  `ep003/result.json`, `ep003/recap.mp4` and `history/`.
 - Large writes go through `ctx.defer`.
 
 ---
@@ -450,6 +460,13 @@ test = the package's `tests/`; no per-step bench (an app has no hooks). After `d
 ---
 
 ## Changelog
+
+**v1.7** (one data folder)
+- `data_dir` (default `./dreamkit-data`): `runs/<run-id>/` and `datasets/<name>/`. An attempt's files go to
+  `ctx.episode_dir` (`runs/<run>/ep003/`: videos, `trace.json`, `recap.mp4`, `result.json`); a plugin's page data stays
+  in `ctx.files`; datasets go to `ctx.datasets_dir` through `dreamkit.datasets`, each with `dataset.json`.
+- The harvester appends successful attempts to `datasets/harvest-<task>/` instead of writing into the run;
+  `dreamkit harvest export` is replaced by `dreamkit datasets [check <name>]`. `dreamkit migrate`, `dreamkit where`.
 
 **v1.1** (decisions taken while implementing v1)
 - Names may be one word (`recovery`, `harvester`, `recorder`, …): 1–3 words.

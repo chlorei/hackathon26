@@ -51,8 +51,9 @@ def test_scenes_differ_and_retry_then_success_with_video_and_recap(make_config):
     assert eps[0]["positions"] != eps[2]["positions"]  # a new scene really moves the fruit
     assert eps[0]["positions"] == eps[1]["positions"]  # a retry keeps it
     assert len({e["duration_s"] for e in eps if e["success"]}) == 2  # mock phase lengths vary
-    assert (folder / "recorder" / "ep001_top.mp4").stat().st_size > 1000
-    assert (folder / eps[0]["recap"]["video"]).stat().st_size > 1000
+    assert (folder / "ep001" / "top.mp4").stat().st_size > 1000  # the attempt's own folder
+    assert eps[0]["recap"]["video"] == "ep001/recap.mp4" and (folder / "ep001" / "recap.mp4").stat().st_size > 1000
+    assert json.loads((folder / "ep001" / "result.json").read_text())["episode"] == 1
     assert eps[0]["failure-monitor"]["latency"] == {"mock": True}
     recap = json.loads((folder / "history" / "summary.json").read_text())["text"]
     assert "scripted on purpose" in recap and "Retries saved 2 scenes" in recap
@@ -84,16 +85,18 @@ def test_recovery_fixes_failures_mid_attempt_without_resetting_the_scene(make_co
 
 
 def test_harvested_episodes_pass_dream_labs_dataset_checks(make_config, tmp_path):
-    from dreamkit import harvest
+    from dreamkit import datasets
 
     code, info, folder = _run(make_config(plugins=["success-check", "failure-monitor", "harvester"]),
                               "--episodes", "2", "--behaviors", "success,dropped")
-    assert len(harvest.episodes(folder)) == 1 and len(harvest.episodes(folder, "failed")) == 1
-    failed = json.loads((harvest.episodes(folder, "failed")[0] / "dreamkit.json").read_text())  # harvester/failed/
-    assert failed["success"] is False and failed["reason"] == "dropped"
-    out = tmp_path / "export"
-    assert len(harvest.export([folder], out)) == 1
-    report = harvest.validate(out)
+    assert not (folder / "harvester").exists()  # nothing harvested inside the run
+    ok, failed = info["episodes"][0], info["episodes"][1]
+    assert ok["harvester"]["dataset"] == "harvest-put-apple-into-the-bowl" and not failed.get("harvester")
+    root = tmp_path / "datasets" / ok["harvester"]["dataset"]
+    rec = datasets.describe(root)
+    assert rec["episodes"] == 1 and rec["source"] == "harvester"
+    assert datasets.find_episode(tmp_path / "datasets", folder.name, 1)["dataset"] == root.name
+    report = datasets.check(root)
     assert report["ok"], report
     assert report["state_dim"] == 14 and report["action_dim"] == 14 and len(report["video_keys"]) == 3
 

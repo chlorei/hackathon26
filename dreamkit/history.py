@@ -1,6 +1,6 @@
 """History: what the panel and the run folder keep about every run, made by the core (not plugins).
 
-- per attempt: a one-sentence story and a captioned highlights clip (run_dir/history/ep003_recap.mp4), cut from the
+- per attempt: a one-sentence story and a captioned highlights clip (runs/<run>/ep003/recap.mp4), cut from the
   recorder's video when there is one;
 - per run: a plain-language summary (history/summary.json) and a self-contained report (history/report.html).
 """
@@ -138,9 +138,11 @@ def clip(src: Path, out: Path, moments: list[dict[str, Any]], episode: int) -> N
 def episode_recap(core, run_dir: Path, defer) -> dict[str, Any]:
     moments, headline = story(core)
     recap: dict[str, Any] = {"headline": headline, "moments": moments, "video": None}
-    src = run_dir / "recorder" / f"ep{core.episode:03d}_{CAMERA}.mp4"
-    if (run_dir / "recorder").is_dir():
-        out = run_dir / "history" / f"ep{core.episode:03d}_recap.mp4"
+    ep_dir = run_dir / f"ep{core.episode:03d}"
+    src = ep_dir / f"{CAMERA}.mp4"
+    recorded = (core.result.get("recorder") or {}).get("videos") or []  # the recorder names its files as it ends
+    if any(Path(v).name == src.name for v in recorded) or src.exists():
+        out = ep_dir / "recap.mp4"
         defer("history", clip, (src, out, moments, core.episode), {})
         recap["video"] = str(out.relative_to(run_dir))
     return recap

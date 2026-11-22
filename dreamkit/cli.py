@@ -223,7 +223,7 @@ INIT_YAML = """\
 # dreamkit.yaml: which plugins run around Dream-1, and their settings. What to run (task, attempts, model)
 # is your loop's business. Change a plugin's settings on the panel's Plugins page (dreamkit ui) or here.
 sim_path: ../dreamlabs/dream_library/examples/yam_mujoco   # Dream Labs' simulator, relative to this file
-runs_dir: runs                                             # one folder per run; the panel reads it
+data_dir: dreamkit-data                                   # runs/ and datasets/: everything dreamkit saves
 prices: {dream-1: 3.0, flash: 2.0}                         # dollars per robot-hour of the model (Live, History)
 plugins:
   - success-check      # was the task done: the object rests in the target, the gripper let go
@@ -288,8 +288,73 @@ def _runs_root(config: str | None) -> Path:
     from . import config as config_mod
 
     cfg, base = config_mod.load(_config_path(config))
-    root = Path(cfg.runs_dir).expanduser()
-    return root if root.is_absolute() else base / root
+    return cfg.runs_path(base)
+
+
+def _human(n: int | float | None) -> str:
+    n = float(n or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def cmd_where(args) -> int:
+    """Where dreamkit keeps everything, and how big it is."""
+    from . import config as config_mod
+    from . import datasets, storage
+
+    cfg, base = config_mod.load(_config_path(args.config))
+    runs, ds = cfg.runs_path(base), cfg.datasets_path(base)
+    all_runs = storage.list_runs(runs)
+    print(f"config    {Path(_config_path(args.config) or 'dreamkit.yaml').resolve()}")
+    print(f"data      {cfg.data_path(base)}")
+    print(f"  runs/     {len(all_runs)} runs, {_human(datasets.size_bytes(runs) if runs.is_dir() else 0)}"
+          f"  ({sum(1 for r in all_runs if r.get('mock'))} mock)")
+    print(f"  datasets/ {len(datasets.list_all(ds, with_size=False))} datasets, "
+          f"{_human(datasets.size_bytes(ds) if ds.is_dir() else 0)}")
+    old = [p for p in (base / "runs", base / "gym", base / "harvest") if p.exists() and p.resolve() != runs.resolve()]
+    if cfg.runs_dir or old:
+        print("older places still in use: " + ", ".join(str(p) for p in old or [runs]) + "  ->  dreamkit migrate")
+    return 0
+
+
+def cmd_datasets(args) -> int:
+    """Every dataset with its source and status; `dreamkit datasets check <name>` runs validate_dataset on one."""
+    from . import config as config_mod
+    from . import datasets
+
+    cfg, base = config_mod.load(_config_path(args.config))
+    root = cfg.datasets_path(base)
+    if args.datasets_cmd == "check":
+        folder = root / args.name
+        if not folder.is_dir():
+            print(f"no dataset {args.name!r} in {root}")
+            return 1
+        report = datasets.check(folder)
+        if report.get("ok"):
+            print(f"{args.name}: validate_dataset OK ({report.get('episodes', '?')} episodes, {report.get('frames', '?')} frames). "
+                  "Nothing was uploaded.")
+            return 0
+        print(f"{args.name}: validate_dataset failed: {report.get('error')}")
+        return 1
+    rows = datasets.list_all(root)
+    if not rows:
+        print(f"no datasets yet in {root} (the harvester adds successful attempts as they end)")
+        return 0
+    width = max(len(r["name"]) for r in rows)
+    for r in rows:
+        extra = f"  model {r['model']}" if r.get("model") else (f"  {r['pending']} waiting for a label" if r["pending"] else "")
+        print(f"{r['name']:<{width}}  {r['source']:<9} {r['episodes']:>4} episodes  {_human(r['size_bytes']):>8}  "
+              f"{r['status']}{extra}")
+    return 0
+
+
+def cmd_migrate(args) -> int:
+    from .migrate import migrate
+
+    return migrate(_config_path(args.config) or "dreamkit.yaml", dry_run=args.dry_run)
 
 
 def cmd_review(args) -> int:
@@ -344,37 +409,14 @@ def cmd_accuracy(args) -> int:
 
 
 def cmd_harvest(args) -> int:
-    from rich.console import Console
-
-    from . import harvest
-
-    console = Console()
-    root = _runs_root(args.config)
-    runs = [root / r for r in args.runs] if args.runs else sorted(p for p in root.iterdir() if p.is_dir())
-    missing = [r.name for r in runs if not r.is_dir()]
-    if missing:
-        console.print(f"[red]no such run: {', '.join(missing)}[/red]")
-        return 1
-    out = Path(args.out)
-    copied = harvest.export(runs, out)
-    if not copied:
-        console.print("no successful episodes in these runs (is the harvester plugin on?)")
-        return 1
-    console.print(f"{len(copied)} successful episode{'s' if len(copied) != 1 else ''} -> {out}")
-    if args.no_validate:
-        return 0
-    report = harvest.validate(out)
-    if report.get("ok"):
-        console.print(f"[green]validate_dataset: OK[/green] {json.dumps({k: v for k, v in report.items() if k != 'ok'})}")
-        console.print("Ready for fine-tuning. Nothing was uploaded; when you decide to: "
-                      "client.upload_dataset(path, name, embodiment)")
-        return 0
-    console.print(f"[red]validate_dataset: {report.get('error')}[/red]")
+    print("`dreamkit harvest export` is gone: the harvester adds every successful attempt to "
+          "<data_dir>/datasets/harvest-<task>/ as it ends, so the dataset is ready.\n"
+          "  dreamkit datasets              list them\n  dreamkit datasets check <name> run validate_dataset on one")
     return 1
 
 
 _BUILTIN_COMMANDS = {"ui", "init", "sim", "run", "list", "search", "check", "test", "bench", "install", "publish", "new",
-                     "record", "review", "accuracy", "harvest"}
+                     "record", "review", "accuracy", "harvest", "where", "datasets", "migrate"}
 
 
 def _app_command(argv: list[str]) -> int | None:
@@ -468,13 +510,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("labels")
     p.add_argument("--tolerance", type=float, default=2.0, help="seconds")
     p.set_defaults(func=cmd_accuracy)
-    p = sub.add_parser("harvest", help="successful episodes -> one folder, checked with validate_dataset (no upload)")
-    hsub = p.add_subparsers(dest="harvest_cmd", required=True)
-    e = hsub.add_parser("export", help="gather and validate")
-    e.add_argument("runs", nargs="*", help="run ids (default: all runs)")
-    e.add_argument("--out", default="harvest")
-    e.add_argument("--no-validate", action="store_true")
-    e.set_defaults(func=cmd_harvest)
+    p = sub.add_parser("harvest", help="(gone: see dreamkit datasets)")
+    p.add_argument("rest", nargs=argparse.REMAINDER)
+    p.set_defaults(func=cmd_harvest)
+
+    p = sub.add_parser("where", help="where dreamkit keeps runs and datasets, and how big they are")
+    p.set_defaults(func=cmd_where)
+    p = sub.add_parser("datasets", help="every dataset with its source and status; check <name>: validate_dataset")
+    p.set_defaults(func=cmd_datasets, datasets_cmd="list")
+    dsub = p.add_subparsers(dest="datasets_cmd")
+    c = dsub.add_parser("check", help="Dream Labs' validate_dataset on a dataset (local, nothing uploaded)")
+    c.add_argument("name")
+    c.set_defaults(func=cmd_datasets)
+    p = sub.add_parser("migrate", help="move runs/, gym/ and harvest/ into the data folder (moves, never deletes)")
+    p.add_argument("--dry-run", action="store_true", help="print what would move, change nothing")
+    p.set_defaults(func=cmd_migrate)
 
     args = parser.parse_args(argv)
     if not hasattr(args, "config"):

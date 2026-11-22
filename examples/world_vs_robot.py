@@ -50,12 +50,12 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         for mode, extra in (("with world", []), ("robot only", ["--no-world"])):
             path = Path(tmp) / f"{mode.replace(' ', '_')}.yaml"
-            path.write_text(yaml.safe_dump({"sim_path": str(cfg.sim_dir(base)), "runs_dir": tmp, "plugins": PLUGINS}))
+            path.write_text(yaml.safe_dump({"sim_path": str(cfg.sim_dir(base)), "data_dir": tmp, "plugins": PLUGINS}))
             argv2 = ["--config", str(path), "--episodes", str(episodes), "--seconds", str(args.seconds), "--fast", *extra]
             if args.mock:
                 argv2 += ["--mock", "--behaviors", args.behaviors]
             sim_loop.main(argv2)
-            run = max((p for p in Path(tmp).iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime)
+            run = max((p for p in (Path(tmp) / "runs").iterdir() if p.is_dir()), key=lambda p: p.stat().st_mtime)
             rows[mode] = json.loads((run / "run.json").read_text())["episodes"]
     names = args.behaviors.split(",") if args.mock else [f"attempt {i + 1}" for i in range(episodes)]
     print(f"\n{'attempt':22} {'with world':28} robot only (state, gripper, commands)")

@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None, sim_loop=None) -> int:
 
     sim_loop = sim_loop or load_sim_loop()
     cfg, base = dk_config.load(args.config if Path(args.config).is_file() else None)
-    runs = Path(cfg.runs_dir) if Path(cfg.runs_dir).is_absolute() else base / cfg.runs_dir
+    runs = cfg.runs_path(base)
     runs.mkdir(parents=True, exist_ok=True)
     rows, first_dir = [], None
     with tempfile.TemporaryDirectory() as tmp:

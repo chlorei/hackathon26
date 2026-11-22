@@ -8,6 +8,7 @@ import base64
 import inspect
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -184,8 +185,19 @@ def create_app(config_path: str | Path) -> FastAPI:
 
     def runs_root() -> Path:
         cfg, base = load_cfg()
-        root = Path(cfg.runs_dir).expanduser()
-        return root if root.is_absolute() else base / root
+        return cfg.runs_path(base)
+
+    def datasets_root() -> Path:
+        cfg, base = load_cfg()
+        return cfg.datasets_path(base)
+
+    def dataset_folder(name: str) -> Path:
+        from . import datasets
+
+        folder = (datasets_root() / name).resolve()
+        if not datasets.NAME_RE.match(name) or folder.parent != datasets_root().resolve() or not folder.is_dir():
+            raise HTTPException(404, "no such dataset")
+        return folder
 
     def run_folder(run_id: str) -> Path:
         folder = (runs_root() / run_id).resolve()
@@ -204,7 +216,8 @@ def create_app(config_path: str | Path) -> FastAPI:
     def get_config():
         cfg, base = load_cfg()
         return {"config_file": config_path.name, "sim_found": (cfg.sim_dir(base) / "yam_env.py").is_file(),
-                "light": cfg.light, "runs_dir": cfg.runs_dir}
+                "light": cfg.light, "data_dir": str(cfg.data_path(base)), "runs_dir": str(cfg.runs_path(base)),
+                "datasets_dir": str(cfg.datasets_path(base))}
 
     def latest_stats() -> tuple[dict[str, Any], dict[str, str], str | None]:
         """Each plugin's timings/errors and refusals from the most recent run (what the monitor knows)."""
@@ -499,21 +512,21 @@ def create_app(config_path: str | Path) -> FastAPI:
         elif not ep.get("reason"):
             ep["reason"] = "marked_failed"
             ep["message"] = "marked failed by a person"
-        # the harvester's dataset of this attempt moves out of unlabeled/
-        src = folder / "harvester" / "unlabeled" / f"ep{episode:03d}"
-        if src.is_dir():
-            split = "success" if body.success else "failed"
-            dst = folder / "harvester" / split / src.name
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if dst.exists():
-                shutil.rmtree(dst)
-            shutil.move(str(src), dst)
-            meta = dst / "dreamkit.json"
-            if meta.is_file():
-                data = json.loads(meta.read_text())
-                data.update(success=body.success, labeled_by="person")
-                meta.write_text(json.dumps(data, indent=2))
-            ep["harvester"] = {**(ep.get("harvester") or {}), "split": split, "path": f"harvester/{split}/{src.name}"}
+        # the harvester kept this attempt waiting in its dataset's .pending/: ✓ appends it, ✗ drops it
+        h = ep.get("harvester") or {}
+        if h.get("pending") and h.get("dataset"):
+            from . import datasets
+
+            root = datasets_root() / h["dataset"]
+            pending = root / ".pending" / h["pending"]
+            if pending.is_dir():
+                if body.success:
+                    link = json.loads((pending / "link.json").read_text()) if (pending / "link.json").is_file() else {}
+                    index = datasets.append_episode(root, pending, source="harvester", **link)
+                    ep["harvester"] = {"dataset": h["dataset"], "index": index, "frames": h.get("frames")}
+                else:
+                    ep["harvester"] = {"dataset": None, "dropped": True}
+                shutil.rmtree(pending, ignore_errors=True)
         from .kit import _summary
 
         info["summary"] = _summary(info["episodes"])
@@ -528,8 +541,10 @@ def create_app(config_path: str | Path) -> FastAPI:
         import subprocess
 
         folder = run_folder(run_id)
-        if episode is not None and (folder / f"ep{episode}").is_dir():
-            folder = folder / f"ep{episode}"
+        for name in (f"ep{episode:03d}", f"ep{episode}") if episode is not None else ():
+            if (folder / name).is_dir():
+                folder = folder / name
+                break
         opener = {"Darwin": ["open"], "Windows": ["explorer"]}.get(platform.system(), ["xdg-open"])
         try:
             subprocess.Popen([*opener, str(folder)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -537,39 +552,83 @@ def create_app(config_path: str | Path) -> FastAPI:
             raise HTTPException(500, f"cannot open a file manager here: {error}") from error
         return {"ok": True}
 
-    @app.get("/api/runs/{run_id}/harvest")
-    def get_harvest(run_id: str):
-        from . import harvest
+    @app.get("/api/runs/{run_id}/episodes/{episode}/files")
+    def episode_files(run_id: str, episode: int):
+        """The attempt's folder (runs/<run>/ep003/): its files, and the dataset it went into, if any."""
+        from . import datasets
 
         folder = run_folder(run_id)
-        ready, failed = harvest.episodes(folder), harvest.episodes(folder, "failed")
-        try:
-            check = json.loads((folder / "harvester" / "validation.json").read_text())
-        except (OSError, ValueError):
-            check = None
-        return {"success": len(ready), "failed": len(failed), "validation": check}
+        ep_dir = folder / f"ep{episode:03d}"
+        files = []
+        if ep_dir.is_dir():
+            for f in sorted(ep_dir.rglob("*")):
+                if f.is_file():
+                    files.append({"name": str(f.relative_to(ep_dir)), "path": str(f.relative_to(folder)),
+                                  "size_bytes": f.stat().st_size})
+        info = storage.read_run(folder) or {}
+        ep = next((e for e in info.get("episodes", []) if e.get("episode") == episode), {})
+        h = ep.get("harvester") or {}
+        dataset = ({"dataset": h["dataset"], "index": h.get("index"), "pending": bool(h.get("pending"))}
+                   if h.get("dataset") else datasets.find_episode(datasets_root(), run_id, episode))
+        return {"folder": ep_dir.name, "files": files, "dataset": dataset}
 
-    @app.post("/api/runs/{run_id}/harvest/validate")
-    async def validate_harvest(run_id: str):
-        """Dream Labs' own dataset checks on this run's successful episodes. Local only: nothing is uploaded."""
-        from . import harvest
+    @app.get("/api/datasets")
+    def list_datasets():
+        from . import datasets
 
-        folder = run_folder(run_id)
-        if not harvest.episodes(folder):
-            raise HTTPException(404, "no successful episodes in this run (is the harvester plugin on?)")
-        report = await asyncio.to_thread(harvest.validate, harvest.episodes(folder)[0].parent)
-        report["checked"] = time.time()
-        (folder / "harvester").mkdir(exist_ok=True)
-        storage.write_json(folder / "harvester" / "validation.json", report)
-        return report
+        return {"datasets": datasets.list_all(datasets_root()), "dir": str(datasets_root())}
+
+    @app.post("/api/datasets/{name}/check")
+    async def check_dataset(name: str):
+        """Dream Labs' own dataset checks (validate_dataset). Local only: nothing is uploaded."""
+        from . import datasets
+
+        return await asyncio.to_thread(datasets.check, dataset_folder(name))
+
+    @app.post("/api/datasets/{name}/reveal")
+    def reveal_dataset(name: str):
+        import platform
+        import subprocess
+
+        opener = {"Darwin": ["open"], "Windows": ["explorer"]}.get(platform.system(), ["xdg-open"])
+        subprocess.Popen([*opener, str(dataset_folder(name))], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"ok": True}
+
+    @app.get("/api/storage")
+    def get_storage():
+        """Where everything is and how big it is; mock runs, which can go."""
+        from . import datasets
+
+        runs = storage.list_runs(runs_root())
+        mock = [r for r in runs if r.get("mock")]
+        return {"data_dir": str(runs_root().parent), "runs_dir": str(runs_root()), "datasets_dir": str(datasets_root()),
+                "runs": len(runs), "runs_bytes": datasets.size_bytes(runs_root()) if runs_root().is_dir() else 0,
+                "datasets": len(datasets.list_all(datasets_root(), with_size=False)),
+                "datasets_bytes": datasets.size_bytes(datasets_root()) if datasets_root().is_dir() else 0,
+                "mock_runs": len(mock),
+                "mock_bytes": sum(datasets.size_bytes(runs_root() / r["id"]) for r in mock if r.get("id"))}
+
+    @app.post("/api/storage/delete-mock-runs")
+    def delete_mock_runs(body: dict[str, Any]):
+        """Deletes the runs of the mock policy (scripted failures, no model). Needs {"confirm": true}."""
+        if body.get("confirm") is not True:
+            raise HTTPException(400, 'confirm with {"confirm": true}')
+        gone = []
+        for r in storage.list_runs(runs_root()):
+            folder = runs_root() / str(r.get("id", ""))
+            if r.get("mock") and folder.is_dir() and not _is_live(folder, r):
+                shutil.rmtree(folder, ignore_errors=True)
+                gone.append(r["id"])
+        return {"deleted": len(gone)}
 
     @app.get("/api/runs/{run_id}/trace/{episode}")
     def get_trace(run_id: str, episode: int):
         folder = run_folder(run_id)
-        path = folder / "failure-monitor" / f"ep{episode:03d}_trace.json"
-        if not path.is_file():
-            path = folder / f"ep{episode}" / "trace.json"  # older runs
-        if not path.is_file():
+        for path in (folder / f"ep{episode:03d}" / "trace.json",  # the attempt's folder (§8)
+                     folder / "failure-monitor" / f"ep{episode:03d}_trace.json", folder / f"ep{episode}" / "trace.json"):
+            if path.is_file():
+                break
+        else:
             raise HTTPException(404, "no trace")
         return json.loads(path.read_text())
 
@@ -649,7 +708,8 @@ def create_app(config_path: str | Path) -> FastAPI:
         cors = {}
         if request.headers.get("origin") == "null":
             parts = Path(path).parts
-            if parts in (("run.json",), ("events.jsonl",)) or (len(parts) > 1 and parts[0] in plugin_pages()):
+            if parts in (("run.json",), ("events.jsonl",)) or (len(parts) > 1 and (
+                    parts[0] in plugin_pages() or re.fullmatch(r"ep\d{3}", parts[0]))):
                 cors = {"Access-Control-Allow-Origin": "null"}
         if root not in target.parents or not target.is_file():
             raise HTTPException(404, "not found", headers=cors or None)
@@ -708,7 +768,7 @@ def create_app(config_path: str | Path) -> FastAPI:
 
     def app_context() -> "apps_mod.AppContext":
         cfg, base = load_cfg()
-        return apps_mod.AppContext(config_path=config_path, base=base, runs_dir=runs_root(),
+        return apps_mod.AppContext(config_path=config_path, base=base, runs_dir=runs_root(), datasets_dir=datasets_root(),
                                    world=apps_mod.world_available(cfg, base), config=cfg)
 
     host = AppsHost(app_context)

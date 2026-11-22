@@ -44,6 +44,7 @@ class AppContext:
     runs_dir: Path  # dreamkit's runs/ (History)
     world: bool  # Dream Labs' simulator is installed here
     config: Any = None
+    datasets_dir: Path | None = None  # <data_dir>/datasets: every dataset (the harvester's, an app's)
 
 
 @dataclass

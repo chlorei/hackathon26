@@ -20,13 +20,14 @@ plugins:
 
 At the end of every run, on the `ctx.defer` worker (the loop never waits for it):
 
-1. gathers the successful attempts of this run and, with `include_previous_runs`, of earlier runs of the same task
-   into `runs/<id>/fine-tune/dataset/` (one LeRobot v2.1 dataset per subfolder, YAM embodiment);
-2. runs `validate_dataset` on it (local: no key, no credits) and writes `status.json`;
+1. takes the harvester's dataset of the task, `<data_dir>/datasets/harvest-<task>/` (every successful attempt of the
+   task across runs; `dataset` names another one);
+2. runs `validate_dataset` on it (local: no key, no credits), recorded in its `dataset.json` and in `status.json`;
 3. with `auto_train` on and at least `min_episodes`: registers the `dreamkit-yam` embodiment once, uploads the dataset,
-   waits up to `processing_wait_s` for Dream Labs to process it and starts the fine-tune; `job.json` keeps the job.
+   waits up to `processing_wait_s` for Dream Labs to process it and starts the fine-tune. The upload, the job and the
+   model id are written to the dataset's `dataset.json` (the Data tab shows them) and to `job.json`.
 
-At the start of every run it asks Dream Labs about the newest earlier job: a processed upload starts training, a
+At the start of every run it asks Dream Labs about the newest unfinished job of any dataset: a processed upload starts training, a
 finished job announces `fine-tune ready: dream-1-ft:…` in the feed. Training takes hours, so the model id usually
 arrives a few runs later.
 

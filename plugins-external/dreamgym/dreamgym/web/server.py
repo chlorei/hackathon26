@@ -144,7 +144,7 @@ def list_runs(root: Path) -> list[dict]:
     runs = []
     if root.is_dir():
         for folder in root.iterdir():
-            if folder.is_dir():
+            if folder.is_dir() and folder.name.startswith("gym-"):  # the rest of runs/ is dreamkit's own runs
                 d = describe(root, folder)
                 if d:
                     runs.append(d)
@@ -169,7 +169,7 @@ def launch(root: Path, body: dict) -> dict:
     n = int(body.get("n", 10))
     if not 1 <= n <= 500:
         raise ValueError("n must be 1..500")
-    run_id = f"{time.strftime('%m%d-%H%M%S')}_{mode}_{task}"
+    run_id = f"gym-{time.strftime('%m%d-%H%M%S')}_{mode}_{task}"
     folder = root / run_id
     cmd = [sys.executable, "-u", "-m", "dreamgym.cli", "arena" if mode == "arena" else "compare", "--task", task, "--n", str(n), "--out", str(folder)]
     for key, flag in (("seed", "--seed"), ("jitter", "--jitter"), ("lighting", "--lighting"), ("max_seconds", "--max-seconds")):
@@ -234,8 +234,12 @@ def stop(root: Path, run_id: str) -> None:
 
 # --- datasets: record / harvest / validate / fine-tune --------------------------------------------------------------
 
+## <data_dir>/datasets: every dataset (DreamGym's and the harvester's), set by make_router from the panel's config.
+DATASETS = {"dir": None}
+
+
 def data_root(root: Path) -> Path:
-    return root.parent / "data"
+    return Path(DATASETS["dir"]) if DATASETS["dir"] else root.parent / "datasets"
 
 
 def _spawn_data_job(data: Path, name: str, kind: str, cmd: list[str]) -> dict:
@@ -264,6 +268,15 @@ def _watch_job(job_path: Path, proc: subprocess.Popen, log) -> None:
     job_path.write_text(json.dumps(job, indent=2))
 
 
+def _core_describe(folder: Path) -> dict:
+    try:
+        from dreamkit import datasets
+
+        return datasets.describe(folder)
+    except Exception:  # an older dreamkit: the list still works without the badges
+        return {}
+
+
 def list_datasets(data: Path) -> list[dict]:
     out = []
     if not data.is_dir():
@@ -273,7 +286,7 @@ def list_datasets(data: Path) -> list[dict]:
             continue
         info = _read_json(folder / "meta" / "info.json") or {}
         state = folder / ".dreamgym"
-        if not info and not state.is_dir():
+        if not info and not state.is_dir() and not (folder / "dataset.json").is_file():
             continue
         tasks = []
         tasks_file = folder / "meta" / "tasks.jsonl"
@@ -298,6 +311,8 @@ def list_datasets(data: Path) -> list[dict]:
             "fps": fps, "minutes": round(frames / fps / 60, 1) if fps else 0, "tasks": tasks, "jobs": jobs,
             "validate": _read_json(state / "validate.json"), "finetune": _read_json(state / "finetune.json"),
             "modified": max([p.stat().st_mtime for p in (folder, state) if p.exists()]),
+            # dataset.json (dreamkit.datasets): where it came from, how big it is, how far it got
+            **{k: v for k, v in _core_describe(folder).items() if k in ("source", "size_bytes", "status", "model", "pending")},
         })
     out.sort(key=lambda d: d["modified"], reverse=True)
     return out
@@ -488,14 +503,16 @@ def teleop_start(root: Path, body: dict) -> dict:
     return {"ok": True}
 
 
-def make_router(root: Path, config_path: Path | None = None):
-    """DreamGym's API as a FastAPI router; the panel mounts it at /apps/dreamgym/api."""
+def make_router(root: Path, config_path: Path | None = None, datasets: Path | None = None):
+    """DreamGym's API as a FastAPI router; the panel mounts it at /apps/dreamgym/api. `root` is dreamkit's runs/
+    (Gym's evaluations go in runs/gym-<id>/), `datasets` its datasets/ (one place for every dataset)."""
     from fastapi import APIRouter, Body, HTTPException
     from fastapi.responses import FileResponse, Response
 
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
     DREAMKIT["config"] = config_path
+    DATASETS["dir"] = Path(datasets).resolve() if datasets else root.parent / "datasets"
     r = APIRouter()
 
     def guard(fn, *args):

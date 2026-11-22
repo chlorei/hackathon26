@@ -175,7 +175,9 @@ python examples/ab_test.py --tune --episodes 10   # prompt tuner: paraphrases of
 python examples/ab_test.py --models dreamlabs/dream-1-beta,<fine-tune id> --episodes 20   # base vs fine-tune
 python examples/finetune.py --runs <run-id...>    # harvested successes -> validated -> upload -> fine-tune (--status)
 dreamkit ui                                 # the panel: Live / Plugins / History
-dreamkit harvest export <run-id...>         # successful episodes -> ./harvest, checked with validate_dataset
+dreamkit where                              # where runs and datasets are, and how big
+dreamkit datasets [check <name>]            # every dataset with its status; check: validate_dataset (local)
+dreamkit migrate [--dry-run]                # older runs/, gym/, harvest/ into the data folder (moves, never deletes)
 dreamkit list | search | install | new      # plugins
 dreamkit review --limit 20                  # failed attempts -> labels.csv, each with its video at the failure second
 dreamkit accuracy labels.csv                # after you label them: "failure-monitor: 17/20 reasons correct"
@@ -184,17 +186,23 @@ dreamkit accuracy labels.csv                # after you label them: "failure-mon
 `examples/sim_loop.py` is the reference integration: Dream Labs' own `dream_control` functions (policy_config, feed,
 capture, validate_chunk) drive the simulator unchanged; dreamkit adds `wrap`, `episode` and `step`.
 
-**Where things are saved.** Every run gets a folder, `runs/<id>/` next to `dreamkit.yaml` (the panel shows the full
-path and an *Open folder* button):
+## Where things are saved
 
-| file | what |
+One folder, `data_dir` in `dreamkit.yaml` (default `./dreamkit-data`, beside the config). `dreamkit where` prints it
+with sizes; `dreamkit migrate` moves older layouts into it.
+
+| path | what |
 |---|---|
-| `recorder/ep003_top.mp4` … | each camera, per attempt; video time = simulated time |
-| `history/ep003_recap.mp4`, `history/summary.json` | the key moments, captioned; the run in plain words |
-| `failure-monitor/ep003_trace.json` | what failure-monitor measured, step by step |
-| `harvester/success/ep003/`, `harvester/failed/ep003/` | one LeRobot v2.1 dataset per attempt, `dreamkit.json` has the outcome |
-| `run.json`, `events.jsonl` | results and the full event feed |
-| `history/report.html` | the run summary, self-contained |
+| `runs/<run-id>/run.json`, `events.jsonl` | one run (your loop, `dreamkit sim`/`run`, the Gym tab): results and the full event feed |
+| `runs/<run-id>/ep003/` | one attempt: `top.mp4` … (each camera; video time = simulated time), `recap.mp4` (the key moments, captioned), `trace.json` (what failure-monitor measured), `result.json` |
+| `runs/<run-id>/history/` | `summary.json` (the run in plain words), `report.html` (self-contained) |
+| `runs/<run-id>/<plugin>/` | a plugin's own data, the files its page reads |
+| `runs/gym-<id>/` | a Gym evaluation (base vs fine-tune on the same seeds) |
+| `datasets/<name>/` | every dataset, LeRobot v2.1 (`meta/`, `data/`, `videos/`), plus `dataset.json`: source (harvester, Gym, Teleop, export), each episode's run and attempt, the `validate_dataset` result, the upload and fine-tune job, the model id |
+| `datasets/harvest-<task>/` | the harvester's: each successful attempt of the task, appended as it ends |
+
+History shows an attempt's files (*Show in Finder*) and the dataset it joined; the Data tab lists every dataset with
+its source, size and status (collected → checked → uploaded → training → model id), and the storage it takes.
 
 **Less CPU.** Switch on *Light mode* in the panel (or `light: true` in `dreamkit.yaml`): cameras are rendered at
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
@@ -255,7 +263,7 @@ your loop's business: `python examples/sim_loop.py --help`.
 
 ```yaml
 sim_path: ../dreamlabs/dream_library/examples/yam_mujoco
-runs_dir: runs
+data_dir: dreamkit-data      # runs/ and datasets/ (see Where things are saved)
 plugins:
   - camera-check
   - success-check
@@ -354,15 +362,16 @@ actions; the example loop only moves the fruit (scene randomisation).
  plugins ── failure-monitor → recovery → harvester …         │
    │        (ctx.world, ctx.ui, ctx.files, ctx.defer)        │
    ▼                                                         │
- runs/<id>/  run.json  events.jsonl  live/  <plugin>/  history/ ┘
+ runs/<id>/  run.json  events.jsonl  live/  ep003/  history/ ┘
 ```
 
 1. **wrap** — `dreamkit.wrap(dream.DreamClient())` is the same client; `get_action()` runs `before_model` / `after_model`
    around the model call, `step()` runs `on_step` after each executed row, `episode()` opens and closes an attempt.
 2. **manager** — loads plugins by the standard (requires, conflicts, one control plugin), gives each a context scoped to
    its capability, times every hook and switches off a plugin that keeps failing or runs over budget.
-3. **plugins** — measure, decide, act (only `recovery` acts), save their files under `runs/<id>/<plugin>/`.
-4. **runs/** — the run folder is the only interface: events, live frames, a heartbeat, results, videos, datasets.
+3. **plugins** — measure, decide, act (only `recovery` acts), save an attempt's files in `runs/<id>/ep003/`; the
+   harvester adds successful attempts to `datasets/harvest-<task>/`.
+4. **runs/** — the run folder is the only interface: events, live frames, a heartbeat, results, videos.
 5. **panel** — follows that folder, so your loop never depends on it: open or close it any time, over SSH too.
 
 ## Develop the panel

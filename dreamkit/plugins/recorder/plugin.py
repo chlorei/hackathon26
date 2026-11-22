@@ -1,4 +1,4 @@
-"""recorder: one MP4 per camera per attempt, in run_dir/recorder/ (PLUGIN_STANDARD.md §8).
+"""recorder: one MP4 per camera per attempt, in the attempt's folder runs/<run>/ep003/<cam>.mp4 (PLUGIN_STANDARD.md §8).
 
 Video time = the attempt's simulated time, so `ep003_top.mp4#t=9.3` is the moment. Encoding runs on ctx.defer."""
 
@@ -75,7 +75,7 @@ class Recorder(Plugin):
             if rgb is None:
                 continue
             if cam not in self.paths:
-                self.paths[cam] = ctx.files.path(ctx.files.episode_name(f"{cam}.mp4"))
+                self.paths[cam] = ctx.episode_dir / f"{cam}.mp4"  # §8: the attempt's files, runs/<run>/ep003/
             ctx.defer(self._write, cam, self.paths[cam], rgb.copy(), pts)
 
     def _write(self, cam: str, path, rgb: np.ndarray, pts: int) -> None:

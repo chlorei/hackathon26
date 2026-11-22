@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         for label, plugins in (("without recovery", BASE),
                                ("with recovery", [*BASE, {"recovery": {"retry_attempts": 0}}])):
             path = Path(tmp) / f"{label.replace(' ', '_')}.yaml"
-            runs = Path(cfg.runs_dir) if Path(cfg.runs_dir).is_absolute() else base / cfg.runs_dir
+            runs = cfg.runs_path(base)
             path.write_text(yaml.safe_dump({"sim_path": str(cfg.sim_dir(base)), "runs_dir": str(runs),
                                             "plugins": plugins}))
             print(f"\n=== {label} ===", flush=True)

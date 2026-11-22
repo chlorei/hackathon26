@@ -15,10 +15,10 @@ from dreamkit.sdk import App, AppContext, Manifest
 
 
 def router(ctx: AppContext):
-    """/apps/dreamgym/api: runs, datasets, teleop. DreamGym's own folders sit beside dreamkit.yaml in gym/."""
+    """/apps/dreamgym/api: datasets, evaluations, teleop. Everything in dreamkit's data folder (runs/, datasets/)."""
     from .web.server import make_router
 
-    return make_router(ctx.base / "gym" / "runs", ctx.config_path)
+    return make_router(ctx.runs_dir, ctx.config_path, getattr(ctx, "datasets_dir", None))
 
 
 def commands(argv: list[str]) -> int:

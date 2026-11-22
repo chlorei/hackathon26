@@ -33,7 +33,10 @@ class Config(BaseModel):
     attempts, model, mock) belongs to the user's loop, not here (examples/sim_loop.py takes them as arguments)."""
 
     sim_path: str = DEFAULT_SIM_PATH
-    runs_dir: str = "runs"
+    ## Everything dreamkit saves, in one folder: runs/<run-id>/ (the attempts) and datasets/<name>/ (LeRobot v2.1).
+    data_dir: str = "dreamkit-data"
+    ## Before data_dir: the runs folder itself (datasets then sit beside it). `dreamkit migrate` moves to data_dir.
+    runs_dir: str | None = None
     plugins: list[PluginSpec] = []
     # advanced, rarely set by hand; examples/sim_loop.py passes faults and light through dreamkit.wrap(...)
     render_every: int = Field(2, ge=1, le=4)  # render cameras every N steps (2 = 10 fps); the model gets 5 fps
@@ -65,6 +68,19 @@ class Config(BaseModel):
             else:
                 raise ValueError(f"bad plugin entry: {item!r}")
         return out
+
+    def runs_path(self, base: Path) -> Path:
+        """Where runs go: <data_dir>/runs, or the legacy runs_dir when a config still names one."""
+        raw = self.runs_dir if self.runs_dir else str(Path(self.data_dir) / "runs")
+        path = Path(raw).expanduser()
+        return path if path.is_absolute() else base / path
+
+    def datasets_path(self, base: Path) -> Path:
+        """Where datasets go: beside runs/, so one folder holds both."""
+        return self.runs_path(base).parent / "datasets"
+
+    def data_path(self, base: Path) -> Path:
+        return self.runs_path(base).parent
 
     def sim_dir(self, base: Path | None = None) -> Path:
         path = Path(self.sim_path).expanduser()

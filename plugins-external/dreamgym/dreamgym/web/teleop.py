@@ -164,7 +164,8 @@ class TeleopSession:
                             from .. import dataset
 
                             dataset.add_episode(self.dataset, writer, task=self.task.name, prompt=self.task.prompt,
-                                                source="teleop", seed=self.seed - 1)
+                                                source="teleop", seed=self.seed - 1, run=kit.run_id,
+                                                episode=kit.ctx.episode)
                         finish(bool(self.task.success(env)) if cmd == "save" else None)
                         if cmd == "save":
                             message = f"Saved episode {len(writer.episodes)} ({frames} frames)." if kept else \

@@ -240,7 +240,7 @@ def replay(fixture: str | Path, plugins: list[Any], keep: bool = False, extra_di
     env = ReplayEnv(fx, world=world)
     tmp = Path(tempfile.mkdtemp(prefix="dreamkit-replay-"))
     specs = [p if isinstance(p, (str, dict)) else str(p) for p in plugins]
-    kit = Kit(ReplayClient(fx), config=None, console=False, runs_dir=str(tmp), plugins=specs,
+    kit = Kit(ReplayClient(fx), config=None, console=False, data_dir=str(tmp), plugins=specs,
               plugin_dirs=[Path(d) for d in extra_dirs or []])
     call_steps = [c["step"] for c in fx.calls]
     with kit.episode(fx.task, env=env, images=fx.frames_at(0)):
@@ -273,5 +273,7 @@ def fake_ctx(plugin, **overrides: Any):
                    run_dir=Path(tempfile.mkdtemp(prefix="dreamkit-fake-")))
     for k, v in overrides.items():
         setattr(core, k, v)
+    if "datasets_dir" not in overrides:  # beside runs/, as in a real data folder: <data>/runs/<id>, <data>/datasets
+        core.datasets_dir = Path(core.run_dir).parent.parent / "datasets"
     hook = overrides.get("hook", "on_step")
     return PluginContext(core, plugin, lambda: hook)

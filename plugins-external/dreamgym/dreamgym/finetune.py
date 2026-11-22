@@ -23,6 +23,18 @@ def state_dir(dataset: Path) -> Path:
 
 def _save(dataset: Path, name: str, data: dict) -> None:
     (state_dir(dataset) / name).write_text(json.dumps(data, indent=2, default=str))
+    # the same facts on the dataset itself (dataset.json: validate, upload, finetune), where every tool reads them
+    from dreamkit import datasets
+
+    if name == "validate.json":
+        datasets.update(dataset, validate={**data, "checked": data.get("checked_at")})
+    elif name == "finetune.json":
+        stage = data.get("stage")
+        datasets.update(dataset, upload={"dataset_id": data.get("dataset_id"), "dataset_name": data.get("dataset_name"),
+                                         "status": stage if stage in ("uploading", "processing", "failed") else "processed",
+                                         "updated": data.get("updated")},
+                        finetune={"stage": stage, "job_id": data.get("job_id"), "model": data.get("model"),
+                                  "status": "failed" if stage == "failed" else stage, "updated": data.get("updated")})
 
 
 def _client():
@@ -33,7 +45,10 @@ def _client():
 
 def validate(dataset: Path) -> dict:
     """Local check against the sim's embodiment; nothing is sent."""
-    report = _client().validate_dataset(str(dataset), EMBODIMENT_CONFIG)
+    from dreamkit import datasets
+
+    with datasets.lerobot_view(Path(dataset)) as view:  # meta/, data/, videos/: not dataset.json or .dreamgym/
+        report = _client().validate_dataset(str(view), EMBODIMENT_CONFIG)
     out = {k: getattr(report, k, None) for k in ("ok", "error", "episodes", "frames", "fps", "state_dim", "action_dim")}
     out["checked_at"] = time.time()
     _save(dataset, "validate.json", out)
@@ -61,7 +76,10 @@ def start(dataset: Path, name: str | None = None, suffix: str = "dreamgym", step
         name = f"{name}-{time.strftime('%m%d-%H%M')}"
     _save(dataset, "finetune.json", {"stage": "uploading", "dataset_name": name, "previous": previous,
                                      "updated": time.time()})
-    ds = client.upload_dataset(str(dataset), name, embodiment.name)
+    from dreamkit import datasets
+
+    with datasets.lerobot_view(dataset) as view:
+        ds = client.upload_dataset(str(view), name, embodiment.name)
     log(f"uploaded {ds.id} ({ds.status}); processing ...")
     _save(dataset, "finetune.json", {"stage": "processing", "dataset_id": ds.id, "dataset_name": ds.name,
                                      "previous": previous, "updated": time.time()})

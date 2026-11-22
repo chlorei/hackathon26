@@ -31,8 +31,18 @@ from .arena import format_summary, run_arena, slug
 from .tasks import TASKS, get_task
 
 ## DreamGym keeps its own folders, apart from dreamkit's runs/ (ignored by git): gym/runs, gym/data.
-RUNS = Path("gym") / "runs"
-DATA = Path("gym") / "data"
+def _runs() -> Path:
+    """Gym's evaluation folders live with dreamkit's runs: <data_dir>/runs/gym-<id>/."""
+    from .kit import paths
+
+    return paths()[0]
+
+
+def _data() -> Path:
+    """Datasets live in <data_dir>/datasets/, with the harvester's."""
+    from .kit import paths
+
+    return paths()[1]
 
 
 def _task(args):
@@ -75,7 +85,7 @@ def cmd_arena(args) -> int:
         return cmd_compare(args)
     task = _task(args)
     policy = make_policy(args.policy, action_limit=args.action_limit)
-    out = args.out or RUNS / f"{time.strftime('%m%d-%H%M')}_{task.name}_{slug(args.policy)}"
+    out = args.out or _runs() / f"gym-{time.strftime('%m%d-%H%M')}_{task.name}_{slug(args.policy)}"
     summary = run_arena(task, policy, n=args.n, out_dir=out, seed0=args.seed, prompt=args.prompt,
                         max_seconds=args.max_seconds, gifs=args.gifs, resume=not args.fresh)
     print("\n" + format_summary(summary))
@@ -97,7 +107,7 @@ def cmd_compare(args) -> int:
     if len(variants) < 2:
         print("compare needs two variants: two --policy, two --prompt, or --recovery-ab", file=sys.stderr)
         return 2
-    out = args.out or RUNS / f"{time.strftime('%m%d-%H%M')}_compare_{task.name}"
+    out = args.out or _runs() / f"gym-{time.strftime('%m%d-%H%M')}_compare_{task.name}"
     report = run_compare(task, variants, n=args.n, out_dir=out, seed0=args.seed, max_seconds=args.max_seconds,
                          action_limit=args.action_limit, gifs=args.gifs)
     print("\n" + format_compare(report))
@@ -134,7 +144,7 @@ def cmd_record(args) -> int:
     from .tasks import prompt_variants
 
     plan = _mix(args)
-    out = args.out or DATA / plan[0][0]
+    out = args.out or _data() / plan[0][0]
     writer = LeRobotWriter(out, fps=args.fps)
     policy = make_policy(args.policy)
     source = "scripted" if policy.name.startswith("scripted") else policy.name
@@ -173,7 +183,8 @@ def cmd_record(args) -> int:
                                         step_hook=writer.step_hook, kit=kit)
                 ok = writer.end(keep=result.success)
                 if ok:
-                    dataset.add_episode(out, writer, task=name, prompt=prompt, source=source, seed=seed)
+                    dataset.add_episode(out, writer, task=name, prompt=prompt, source=source, seed=seed,
+                                        run=getattr(result, "run_id", None), episode=getattr(result, "episode", None))
                 kept[name] += ok
                 tried[name] += 1
                 progress["last"] = {"task": name, "seed": seed, "reason": result.reason, "kept": bool(ok)}

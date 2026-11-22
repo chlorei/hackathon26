@@ -272,8 +272,8 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
         <div className="min-w-0 space-y-4">
           {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} pages={pages}
             onPage={(plugin) => setPage({ plugin, runId: id, episode: ep.episode })} /> : <p className="text-dim">This run has no finished attempts.</p>}
+          {ep && <Files key={`files-${ep.episode}`} runId={id} episode={ep.episode} />}
           {r.recap?.text && <Fold title="Run summary"><p className="px-5 py-4 text-[14px] leading-relaxed">{r.recap.text}</p></Fold>}
-          <Harvest id={id} />
         </div>
         <PluginPageDrawer page={page} onClose={() => setPage(null)} />
       </div>
@@ -324,34 +324,38 @@ function RunFacts({ r, onPage }: { r: RunInfo; onPage: (plugin: string) => void 
   )
 }
 
-function Harvest({ id }: { id: string }) {
-  const queryClient = useQueryClient()
-  const harvest = useQuery({ queryKey: ['harvest', id], queryFn: () => api.harvest(id) })
-  const check = useMutation({
-    mutationFn: () => api.validateHarvest(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['harvest', id] }),
-  })
-  const h = harvest.data
-  if (!h || (h.success === 0 && h.failed === 0)) return null
-  const v = h.validation
+const bytes = (n: number) => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 ** 2).toFixed(1)} MB`)
+
+/** The attempt's folder (runs/<run>/ep003/): its files, Show in Finder, and the dataset it joined. */
+function Files({ runId, episode }: { runId: string; episode: number }) {
+  const files = useQuery({ queryKey: ['files', runId, episode], queryFn: () => api.files(runId, episode) })
+  const reveal = useMutation({ mutationFn: () => api.revealEpisode(runId, episode) })
+  const f = files.data
+  if (!f) return null
+  const ds = f.dataset
   return (
-    <Fold title={<>Dataset <span className="font-normal text-dim">· {count(h.success, 'successful episode')} for fine-tuning</span></>}>
-      <div className="space-y-2 px-5 py-4 text-[14px]">
-        <p>{count(h.success, 'successful episode')} ready for fine-tuning{h.failed ? `, ${h.failed} failed kept for analysis` : ''}. Nothing is uploaded.</p>
-        {v && (v.ok ? <p className="text-ok">Checked with validate_dataset: {v.episodes} episodes, {v.frames} frames, {v.fps} fps.</p> : (
-          <div>
-            <p className="text-bad">validate_dataset refused it.</p>
-            <details className="text-[13px] text-dim"><summary className="cursor-pointer">Details</summary><pre className="mt-1 font-mono whitespace-pre-wrap">{v.error}</pre></details>
-          </div>
-        ))}
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          {h.success > 0 && (
-            <Button onClick={() => check.mutate()} disabled={check.isPending}>{check.isPending ? 'Checking…' : v ? 'Check again' : 'Check with validate_dataset'}</Button>
-          )}
-          <span className="text-[13px] text-dim">Several runs into one dataset: <code className="text-ink">dreamkit harvest export {id}</code></span>
+    <>
+      {ds && (
+        <p className="text-[14px] text-dim">
+          {ds.pending ? <>Waiting for a ✓ to join <b className="text-ink">{ds.dataset}</b></>
+            : <>In dataset: <a href="#/data" className="font-medium text-ink hover:underline">{ds.dataset}</a>{ds.index != null && <> (episode {ds.index})</>}</>}
+        </p>
+      )}
+      <Fold title={<>Files <span className="font-normal text-dim">· {count(f.files.length, 'file')} in {f.folder}/</span></>}>
+        <div className="px-5 py-3">
+          <ul className="text-[14px]">
+            {f.files.map((x) => (
+              <li key={x.path} className="flex items-baseline justify-between gap-4 border-b border-line/60 py-1.5 last:border-0">
+                <a href={`/media/${runId}/${x.path}`} target="_blank" rel="noreferrer" className="truncate font-mono text-[13px] hover:underline">{x.name}</a>
+                <span className="shrink-0 text-[13px] text-dim tabular-nums">{bytes(x.size_bytes)}</span>
+              </li>
+            ))}
+            {!f.files.length && <li className="py-1.5 text-dim">No files for this attempt.</li>}
+          </ul>
+          <Button className="mt-3" onClick={() => reveal.mutate()}><FolderOpen className="h-4 w-4" /> Show in Finder</Button>
         </div>
-      </div>
-    </Fold>
+      </Fold>
+    </>
   )
 }
 
@@ -360,7 +364,7 @@ function LabelButtons({ runId, episode }: { runId: string; episode: number }) {
   const queryClient = useQueryClient()
   const mark = useMutation({
     mutationFn: (success: boolean) => api.label(runId, episode, success),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['run', runId] }); queryClient.invalidateQueries({ queryKey: ['harvest', runId] }) },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['run', runId] }); queryClient.invalidateQueries({ queryKey: ['files', runId] }) },
   })
   return (
     <div className="mt-1 flex items-center gap-1.5 pl-5" onClick={(e) => e.stopPropagation()}>

@@ -560,7 +560,7 @@ class FailureMonitor(Plugin):
                 if "target" in r:
                     item["dt"] = round(float(np.linalg.norm(r["obj"][:2] - r["target"][:2])), 4)
             out.append(item)
-        path = ctx.files.path(ctx.files.episode_name("trace.json"))
+        path = ctx.episode_dir / "trace.json"  # §8: beside the attempt's videos
         payload = {"object": self.obj, "target": self.target, "rows": out, "milestones": self.milestones,
                    "source": self.source}
         ctx.defer(path.write_text, json.dumps(payload))

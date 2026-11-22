@@ -1,4 +1,4 @@
-"""fine-tune: gathers successes across runs, checks them, trains only when asked; a replay run end to end."""
+"""fine-tune: checks the harvester's dataset of the task, trains only when asked, keeps the job in dataset.json."""
 
 import json
 import sys
@@ -15,11 +15,17 @@ from fine_tune.plugin import FineTune  # noqa: E402
 TASK = "put apple into the bowl"
 
 
-def _episode(run: Path, ep: str, task: str = TASK, frames: int = 120) -> None:
-    folder = run / "harvester" / "success" / ep
-    (folder / "meta").mkdir(parents=True)
-    (folder / "meta" / "info.json").write_text(json.dumps({"total_frames": frames, "fps": 10}))
-    (folder / "dreamkit.json").write_text(json.dumps({"task": task, "success": True}))
+def _dataset(data: Path, episodes: int, task: str = TASK, frames: int = 120) -> Path:
+    """What the harvester leaves: datasets/harvest-<task>/ with its meta and dataset.json."""
+    from dreamkit import datasets
+
+    root = data / "datasets" / datasets.harvest_name(task)
+    (root / "meta").mkdir(parents=True)
+    (root / "meta" / "info.json").write_text(json.dumps({"total_episodes": episodes, "total_frames": frames * episodes,
+                                                         "fps": 10}))
+    datasets.update(root, name=root.name, source="harvester",
+                    episodes=[{"index": i, "run": "r0", "episode": i + 1, "task": task} for i in range(episodes)])
+    return root
 
 
 def _ctx(plugin, runs: Path, run_id: str, hook: str):
@@ -33,18 +39,16 @@ def _run(plugin, runs: Path, run_id: str) -> dict:
     return json.loads((runs / run_id / "fine-tune" / "status.json").read_text())
 
 
-def test_gathers_successes_of_this_and_earlier_runs_of_the_same_task(tmp_path, monkeypatch):
+def test_checks_the_task_dataset_and_records_it(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
-    _episode(runs / "r1", "ep001")
-    _episode(runs / "r1", "ep002", task="put banana on the plate")
-    _episode(runs / "r2", "ep001")
-    monkeypatch.setattr("dreamkit.harvest.validate", lambda path, config=None: {"ok": True})
+    root = _dataset(tmp_path, 2)
+    _dataset(tmp_path, 4, task="put banana on the plate")  # another task's dataset is left alone
+    monkeypatch.setattr("dreamkit.datasets.validate", lambda path, config=None: {"ok": True})
     status = _run(FineTune(min_episodes=5), runs, "r2")
-    assert status["episodes"] == 2 and status["sources"] == ["r1", "r2"]  # banana left out
+    assert status["dataset"] == root.name and status["episodes"] == 2
     assert status["frames"] == 240 and status["validate"]["ok"]
-    copied = sorted(p.name for p in (runs / "r2" / "fine-tune" / "dataset").iterdir())
-    assert copied == ["r1-ep001", "r2-ep001"]
-    assert not list((runs / "r2" / "fine-tune" / "dataset").rglob("dreamkit.json"))  # outcome files stay out
+    rec = json.loads((root / "dataset.json").read_text())
+    assert rec["validate"]["ok"]  # the check is recorded on the dataset (the Data tab's status)
     assert not (runs / "r2" / "fine-tune" / "job.json").exists()  # auto_train off: nothing uploaded
 
 
@@ -77,9 +81,8 @@ class FakeClient:
 
 def test_trains_when_asked_and_announces_the_model_next_run(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
-    for i in range(3):
-        _episode(runs / "r1", f"ep00{i}")
-    monkeypatch.setattr("dreamkit.harvest.validate", lambda path, config=None: {"ok": True})
+    root = _dataset(tmp_path, 3)
+    monkeypatch.setattr("dreamkit.datasets.validate", lambda path, config=None: {"ok": True})
     monkeypatch.setitem(sys.modules, "dream", types.SimpleNamespace(DreamClient=FakeClient))
     FakeClient.calls = []
     _run(FineTune(min_episodes=3, auto_train=True, suffix="apple"), runs, "r1")
@@ -92,12 +95,17 @@ def test_trains_when_asked_and_announces_the_model_next_run(tmp_path, monkeypatc
     nxt.on_run_start(_ctx(nxt, runs, "r2", "on_run_start"))
     job2 = json.loads((runs / "r2" / "fine-tune" / "job.json").read_text())
     assert job2["stage"] == "done" and job2["model"] == "dream-1-ft:abcd1234-apple"
+    rec = json.loads((root / "dataset.json").read_text())  # upload, job and model id live on the dataset
+    assert rec["upload"]["dataset_id"] == "ds_1" and rec["finetune"]["model"] == "dream-1-ft:abcd1234-apple"
+    from dreamkit import datasets
+
+    assert datasets.describe(root)["status"] == "trained"
 
 
 def test_not_enough_attempts_means_no_upload(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
-    _episode(runs / "r1", "ep001")
-    monkeypatch.setattr("dreamkit.harvest.validate", lambda path, config=None: {"ok": True})
+    _dataset(tmp_path, 1)
+    monkeypatch.setattr("dreamkit.datasets.validate", lambda path, config=None: {"ok": True})
     monkeypatch.setitem(sys.modules, "dream", types.SimpleNamespace(DreamClient=FakeClient))
     FakeClient.calls = []
     _run(FineTune(min_episodes=20, auto_train=True), runs, "r1")

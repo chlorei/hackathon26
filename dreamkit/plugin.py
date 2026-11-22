@@ -91,6 +91,7 @@ class Context:
     run_id: str
     run_dir: Path | None = None
     config: Any = None
+    datasets_dir: Path | None = None  # <data_dir>/datasets: where datasets go (the harvester's, DreamGym's)
     episode: int = 0
     scene: int = 0
     attempt: int = 1
@@ -123,6 +124,15 @@ class Context:
     def target(self) -> dict[str, str | None]:
         obj, target = parse(self.task or "")
         return {"object": obj, "target": target}
+
+    @property
+    def episode_dir(self) -> Path | None:
+        """runs/<run>/ep003/: the files of this attempt (camera videos, recap.mp4, trace.json, result.json)."""
+        if self.run_dir is None or self.episode < 1:
+            return None
+        d = self.run_dir / f"ep{self.episode:03d}"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
     def event(self, plugin: str, level: str, message: str, **data: Any) -> None:
         if self.emitter is not None:
@@ -239,7 +249,8 @@ class UI:
 
 
 class Files:
-    """§8: a plugin's files live in run_dir/<plugin>/, nowhere else."""
+    """§8: a plugin's own files (the data its page reads) live in run_dir/<plugin>/; files of an attempt go to
+    ctx.episode_dir."""
 
     _NAME = re.compile(r"^[a-z0-9][a-z0-9_.\-]*$")
 
@@ -298,6 +309,10 @@ class PluginContext:
     model = property(lambda self: self._core.model)
     mock = property(lambda self: self._core.mock)
     run_id = property(lambda self: self._core.run_id)
+    ## §8: this attempt's folder, runs/<run>/ep003/: the files of the attempt (videos, trace.json ...), shared by all
+    episode_dir = property(lambda self: self._core.episode_dir)
+    ## <data_dir>/datasets/: datasets live here, not inside a run (the harvester appends to one)
+    datasets_dir = property(lambda self: self._core.datasets_dir)
     run_dir = property(lambda self: self._core.run_dir)
     config = property(lambda self: self._core.config)
     episode = property(lambda self: self._core.episode)

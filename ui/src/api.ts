@@ -47,7 +47,7 @@ export interface EpisodeResult {
   recoveries?: number
   recovery?: { count: number; actions: string[]; worked: boolean }
   'latency-monitor'?: { mean_ms?: number; p95_ms?: number; max_ms?: number; calls?: number; mock?: boolean }
-  harvester?: { split: string; path: string; frames: number }
+  harvester?: { dataset?: string | null; index?: number; pending?: string; frames?: number } | null
   ui?: Record<string, { metrics: Record<string, { value: number; unit: string }>; marks: { t_s: number; label: string; level: string }[]; badges: { text: string; level: string }[] }>
 }
 
@@ -63,6 +63,13 @@ export interface AppInfo {
   api: boolean
   commands: string[]
   inactive: string | null
+}
+
+/** An attempt's folder, runs/<run>/ep003/, and the dataset it joined (harvester). */
+export interface EpisodeFiles {
+  folder: string
+  files: { name: string; path: string; size_bytes: number }[]
+  dataset: { dataset: string; index?: number | null; pending?: boolean } | null
 }
 
 export interface RunInfo {
@@ -211,8 +218,8 @@ export const api = {
     call<{ path: string }>(`/api/runs/${id}/reveal${episode ? `?episode=${episode}` : ''}`, { method: 'POST' }),
   apps: () => call<{ apps: AppInfo[]; problems: string[]; world: boolean }>('/api/apps'),
   live: () => call<{ id: string | null; task?: string; model?: string; mock?: boolean }>('/api/live'),
-  harvest: (id: string) => call<{ success: number; failed: number; validation: Validation | null }>(`/api/runs/${id}/harvest`),
-  validateHarvest: (id: string) => call<Validation>(`/api/runs/${id}/harvest/validate`, { method: 'POST' }),
+  files: (id: string, episode: number) => call<EpisodeFiles>(`/api/runs/${id}/episodes/${episode}/files`),
+  revealEpisode: (id: string, episode: number) => call<{ ok: boolean }>(`/api/runs/${id}/reveal?episode=${episode}`, { method: 'POST' }),
   deleteRun: (id: string) => call<{ ok: boolean }>(`/api/runs/${id}`, { method: 'DELETE' }),
   // Create: a plugin described in words (dreamkit/create.py)
   create: (messages: ChatMessage[], files?: Record<string, string> | null) =>

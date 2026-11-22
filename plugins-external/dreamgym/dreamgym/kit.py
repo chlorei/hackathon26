@@ -22,6 +22,15 @@ def config_path() -> str | None:
     return "dreamkit.yaml" if Path("dreamkit.yaml").is_file() else None
 
 
+def paths() -> tuple[Path, Path]:
+    """(runs, datasets) of the dreamkit data folder (dreamkit.yaml's data_dir): DreamGym keeps nothing of its own."""
+    from dreamkit import config as config_mod
+
+    path = config_path()
+    cfg, base = config_mod.load(path if path and Path(path).is_file() else None)
+    return cfg.runs_path(base), cfg.datasets_path(base)
+
+
 def plugins_with(recovery: bool | None) -> list[Any] | None:
     """dreamkit.yaml's plugins, with recovery forced on or off (None: as configured)."""
     if recovery is None:

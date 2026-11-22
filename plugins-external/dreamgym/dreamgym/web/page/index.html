@@ -162,6 +162,13 @@ kbd{display:inline-block;min-width:24px;text-align:center;padding:1px 6px;border
 .btn.rec{background:var(--bad);color:var(--panel);border-color:var(--bad)}
 .btn.save{background:var(--ok);color:var(--panel);border-color:var(--ok)}
 .field.check{display:flex;align-items:center;gap:8px;font-weight:500;margin:6px 0}
+.dsitem .src{display:inline-block;margin-right:6px;padding:0 6px;border-radius:10px;background:var(--soft);color:var(--muted);font-size:11.5px}
+.dsitem .model{font-family:var(--dk-font-mono);font-size:11.5px;color:var(--ok);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.storage{margin-top:16px;padding:12px;border-top:1px solid var(--line)}
+.storage h3{margin:0 0 4px;font-size:14px}
+.storage .row{display:flex;justify-content:space-between;font-size:13px;color:var(--muted);margin-top:4px}
+.storage .row b{color:var(--ink);font-weight:600}
+.storage .btn{margin-top:10px;width:100%}
 .focusnote{font-size:12.5px;color:var(--muted);margin-top:8px}
 /* --- Data tab --- */
 .dsitem{display:block;width:100%;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:11px 12px;margin-bottom:8px;cursor:pointer}
@@ -215,7 +222,7 @@ td .play{border:0;background:var(--soft);border-radius:6px;cursor:pointer;paddin
   <button class="btn primary" id="newDs">New dataset</button>
 </header>
 <main>
-  <aside id="dsList"></aside>
+  <aside><div id="dsList"></div><div id="storage" class="storage"></div></aside>
   <section class="detail" id="detail">
     <div class="empty"><h2>No dataset yet</h2>Press <b>New dataset</b>, pick tasks, and record. Episodes appear here as they are saved.</div>
   </section>
@@ -306,13 +313,38 @@ function renderList() {
   if (!changed("list", [items, sel])) return;
   if (!items.length) { $("#dsList").innerHTML = '<div class="hint" style="padding:8px">No datasets yet.</div>'; return; }
   $("#dsList").innerHTML = items.map(d => {
-    const rec = d.jobs?.record?.running, ft = d.finetune?.stage;
-    const pill = rec ? '<span class="pill running">recording</span>' : (ft ? `<span class="pill done">${esc(ft)}</span>` : (d.fresh ? '<span class="pill done">new</span>' : ""));
+    const rec = d.jobs?.record?.running;
+    // status along the way: collected -> checked -> uploaded -> training -> trained (model id)
+    const st = rec ? "recording" : (d.fresh ? "new" : (d.status || ""));
+    const tone = st === "trained" || st === "checked" ? "done" : (st === "failed" || st === "check failed" ? "failed" : (st === "recording" || st === "training" || st === "uploaded" ? "running" : ""));
+    const pill = st && st !== "empty" && st !== "collected" ? `<span class="pill ${tone}">${esc(st)}</span>` : "";
+    const src = d.source && d.source !== "unknown" ? `<span class="src">${esc(SOURCE[d.source] || d.source)}</span>` : "";
     return `<button class="dsitem ${d.name === sel ? "sel" : ""}" data-name="${esc(d.name)}">
       <div class="top"><span class="nm">${esc(d.name)}</span>${pill}</div>
-      <div class="sub"><b>${d.episodes}</b> episodes · ${d.minutes} min</div></button>`;
+      <div class="sub">${src}<b>${d.episodes}</b> episodes · ${d.minutes} min${d.size_bytes != null ? ` · ${size(d.size_bytes)}` : ""}${d.pending ? ` · ${d.pending} waiting for a label` : ""}</div>
+      ${d.model ? `<div class="sub model" title="the fine-tuned model">${esc(d.model)}</div>` : ""}</button>`;
   }).join("");
   document.querySelectorAll(".dsitem").forEach(b => b.onclick = () => select(b.dataset.name));
+}
+const SOURCE = {harvester: "harvester", gym: "Gym", scripted: "scripted", teleop: "teleop", export: "export", migrated: "migrated"};
+const size = n => n < 1024 ** 2 ? `${Math.round(n / 1024)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${(n / 1024 ** 3).toFixed(2)} GB`;
+// The panel's own API (storage), next to this app's: the page lives at /apps/dreamgym/, so ../../api/ is /api/.
+const CORE = "../../api/";
+async function renderStorage() {
+  let s; try { s = await api(CORE + "storage"); } catch (e) { return; }
+  if (!changed("storage", [s])) return;
+  $("#storage").innerHTML = `<h3>Storage</h3>
+    <div class="hint" title="${esc(s.data_dir)}">${esc(s.data_dir.split("/").slice(-2).join("/"))}</div>
+    <div class="row"><span>runs</span><b>${s.runs} · ${size(s.runs_bytes)}</b></div>
+    <div class="row"><span>datasets</span><b>${s.datasets} · ${size(s.datasets_bytes)}</b></div>
+    ${s.mock_runs ? `<button class="btn sm danger" id="delMock">Delete ${s.mock_runs} mock run${s.mock_runs > 1 ? "s" : ""} (${size(s.mock_bytes)})</button>` : ""}`;
+  const del = $("#delMock");
+  if (del) del.onclick = async () => {
+    if (!confirm(`Delete ${s.mock_runs} mock runs (${size(s.mock_bytes)})? Their videos and results go; datasets stay.`)) return;
+    del.disabled = true;
+    try { await api(CORE + "storage/delete-mock-runs", {confirm: true}); } catch (e) { alert(e.message); }
+    renderStorage();
+  };
 }
 async function refreshList() {
   try { list = await api("api/datasets"); renderList(); } catch (e) { console.warn(e); }
@@ -740,8 +772,10 @@ function fillTaskSelects() {
 (async () => {
   tasks = await api("api/tasks");
   await refreshList();
+  renderStorage();
   if (list.length) select(list[0].name);
   const visible = () => !document.hidden;
+  setInterval(() => { if (visible()) renderStorage(); }, 20000);
   const busy = () => detail && (detail.recording || detail.jobs?.validate?.running || detail.jobs?.finetune?.running ||
     detail.evaluate?.results?.some(r => r.run?.status === "running"));
   let last = 0;

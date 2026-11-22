@@ -91,18 +91,25 @@ def test_sim_only_plugins_are_off_on_a_robot(tmp_path):
 
 
 def test_a_person_labels_an_unknown_attempt_and_the_dataset_follows(tmp_path):
-    from dreamkit import harvest
+    from dreamkit import datasets
     from dreamkit.server import create_app
 
     r = replay("success_apple_bowl", plugins=["success-check", "harvester"], world=False, keep=True)
-    assert r.result["harvester"]["split"] == "unlabeled"
+    h = r.result["harvester"]
+    assert h["pending"] and h["dataset"] == "harvest-put-apple-into-the-bowl"  # waits for a person
     run_dir = r.run_dir
+    data = run_dir.parent.parent
+    root = data / "datasets" / h["dataset"]
+    assert (root / ".pending" / h["pending"]).is_dir() and datasets.describe(root)["episodes"] == 0
     cfg = tmp_path / "dreamkit.yaml"
-    cfg.write_text(yaml.safe_dump({"runs_dir": str(run_dir.parent), "plugins": []}))
+    cfg.write_text(yaml.safe_dump({"data_dir": str(data), "plugins": []}))
     api = TestClient(create_app(cfg))
     resp = api.post(f"/api/runs/{run_dir.name}/episodes/1/label", json={"success": True})
     assert resp.status_code == 200, resp.text
     info = json.loads((run_dir / "run.json").read_text())
     assert info["episodes"][0]["success"] is True and info["episodes"][0]["labeled_by"] == "person"
-    assert len(harvest.episodes(run_dir)) == 1  # moved from unlabeled/ to success/
+    assert info["episodes"][0]["harvester"] == {"dataset": h["dataset"], "index": 0, "frames": h["frames"]}
+    assert datasets.describe(root)["episodes"] == 1 and not (root / ".pending" / h["pending"]).exists()
+    files = api.get(f"/api/runs/{run_dir.name}/episodes/1/files").json()
+    assert files["dataset"]["dataset"] == h["dataset"] and any(f["name"] == "result.json" for f in files["files"])
     assert "1 of 1 attempts worked" in (run_dir / "history" / "summary.json").read_text()

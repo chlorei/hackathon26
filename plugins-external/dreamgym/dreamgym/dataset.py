@@ -51,6 +51,10 @@ def add_episode(root: Path, writer: LeRobotWriter, **extra) -> None:
     with path.open("a") as f:
         f.write(json.dumps(row) + "\n")
     (state_dir(root) / "validate.json").unlink(missing_ok=True)  # the last check was of a smaller dataset
+    from dreamkit import datasets
+
+    datasets.note_episode(Path(root), source=str(extra.get("source") or "gym"), run=extra.get("run"),
+                          episode=extra.get("episode"), task=extra.get("task"), prompt=extra.get("prompt"))
 
 
 def write_progress(root: Path, progress: dict) -> None:
@@ -79,6 +83,12 @@ def describe(root: Path) -> dict:
     fps = info.get("fps") or 10
     episodes = _jsonl(root / "meta" / "episodes.jsonl")
     extras = {e["episode_index"]: e for e in _jsonl(root / ".dreamgym" / "episodes.jsonl")}
+    # dataset.json (dreamkit.datasets) knows the source of episodes DreamGym did not record (the harvester's)
+    rec = _read_json(root / "dataset.json") or {}
+    for e in rec.get("episodes") or []:
+        if "index" in e and e["index"] not in extras:
+            extras[e["index"]] = {"source": rec.get("source"), "created": e.get("added"), "run": e.get("run"),
+                                  "episode": e.get("episode")}
     rows = []
     for ep in episodes:
         i = ep["episode_index"]

@@ -1,28 +1,27 @@
-"""fine-tune — Learn, closed: successful attempts -> one checked dataset -> a Dream-1 fine-tune (PLUGIN_STANDARD.md).
+"""fine-tune — Learn, closed: the harvester's dataset -> checked -> a Dream-1 fine-tune (PLUGIN_STANDARD.md).
 
-At the end of every run (on the ctx.defer worker, never in the loop):
-1. gathers the harvester's successful attempts of this run, and of earlier runs of the same task, into
-   run_dir/fine-tune/dataset/ (one LeRobot v2.1 dataset per subfolder, as `dreamkit harvest export` builds it);
-2. checks it with Dream Labs' own validate_dataset (local, no key, no credits) and writes status.json;
-3. only with `auto_train` on and at least `min_episodes`: registers the YAM embodiment once, uploads the dataset,
+The harvester appends every successful attempt of a task to <data_dir>/datasets/harvest-<task>/, across runs. At the
+end of every run (on the ctx.defer worker, never in the loop) this plugin:
+1. checks that dataset with Dream Labs' own validate_dataset (local, no key, no credits), recorded in its dataset.json;
+2. only with `auto_train` on and at least `min_episodes`: registers the YAM embodiment once, uploads the dataset,
    waits up to `processing_wait_s` for Dream Labs to process it and starts the fine-tune (fine-tuning credits).
-
-At the start of every run it asks Dream Labs about the last job (found in the newest earlier run's job.json): a
-processed upload starts training, a finished job announces its model id. A job takes hours, so the answer usually
-comes a few runs later. Ported from DreamGym's Data & fine-tune.
+The upload, the job and the model id are written to the dataset's dataset.json (upload, finetune), where the Data
+tab shows them. At the start of every run it asks Dream Labs about an unfinished job: a processed upload starts
+training, a finished job announces its model id. A job takes hours, so the answer usually comes a few runs later.
+Its own page reads run_dir/fine-tune/status.json and job.json.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import shutil
 import time
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from dreamkit import datasets
 from dreamkit.plugin import Plugin, PluginContext
 from dreamkit.plugins.harvester.plugin import YAM_CONFIG
 from dreamkit.standard import Manifest
@@ -34,8 +33,8 @@ ACTIVE = ("uploading", "processing", "training")
 
 
 class Params(BaseModel):
-    include_previous_runs: bool = Field(True, description="Also gather successful attempts of earlier runs")
-    same_task_only: bool = Field(True, description="Only attempts of this run's task")
+    dataset: str = Field("", description="The dataset to train on, in <data_dir>/datasets/; empty: the harvester's "
+                         "dataset of this run's task (harvest-<task>)")
     min_episodes: int = Field(20, ge=1, le=10000, description="Successful attempts needed before training starts",
                               json_schema_extra={"unit": ""})
     auto_train: bool = Field(False, description="Upload and start a Dream-1 fine-tune when the dataset is ready "
@@ -81,8 +80,9 @@ class FineTune(Plugin):
                         hooks=["on_run_start", "on_run_end"], step_rate_hz=1, requires=["harvester"],
                         ui="ui/index.html")
 
-    # -- run start: carry the last job over and ask about it ----------------------------------------------------------
+    # -- run start: an unfinished job of any dataset, asked about ---------------------------------------------------
     def on_run_start(self, ctx: PluginContext) -> None:
+        self.root: Path | None = None
         self.job = self._previous_job(ctx)
         if not self.job:
             return
@@ -91,16 +91,34 @@ class FineTune(Plugin):
             ctx.defer(self._refresh, ctx)
 
     def _previous_job(self, ctx: PluginContext) -> dict[str, Any]:
-        root = Path(ctx.run_dir).parent
-        for run in sorted((p for p in root.iterdir() if p.is_dir() and p.name != ctx.run_id), reverse=True):
-            job = _read(run / self.name / "job.json")
-            if job:
-                return job
-        return {}
+        """The newest dataset with an upload or a job on it (dataset.json: upload, finetune)."""
+        if ctx.datasets_dir is None or not Path(ctx.datasets_dir).is_dir():
+            return {}
+        best: tuple[float, Path, dict[str, Any]] | None = None
+        for root in Path(ctx.datasets_dir).iterdir():
+            rec = datasets.record(root) if root.is_dir() else {}
+            job = rec.get("finetune") or {}
+            if not job.get("stage"):
+                continue
+            when = float(job.get("updated") or 0)
+            if best is None or when > best[0]:
+                best = (when, root, job)
+        if best is None:
+            return {}
+        self.root = best[1]
+        return dict(best[2])
 
     def _save_job(self, ctx: PluginContext) -> None:
         self.job["updated"] = time.time()
-        ctx.files.path("job.json").write_text(json.dumps(self.job, indent=2, default=str))
+        ctx.files.path("job.json").write_text(json.dumps(self.job, indent=2, default=str))  # its page reads this
+        if self.root is not None:
+            upload = {k: self.job.get(k) for k in ("dataset_id", "dataset_name") if self.job.get(k)}
+            stage = self.job.get("stage")
+            upload["status"] = stage if stage in ("uploading", "processing", "processed", "failed") else "processed"
+            datasets.update(self.root, upload=upload, finetune={
+                "stage": stage, "job_id": self.job.get("job_id"), "model": self.job.get("model"),
+                "status": "failed" if stage == "failed" else self.job.get("stage"), "error": self.job.get("error"),
+                "updated": self.job["updated"]})
 
     def _refresh(self, ctx: PluginContext) -> None:
         try:
@@ -130,47 +148,26 @@ class FineTune(Plugin):
             _say(ctx, "warn", f"could not ask dream labs about the fine-tune: {type(error).__name__}: {error}")
         self._save_job(ctx)
 
-    # -- run end: build, check, maybe train --------------------------------------------------------------------------
+    # -- run end: check, maybe train -------------------------------------------------------------------------------
     def on_run_end(self, ctx: PluginContext) -> None:
         ctx.defer(self._collect, ctx, str(ctx.task or ""))
 
-    def _sources(self, ctx: PluginContext, task: str) -> list[Path]:
-        root = Path(ctx.run_dir).parent
-        runs = [Path(ctx.run_dir)]
-        if self.params.include_previous_runs:
-            runs += sorted(p for p in root.iterdir() if p.is_dir() and p.name != ctx.run_id)
-        found = []
-        for run in runs:
-            for ep in sorted((run / "harvester" / "success").glob("ep*/meta/info.json")):
-                folder = ep.parent.parent
-                if self.params.same_task_only and task and _read(folder / "dreamkit.json").get("task") != task:
-                    continue
-                found.append(folder)
-        return found
+    def _dataset(self, ctx: PluginContext, task: str) -> Path | None:
+        if ctx.datasets_dir is None:
+            return None
+        return Path(ctx.datasets_dir) / (self.params.dataset or datasets.harvest_name(task or "task"))
 
     def _collect(self, ctx: PluginContext, task: str) -> None:
-        dataset = ctx.files.path("dataset")
-        dataset.mkdir(parents=True, exist_ok=True)
-        sources = self._sources(ctx, task)
-        for ep in sources:
-            target = dataset / f"{ep.parent.parent.parent.name}-{ep.name}"
-            if not target.exists():
-                shutil.copytree(ep, target, ignore=shutil.ignore_patterns("dreamkit.json"))
-        frames, seconds = 0, 0.0
-        for info in dataset.glob("*/meta/info.json"):
-            meta = _read(info)
-            frames += int(meta.get("total_frames") or 0)
-            seconds += int(meta.get("total_frames") or 0) / max(1, int(meta.get("fps") or 10))
-        episodes = len(list(dataset.glob("*/meta/info.json")))
+        root = self._dataset(ctx, task)
+        info = datasets.describe(root) if root is not None and root.is_dir() else {"episodes": 0, "frames": 0, "fps": 10}
+        episodes, frames = int(info["episodes"]), int(info.get("frames") or 0)
+        seconds = frames / max(1, int(info.get("fps") or 10))
         report: dict[str, Any] = {"ok": False, "error": "no successful attempts yet"}
-        if episodes:
-            from dreamkit import harvest
-
-            report = harvest.validate(dataset, CONFIG)
-        status = {"run": ctx.run_id, "task": task, "episodes": episodes, "frames": frames,
-                  "duration_s": round(seconds, 1), "min_episodes": self.params.min_episodes,
-                  "auto_train": self.params.auto_train, "validate": report,
-                  "sources": sorted({p.parent.parent.parent.name for p in sources}), "updated": time.time()}
+        if episodes and root is not None:
+            report = datasets.check(root, CONFIG)
+        status = {"run": ctx.run_id, "task": task, "dataset": root.name if root else None, "episodes": episodes,
+                  "frames": frames, "duration_s": round(seconds, 1), "min_episodes": self.params.min_episodes,
+                  "auto_train": self.params.auto_train, "validate": report, "updated": time.time()}
         ctx.files.path("status.json").write_text(json.dumps(status, indent=2, default=str))
         ready = bool(report.get("ok")) and episodes >= self.params.min_episodes
         if not episodes:
@@ -181,12 +178,13 @@ class FineTune(Plugin):
         else:
             more = "" if ready else f", {self.params.min_episodes - episodes} more to train"
             _say(ctx, "success" if ready else "info",
-                     f"dataset {episodes} attempts, {seconds / 60:.1f} min, validate_dataset ok{more}",
+                     f"dataset {root.name}: {episodes} attempts, {seconds / 60:.1f} min, validate_dataset ok{more}",
                      episodes=episodes, duration_s=round(seconds, 1))
         busy = self.job.get("stage") in ACTIVE
         done = self.job.get("stage") == "done" and not self.params.train_again
         if ready and self.params.auto_train and not busy and not done:
-            self._upload(ctx, dataset, task, episodes)
+            self.root = root
+            self._upload(ctx, root, task, episodes)
         elif ready and not self.params.auto_train and not busy:
             _say(ctx, "info", "ready to train: switch on auto_train in fine-tune settings (uses fine-tuning credits)")
 
@@ -200,7 +198,8 @@ class FineTune(Plugin):
             name = f"dreamkit-{_slug(task)}-{_slug(ctx.run_id)}"
             self.job = {"stage": "uploading", "dataset_name": name, "episodes": episodes, "run": ctx.run_id}
             self._save_job(ctx)
-            ds = client.upload_dataset(str(dataset), name, embodiment.name)
+            with datasets.lerobot_view(dataset) as view:  # meta/, data/, videos/: not dataset.json
+                ds = client.upload_dataset(str(view), name, embodiment.name)
             self.job.update(stage="processing", dataset_id=ds.id, dataset_name=ds.name)
             self._save_job(ctx)
             _say(ctx, "info", f"uploaded {episodes} attempts as {ds.name}; dream labs is processing it")

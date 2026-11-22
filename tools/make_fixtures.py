@@ -45,7 +45,7 @@ def main(names: list[str]) -> None:
     for name in names or FIXTURES:
         behavior, seconds, extra, args = FIXTURES[name]
         with tempfile.TemporaryDirectory() as tmp:
-            config = {"sim_path": sim, "runs_dir": tmp, "render_every": 4, "plugins": OBSERVE, **extra}
+            config = {"sim_path": sim, "data_dir": tmp, "render_every": 4, "plugins": OBSERVE, **extra}
             path = Path(tmp) / "c.yaml"
             path.write_text(yaml.safe_dump(config))
             sim_loop.main(["--mock", "--fast", "--config", str(path), "--episodes", "1", "--seconds", str(seconds),
