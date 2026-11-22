@@ -1,0 +1,29 @@
+# Every push and pull request: the tests that need no simulator, no network model and no keys (mock and replay).
+# Tests that need Dream Labs' simulator skip themselves when it is not there.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install -e ".[dev]"
+          uv pip install -e plugins-external/vision-judge   # its model client (google-genai), for its tests
+      - name: Tests
+        run: .venv/bin/pytest -q
+      - name: Every built-in plugin against the plugin standard
+        run: .venv/bin/dreamkit check --all
+      - name: Plugins outside the core
+        run: |
+          for d in gripper-check reliability safety vision-judge; do
+            (cd plugins-external/$d && DREAMKIT_PLUGIN_PATH=$PWD ../../.venv/bin/pytest -q)
+          done

@@ -72,12 +72,17 @@ def usage_today() -> dict[str, dict[str, int]]:
 def gemini(images: list[bytes], prompt: str, models: list[str], timeout_s: float, deadline: float,
            max_tokens: int | None = None) -> tuple[str, str]:
     """(text, model): the first of `models` that answers, as JSON. Raises Unavailable."""
-    import httpx2  # google-genai's HTTP client  # noqa: PLC0415
-    from google import genai  # noqa: PLC0415
-    from google.genai import errors, types  # noqa: PLC0415
-
-    if not os.getenv("GEMINI_API_KEY"):
+    if not os.getenv("GEMINI_API_KEY"):  # before the imports: no key is the common case and says so plainly
         raise RuntimeError("GEMINI_API_KEY is not set")
+    try:
+        from google import genai  # noqa: PLC0415
+        from google.genai import errors, types  # noqa: PLC0415
+    except ImportError as error:
+        raise RuntimeError("google-genai is not installed: pip install google-genai") from error
+    try:
+        import httpx2  # google-genai's HTTP client (3.x)  # noqa: PLC0415
+    except ImportError:
+        import httpx as httpx2  # older google-genai  # noqa: PLC0415
     parts = [types.Part.from_bytes(data=b, mime_type="image/jpeg") for b in images]
     failures = []
     for model in models:
