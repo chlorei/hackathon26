@@ -188,13 +188,15 @@ its source, size and status (collected → checked → uploaded → training →
 5 fps instead of 10. Recording fewer cameras helps most: `- recorder: {cameras: [top]}`. The panel itself redraws
 cameras and graphs outside React and pauses when its tab is hidden.
 
-## Gym (an app plugin)
+## Data tab (an app plugin)
 
-DreamGym is a dreamkit **app plugin** in [plugins-external/dreamgym](plugins-external/dreamgym/README.md): a tab in
-the panel with **Arena** (success rate with a 95% interval over seeded, randomised scenes, failure GIFs), **Compare**
-and **Prompt Tuner** (same seeds, McNemar's test), **Data & fine-tune** and **Teleop**. Every episode runs through
-`dreamkit.wrap`, so the plugins of dreamkit.yaml work in it, and every run shows in History with a **Gym** badge.
-Tick **Recovery on vs off** to measure recovery itself: the same seeds without and with it, McNemar on the pairs.
+DreamGym is a dreamkit **app plugin** in [plugins-external/dreamgym](plugins-external/dreamgym/README.md): the
+**Data** tab of the panel, everything to fine-tune Dream-1 on your own demonstrations. **Collect** (a scripted IK
+expert for free, Dream-1's own successes, or teleop; built-in tasks or one typed in your own words), **Check** (balance
+per task, every episode on video, keyboard review), **Fine-tune** (Dream Labs' `validate_dataset`, then upload), and
+**Compare** the fine-tune with the base model on scenes it never saw (McNemar's test). Every episode runs through
+`dreamkit.wrap`, so the plugins of dreamkit.yaml work in it. On the command line it also has Arena, Compare and the
+Prompt Tuner (same seeds, McNemar), with **Recovery on vs off** to measure recovery itself.
 
 ```bash
 dreamkit install ./plugins-external/dreamgym     # check + tests, then pip; restart dreamkit ui -> tab "Data"

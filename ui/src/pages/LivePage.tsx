@@ -178,7 +178,7 @@ function NowCard({ events, episodes, current, running, live }: {
 }
 
 const STEPS = [
-  { n: 1, title: 'Install dreamkit and make a config', code: 'pip install dreamkit && dreamkit init' },
+  { n: 1, title: 'Install dreamkit and make a config', code: 'pip install dreamlabs "git+https://github.com/chlorei/hackathon26.git" && dreamkit init' },
   { n: 2, title: 'Wrap your Dream-1 client: one line', code: 'client = dreamkit.wrap(dream.DreamClient())' },
   { n: 3, title: 'Run your loop', code: 'python my_robot.py', after: 'this page comes alive' },
 ]

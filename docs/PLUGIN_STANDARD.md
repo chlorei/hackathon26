@@ -304,7 +304,7 @@ def test_flags_release_off_target():
 ## 10. Plugin Development Kit (PDK)
 
 Everything a developer needs to write, debug and ship a plugin without a robot, without the simulator open and
-without spending credits. Ships inside `dreamkit` (`pip install dreamkit` is enough).
+without spending credits. Ships inside `dreamkit` (installing dreamkit is enough).
 
 ### 10.1 CLI
 
