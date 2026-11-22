@@ -326,10 +326,12 @@ def launch_record(root: Path, body: dict) -> dict:
     name = (body.get("name") or "").strip() or (f"{first}_demos" if len(mix) == 1 else "mixed_demos")
     if not SAFE.match(name):
         raise ValueError("dataset name: lowercase letters, digits, - and _")
-    attempts = int(body.get("max_attempts") or max(mix.values()) * (3 if scripted else 5))
+    # each task may use ATTEMPTS_PER_SUCCESS x its own episodes, so the page's cost bound (sum x that) holds
+    cap = ["--max-attempts", str(int(body["max_attempts"]))] if body.get("max_attempts") else \
+        ["--attempts-per-success", str(ATTEMPTS_PER_SUCCESS["scripted" if scripted else "model"])]
     cmd = [sys.executable, "-u", "-m", "dreamgym.cli", "record", "--task", first,
            "--mix", ",".join(f"{t}:{n}" for t, n in mix.items()), "--out", str(data / name), "--policy", policy,
-           "--max-attempts", str(attempts), "--seed", str(int(body.get("seed") or _next_seed(data / name)))]
+           *cap, "--seed", str(int(body.get("seed") or _next_seed(data / name)))]
     for key, flag in (("jitter", "--jitter"), ("lighting", "--lighting"), ("max_seconds", "--max-seconds")):
         if body.get(key) not in (None, ""):
             cmd += [flag, str(float(body[key]))]
@@ -341,11 +343,28 @@ def launch_record(root: Path, body: dict) -> dict:
     return {**_spawn_data_job(data, name, "record", cmd), "name": name}
 
 
-def _next_seed(folder: Path) -> int:
-    """New scenes for an existing dataset: continue after the highest seed it already holds."""
+## Attempts a recording may spend per episode it keeps: the page states its cost bound with the same numbers.
+ATTEMPTS_PER_SUCCESS = {"scripted": 3, "model": 5}
+
+## Evaluate runs from here up: scenes the fine-tune was not trained on (recordings start at 0, +1000 each).
+EVAL_SEED0 = 100_000
+
+
+def _dataset_seeds(folder: Path) -> list[int]:
     from .. import dataset
 
-    seeds = [e.get("seed") for e in dataset._jsonl(folder / ".dreamgym" / "episodes.jsonl") if e.get("seed") is not None]
+    return [int(e["seed"]) for e in dataset._jsonl(folder / ".dreamgym" / "episodes.jsonl") if e.get("seed") is not None]
+
+
+def eval_seed0(folder: Path) -> int:
+    """First seed of an evaluation: the same every time (so evaluations compare), above every training scene."""
+    seeds = _dataset_seeds(folder)
+    return max(EVAL_SEED0, max(seeds) + 1) if seeds else EVAL_SEED0
+
+
+def _next_seed(folder: Path) -> int:
+    """New scenes for an existing dataset: continue after the highest seed it already holds."""
+    seeds = _dataset_seeds(folder)
     return max(seeds) + 1000 if seeds else 0
 
 
@@ -408,13 +427,14 @@ def evaluate(root: Path, name: str, body: dict) -> dict:
     if not tasks:
         raise ValueError("no known task in this dataset")
     n = int(body.get("n") or 20)
+    seed0 = eval_seed0(folder)
     runs = []
     for task in tasks:
         r = launch(root, {"mode": "compare", "task": task, "policies": ["dream-1", f"dream:{model}"], "n": n,
-                          "gifs": "failures"})
+                          "seed": seed0, "gifs": "failures"})
         runs.append({"task": task, "id": r["id"]})
         time.sleep(1.1)  # run ids carry the second they started
-    record = {"model": model, "n": n, "runs": runs, "started": time.time()}
+    record = {"model": model, "n": n, "seed": seed0, "runs": runs, "started": time.time()}
     (dataset.state_dir(folder) / "evaluate.json").write_text(json.dumps(record, indent=2))
     return record
 
@@ -428,6 +448,9 @@ def dataset_action(root: Path, name: str, action: str, body: dict) -> dict:
     if action == "validate":
         return _spawn_data_job(data, name, "validate", base + ["--validate-only"])
     if action == "finetune":
+        ft = _read_json(data / name / ".dreamgym" / "finetune.json") or {}
+        if _running(f"data:{name}:finetune") or ft.get("stage") == "training":
+            raise ValueError("a fine-tune of this dataset is still going: Check job until it is done or failed")
         suffix = (body.get("suffix") or name).replace("_", "-").lower()[:40]
         cmd = base + ["--suffix", suffix]
         if body.get("steps"):

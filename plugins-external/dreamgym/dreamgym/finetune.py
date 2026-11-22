@@ -51,19 +51,30 @@ def start(dataset: Path, name: str | None = None, suffix: str = "dreamgym", step
     mine = {e.name.split("/", 1)[-1]: e for e in client.get_embodiments()}
     embodiment = mine.get(EMBODIMENT) or client.add_embodiment(EMBODIMENT, EMBODIMENT_CONFIG)
     log(f"embodiment: {embodiment.name}")
+    path = state_dir(dataset) / "finetune.json"
+    before = json.loads(path.read_text()) if path.is_file() else {}
+    # earlier fine-tunes of this folder: kept, so a retrain does not lose the model ids
+    previous = before.get("previous", []) + ([{k: before.get(k) for k in ("model", "job_id", "dataset_name", "started")}]
+                                            if before.get("job_id") else [])
     name = name or dataset.name.replace("_", "-").lower()
-    _save(dataset, "finetune.json", {"stage": "uploading", "dataset_name": name, "updated": time.time()})
+    if before.get("dataset_name"):  # uploaded before (maybe with fewer episodes): a new name for the new upload
+        name = f"{name}-{time.strftime('%m%d-%H%M')}"
+    _save(dataset, "finetune.json", {"stage": "uploading", "dataset_name": name, "previous": previous,
+                                     "updated": time.time()})
     ds = client.upload_dataset(str(dataset), name, embodiment.name)
     log(f"uploaded {ds.id} ({ds.status}); processing ...")
-    _save(dataset, "finetune.json", {"stage": "processing", "dataset_id": ds.id, "dataset_name": ds.name, "updated": time.time()})
+    _save(dataset, "finetune.json", {"stage": "processing", "dataset_id": ds.id, "dataset_name": ds.name,
+                                     "previous": previous, "updated": time.time()})
     while (st := client.get_dataset_status(ds.id)).status not in ("processed", "failed"):
         time.sleep(20)
     if st.status == "failed":
-        _save(dataset, "finetune.json", {"stage": "failed", "error": st.error, "dataset_id": ds.id, "updated": time.time()})
+        _save(dataset, "finetune.json", {"stage": "failed", "error": st.error, "dataset_id": ds.id,
+                                         "dataset_name": ds.name, "previous": previous, "updated": time.time()})
         raise RuntimeError(f"dataset processing failed: {st.error}")
     job = client.finetune(ds.name, suffix, steps=steps)
     record = {"stage": "training", "dataset_id": ds.id, "dataset_name": ds.name, "job": job,
-              "job_id": job.get("id") or job.get("job_id"), "started": time.time(), "updated": time.time()}
+              "job_id": job.get("id") or job.get("job_id"), "previous": previous, "started": time.time(),
+              "updated": time.time()}
     _save(dataset, "finetune.json", record)
     log(json.dumps(job, indent=2, default=str))
     return record

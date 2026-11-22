@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -142,6 +143,9 @@ def cmd_record(args) -> int:
     tasks = {name: _task(argparse.Namespace(task=name, jitter=args.jitter, lighting=args.lighting)) for name, _ in plan}
     rng = np.random.default_rng(args.seed)
     want = dict(plan)
+    # attempts allowed per task: --attempts-per-success x what that task needs, else --max-attempts for each
+    cap = {n: math.ceil(k * args.attempts_per_success) if args.attempts_per_success else args.max_attempts
+           for n, k in want.items()}
     kept = {name: 0 for name in want}
     tried = {name: 0 for name in want}
     progress = {"plan": want, "kept": kept, "tried": tried, "source": source, "status": "running",
@@ -154,7 +158,7 @@ def cmd_record(args) -> int:
     status = "done"
     try:
         while True:
-            todo = [n for n in want if kept[n] < want[n] and tried[n] < args.max_attempts]
+            todo = [n for n in want if kept[n] < want[n] and tried[n] < cap[n]]
             if not todo:
                 break
             for name in todo:
@@ -260,6 +264,8 @@ def main(argv=None) -> int:
     p.add_argument("--policy", default="scripted:0.004", help="scripted[:noise_m]")
     p.add_argument("--fps", type=int, default=10, choices=[10, 5])
     p.add_argument("--max-attempts", type=int, default=200, help="per task")
+    p.add_argument("--attempts-per-success", type=float, default=None,
+                   help="cap each task at this many attempts per episode it needs (instead of --max-attempts)")
     p.add_argument("--mix", default=None, help="several tasks into one dataset: banana_plate:20,apple_bowl:20")
     p.add_argument("--vary-prompts", action="store_true", help="each episode gets a paraphrase of the task's prompt")
     p.set_defaults(fn=cmd_record)

@@ -50,6 +50,7 @@ def add_episode(root: Path, writer: LeRobotWriter, **extra) -> None:
     path = state_dir(root) / "episodes.jsonl"
     with path.open("a") as f:
         f.write(json.dumps(row) + "\n")
+    (state_dir(root) / "validate.json").unlink(missing_ok=True)  # the last check was of a smaller dataset
 
 
 def write_progress(root: Path, progress: dict) -> None:

@@ -158,3 +158,81 @@ def test_recording_started_elsewhere_is_seen(tmp_path):
     assert not server._pid_alive(alive.pid) or os.name == "nt"
     d = server.dataset_detail(root, "fruit")
     assert not d["recording"] and not d["busy"] and d["progress"]["status"] == "interrupted"
+
+
+def test_evaluate_uses_scenes_not_in_the_dataset(tmp_path, monkeypatch):
+    from dreamgym.web import server
+
+    root = tmp_path / "gym" / "runs"
+    folder = server.data_root(root) / "fruit"
+    w = MetaOnlyWriter(folder)
+    for seed in (0, 1, 1000, 1001):
+        w.begin("put banana on the plate")
+        w.end(keep=True)
+        dataset.add_episode(folder, w, task="banana_plate", source="scripted", seed=seed)
+    dataset.state_dir(folder).joinpath("finetune.json").write_text(json.dumps({"model": "dream-1-ft:x"}))
+    seen = []
+    monkeypatch.setattr(server, "launch", lambda root, body: seen.append(body) or {"id": "r"})
+    monkeypatch.setattr(server.time, "sleep", lambda s: None)
+    out = server.evaluate(root, "fruit", {"n": 20})
+    assert seen[0]["seed"] == out["seed"] == server.EVAL_SEED0 > 1001  # not the training scenes 0.., 1000..
+    dataset.add_episode(folder, w, task="banana_plate", source="scripted", seed=200_000)
+    assert server.eval_seed0(folder) == 200_001
+
+
+def test_new_episodes_make_the_format_check_stale(tmp_path):
+    w = MetaOnlyWriter(tmp_path / "ds")
+    (dataset.state_dir(tmp_path / "ds") / "validate.json").write_text('{"ok": true, "episodes": 0}')
+    w.begin("put banana on the plate")
+    w.end(keep=True)
+    dataset.add_episode(tmp_path / "ds", w, task="banana_plate", source="scripted", seed=0)
+    assert not (tmp_path / "ds" / ".dreamgym" / "validate.json").exists()
+
+
+def test_attempts_are_capped_per_task(tmp_path, fake_record, monkeypatch):
+    from dreamgym.web import server
+
+    seen = {}
+    monkeypatch.setattr(server, "_spawn_data_job", lambda data, name, kind, cmd: seen.update(cmd=cmd) or {"id": name})
+    server.launch_record(tmp_path / "gym" / "runs", {"name": "m", "source": "dream-1",
+                                                     "mix": {"banana_plate": 10, "apple_bowl": 2}})
+    cmd = seen["cmd"]
+    assert "--max-attempts" not in cmd and cmd[cmd.index("--attempts-per-success") + 1] == "5"
+    # every third seed fails: apple_bowl (2 wanted, 3 attempts at 1.5 per success) stops at its own cap
+    cli.main(["record", "--task", "banana_plate", "--mix", "banana_plate:4,apple_bowl:2", "--out", str(tmp_path / "o"),
+              "--attempts-per-success", "1.5", "--seed", "0"])
+    progress = json.loads((tmp_path / "o" / ".dreamgym" / "record.progress.json").read_text())
+    assert progress["tried"]["apple_bowl"] <= 3 and progress["tried"]["banana_plate"] <= 6
+
+
+def test_a_dataset_can_be_trained_again(tmp_path, monkeypatch):
+    from dreamgym.web import server
+
+    root = tmp_path / "gym" / "runs"
+    folder = server.data_root(root) / "fruit"
+    state = dataset.state_dir(folder)
+    monkeypatch.setattr(server, "_spawn_data_job", lambda data, name, kind, cmd: {"id": kind})
+    state.joinpath("finetune.json").write_text(json.dumps({"stage": "training", "job_id": "j1"}))
+    with pytest.raises(ValueError, match="still going"):
+        server.dataset_action(root, "fruit", "finetune", {})
+    state.joinpath("finetune.json").write_text(json.dumps({"stage": "done", "job_id": "j1", "model": "m1"}))
+    assert server.dataset_action(root, "fruit", "finetune", {})["id"] == "finetune"
+
+
+def test_retrain_uploads_under_a_new_name_and_keeps_the_old_model(tmp_path, monkeypatch):
+    from dreamgym import finetune
+
+    folder = tmp_path / "fruit"
+    finetune.state_dir(folder).joinpath("finetune.json").write_text(
+        json.dumps({"stage": "done", "job_id": "j1", "model": "m1", "dataset_name": "fruit"}))
+    uploaded = []
+    client = types.SimpleNamespace(
+        get_embodiments=lambda: [types.SimpleNamespace(name="me/" + finetune.EMBODIMENT)],
+        upload_dataset=lambda path, name, emb: uploaded.append(name) or types.SimpleNamespace(id="d2", status="new", name=name),
+        get_dataset_status=lambda i: types.SimpleNamespace(status="processed"),
+        finetune=lambda name, suffix, steps=None: {"id": "j2"})
+    monkeypatch.setattr(finetune, "_client", lambda: client)
+    monkeypatch.setattr(finetune, "validate", lambda d: {"ok": True, "episodes": 1, "frames": 1, "fps": 10})
+    record = finetune.start(folder, log=lambda *a: None)
+    assert uploaded[0].startswith("fruit-") and record["job_id"] == "j2"
+    assert record["previous"] == [{"model": "m1", "job_id": "j1", "dataset_name": "fruit", "started": None}]

@@ -437,7 +437,8 @@ async function startRecording() {
   if (!Object.keys(mix).length) { $("#collectErr").textContent = "Tick at least one task."; return; }
   if (source !== "scripted") {
     const n = Object.values(mix).reduce((a, b) => a + b, 0);
-    if (!confirm(`Dream-1 will run until it has ${n} successful episodes (at most ${n * 5} attempts, up to ~${money(n * 5 * PER_EPISODE_USD)}). Start?`)) return;
+    const per = PER_EPISODE_USD * (+$("#cMax").value || 60) / 60;  // each task gets at most 5 attempts per episode it needs
+    if (!confirm(`Dream-1 will run until it has ${n} successful episodes (at most ${n * 5} attempts, up to ~${money(n * 5 * per)}). Start?`)) return;
   }
   const body = {name: sel, source, mix, jitter: $("#cJitter").value, lighting: $("#cLight").value,
                 max_seconds: $("#cMax").value, vary_prompts: $("#cVary").checked};
@@ -498,7 +499,8 @@ $("#vidClose").onclick = () => { $("#vid").pause(); $("#vidDlg").close(); };
 function renderTrain(d) {
   const j = d.jobs || {}, v = d.validate, f = d.finetune || {};
   if (!changed("train", [d.episodes, d.warnings, d.busy, j.validate, j.finetune, j.status, v, f])) return;
-  const enough = d.episodes >= MIN_PER_TASK;
+  const fewest = d.balance.length ? Math.min(...d.balance.map(t => t.episodes)) : 0;
+  const enough = fewest >= MIN_PER_TASK;  // every task, not the total: 3 tasks x 7 is not enough for any of them
   const checking = j.validate?.running, training = j.finetune?.running;
   const checkLine = checking ? '<span class="dot run"></span> checking…' :
     (v ? (v.ok ? `<span class="dot ok"></span> ready: ${v.episodes} episodes, ${v.frames} frames at ${v.fps} fps` : `<span class="dot bad"></span> <span style="color:var(--bad)">${esc(v.error)}</span>`)
@@ -509,16 +511,17 @@ function renderTrain(d) {
   else if (j.finetune?.status === "failed") ftLine = `<span class="dot bad"></span> <span style="color:var(--bad)">${failure(j.finetune.log, "fine-tuning did not start")}</span>`;
   $("#state3").textContent = f.model ? "fine-tune ready" : (f.stage || (v?.ok ? "ready to train" : ""));
   $("#train").innerHTML = `
-    <div class="check"><span class="dot ${enough ? "ok" : ""}"></span> Enough data: ${d.episodes} episodes${d.warnings.length ? ` <span class="hint">(${d.warnings.length} warning${d.warnings.length > 1 ? "s" : ""} in Check)</span>` : ""}</div>
+    <div class="check"><span class="dot ${enough ? "ok" : ""}"></span> Enough data: ${d.episodes} episodes${d.balance.length > 1 ? `, fewest per task ${fewest}` : ""} <span class="hint">(aim ≥ ${MIN_PER_TASK} per task)</span>${d.warnings.length ? ` <span class="hint">(${d.warnings.length} warning${d.warnings.length > 1 ? "s" : ""} in Check)</span>` : ""}</div>
     <div class="check">${checkLine} <button class="btn sm" id="tCheck" ${d.episodes && !d.busy && !checking ? "" : "disabled"}>Check format</button></div>
     <div class="check">${ftLine}
-      <button class="btn sm primary" id="tTrain" ${v?.ok && !d.busy && !training && !f.job_id ? "" : "disabled"}>Upload &amp; fine-tune</button>
+      <button class="btn sm primary" id="tTrain" ${v?.ok && !d.busy && !training && f.stage !== "training" ? "" : "disabled"}>${f.job_id ? "Train again" : "Upload &amp; fine-tune"}</button>
       ${f.stage === "training" ? '<button class="btn sm" id="tJob">Check job</button>' : ""}</div>
     ${f.model ? `<div class="check"><span class="dot ok"></span> Model <code class="model">${esc(f.model)}</code></div>` : ""}
     <div class="hint" style="margin-top:6px">The check runs locally and sends nothing. Fine-tuning uploads the dataset, uses fine-tuning credits (about $200 a job) and takes about 7–8 hours.</div>`;
   const act = async (a, body) => { $("#trainErr").textContent = ""; try { await api(`api/dataset/${encodeURIComponent(sel)}/${a}`, body || {}); refreshDetail(); } catch (e) { $("#trainErr").textContent = e.message; } };
   $("#tCheck").onclick = () => act("validate");
-  $("#tTrain").onclick = () => { if (confirm(`Upload ${sel} (${d.episodes} episodes) and start a Dream-1 fine-tune? It uses fine-tuning credits (about $200) and takes about 7–8 hours.`)) act("finetune", {suffix: sel}); };
+  const again = f.job_id ? ` A new upload and a new model; ${f.model ? `the current one (${f.model}) stays usable` : "the earlier job is kept in its history"}.` : "";
+  $("#tTrain").onclick = () => { if (confirm(`Upload ${sel} (${d.episodes} episodes) and start a Dream-1 fine-tune? It uses fine-tuning credits (about $200) and takes about 7–8 hours.${again}`)) act("finetune", {suffix: sel}); };
   const job = $("#tJob"); if (job) job.onclick = () => act("status");
 }
 
@@ -532,10 +535,10 @@ function renderEvaluate(d) {
   const f = d.finetune || {}, ev = d.evaluate;
   if (!changed("evaluate", [f.model, ev, d.balance.length])) return;
   const model = f.model || "";
-  const nTasks = Math.max(1, d.balance.length);
+  const nTasks = Math.max(1, d.balance.filter(t => t.task !== "?").length);  // the server evaluates known tasks only
   const running = ev?.results?.some(r => r.run?.running || r.run?.status === "running");
   $("#state4").textContent = running ? "running…" : (ev ? "done" : "");
-  let html = `<div class="hint" style="margin-bottom:10px">Base Dream-1 and the fine-tune on the same scenes, every task of this dataset. A difference counts only when McNemar says it is not luck.</div>
+  let html = `<div class="hint" style="margin-bottom:10px">Base Dream-1 and the fine-tune on the same scenes, every task of this dataset — new scenes, none of them in the training data. A difference counts only when McNemar says it is not luck.</div>
     <div class="grid2"><div class="field"><label>Fine-tuned model</label><input id="eModel" value="${esc(model)}" placeholder="appears after training; or paste a model id"></div>
       <div class="field"><label>Scenes per task</label><input id="eN" type="number" min="5" max="200" value="${ev?.n || 20}"></div></div>
     <div class="actions"><span class="hint" id="eEst"></span><button class="btn primary" id="eGo" ${running ? "disabled" : ""}>Compare base vs fine-tune</button></div>`;
