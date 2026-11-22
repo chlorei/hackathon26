@@ -33,6 +33,7 @@ camera-check = "dreamkit.plugins.camera_check:CameraCheck"
 recovery = "dreamkit.plugins.recovery:Recovery"
 recorder = "dreamkit.plugins.recorder:Recorder"
 harvester = "dreamkit.plugins.harvester:Harvester"
+budget-guard = "dreamkit.plugins.budget_guard:BudgetGuard"
 
 [build-system]
 requires = ["hatchling"]

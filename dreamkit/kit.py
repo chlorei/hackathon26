@@ -185,6 +185,11 @@ class Kit:
         return cost.price_per_hour(self.ctx.model, self.info["mock"], self.config.prices)
 
     @property
+    def stop_requested(self) -> bool:
+        """True when the control plugin asked to end the run (ctx.stop_run): start no new attempt."""
+        return self.ctx._stop_run is not None
+
+    @property
     def retry_requested(self) -> bool:
         """True when the control plugin asked to run the last attempt's scene again."""
         return self._next_is_retry
@@ -468,6 +473,8 @@ class Kit:
             str(p.relative_to(self.run_dir)) for p in (self.run_dir / "recorder").glob(f"ep{ctx.episode:03d}_*.mp4"))
         ctx.episodes.append(_plain(result))
         self.info["cost_usd"] = round(cost.usd(self._run_calls, self._price()), 4)
+        if ctx._stop_run is not None:
+            self.info["stop_requested"] = ctx._stop_run
         self._next_is_retry = ctx._retry
         if self.recorder is not None:
             self.recorder.end(ctx, ctx.episodes[-1])

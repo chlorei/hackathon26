@@ -30,6 +30,9 @@ class Params(BaseModel):
                                description="Verdicts to recover from", json_schema_extra=CHOICES)
     stop_on: list[str] = Field(["camera_failure"], description="Verdicts that stop the robot at once",
                                json_schema_extra=CHOICES)
+    stop_run_on: list[str] = Field(["budget_exhausted"], description="Verdicts that end the whole run safely: "
+                                   "arms home, then no new attempt (or, if the verdict says so, after this one)",
+                                   json_schema_extra={"choices": ["budget_exhausted", *FAILURES]})
     home_s: float = Field(2.0, gt=0, le=10, description="How long driving the arms home takes",
                           json_schema_extra={"unit": "s"})
     lift_m: float = Field(0.05, gt=0, le=0.3, description="How far to lift a hand that grasped air",
@@ -59,6 +62,7 @@ class Recovery(Plugin):
         self.queue_from_step = 0
         self.gave_up = False
         self.actions: list[str] = []
+        self.halt: str | None = None  # stop_run_on: after the arms are home, end the attempt and the run
 
     def before_model(self, ctx: PluginContext) -> None:
         if self.queue:  # still driving an earlier recovery; the loop may execute fewer rows per chunk
@@ -67,6 +71,9 @@ class Recovery(Plugin):
             if self.queue:
                 self._send(ctx)
                 return
+        if self.halt:  # the arms are home: end the attempt (the run was told to stop when the verdict came)
+            reason, self.halt = self.halt, None
+            ctx.stop(reason, "arms home, run stopped")
         verdict = ctx.store.get("verdict")
         if not verdict:
             return
@@ -75,6 +82,20 @@ class Recovery(Plugin):
             return
         self.handled.add(key)
         reason = verdict["reason"]
+        if reason in self.params.stop_run_on:  # the run must end: safely, arms home first unless told to finish
+            if verdict.get("finish"):
+                ctx.stop_run(reason, f"{verdict.get('message') or reason}: this attempt finishes, then the run stops")
+                return
+            ctx.stop_run(reason, f"{verdict.get('message') or reason}: arms home, no new attempt")  # whatever ends this one
+            ctx.reset_policy()
+            rows = self._home(ctx)
+            self.actions.append("home")
+            ctx.emit("warn", f"{reason.replace('_', ' ')}: arms home, then the run stops", reason=reason, action="home")
+            ctx.ui.mark(ctx.t, f"{reason.replace('_', ' ')}: arms home, run stops", "error")
+            self.halt = reason
+            self.queue, self.queue_from_step = rows, ctx.step
+            self._send(ctx)
+            return
         if reason in self.params.stop_on:
             ctx.stop(reason, verdict.get("message", ""))
         if reason not in self.params.reasons:

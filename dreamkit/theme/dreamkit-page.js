@@ -71,7 +71,7 @@
     const bw = Math.max(4, Math.min(48, (W - 36) / data.length - gap)), every = Math.ceil(data.length / 16)
     return s('svg', { class: 'dk-chart', viewBox: `0 0 ${W} ${H + 20}`, role: 'img' },
       s('line', { class: 'axis', x1: 30, x2: W, y1: H, y2: H }),
-      s('text', { x: 0, y: 10 }, `${whole ? top : fmt(top, top < 10 ? 1 : 0)}${unit}`), s('text', { x: 18, y: H }, '0'),
+      s('text', { x: 0, y: 10 }, `${whole ? top : fmt(top, top < 1 ? 2 : top < 10 ? 1 : 0)}${unit}`), s('text', { x: 18, y: H }, '0'),
       data.map((d, i) => {
         const x = 34 + i * (bw + gap), bh = d.value > 0 ? Math.max(2, (d.value / top) * (H - 8)) : 0
         return [s('rect', { class: d.tone || 'info', x, y: H - bh, width: bw, height: bh, rx: 2 }, s('title', {}, d.title || `${d.label}: ${d.value}${unit}`)),

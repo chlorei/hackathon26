@@ -145,6 +145,9 @@ def main(argv: list[str] | None = None) -> int:
                             break
                         if not args.fast:
                             time.sleep(max(0.0, 0.05 - (time.monotonic() - tick)))
+            if client.stop_requested:  # the control plugin ended the run (e.g. budget-guard's budget used up)
+                print("run stopped by a plugin: no new attempts", flush=True)
+                break
             if not client.retry_requested:
                 scene_index += 1
     except KeyboardInterrupt:

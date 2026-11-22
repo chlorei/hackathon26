@@ -112,6 +112,7 @@ class Context:
     world: World = field(default_factory=lambda: World(None))
     robot: Robot = field(default_factory=Robot)
     _retry: bool = False
+    _stop_run: dict[str, Any] | None = None  # set by ctx.stop_run(): {"by", "reason"}; the loop starts no new attempt
     _telemetry: dict[str, float] = field(default_factory=dict)
     _override: tuple[Any, Any, str] | None = None
     _reset_policy: Any = None
@@ -404,6 +405,17 @@ class PluginContext:
             raise _refuse("§7", f"{self._name}: ctx.stop", f"{reason!r} is not a reason code",
                           "Use a code from dreamkit.reasons.REASONS.")
         raise StopEpisode(reason, self._name, message)
+
+    def stop_run(self, reason: str, message: str = "") -> None:
+        """Control only: after this attempt the loop starts no new one (client.stop_requested). Use ctx.stop()
+        as well to end the attempt now."""
+        self._control("stop_run")
+        if not reasons_mod.is_reason(reason):
+            raise _refuse("§7", f"{self._name}: ctx.stop_run", f"{reason!r} is not a reason code",
+                          "Use a code from dreamkit.reasons.REASONS.")
+        if self._core._stop_run is None:
+            self._core._stop_run = {"by": self._name, "reason": reason, "message": message or reasons_mod.label(reason)}
+            self._core.event(self._name, "error", f"run stopping: {message or reasons_mod.label(reason)}", reason=reason)
 
     def request_retry(self) -> None:
         self._control("request_retry")

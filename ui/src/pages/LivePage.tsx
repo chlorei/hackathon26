@@ -275,7 +275,9 @@ function CameraView({ live, cam, running, large }: { live: LiveStore; cam: strin
 function Spent({ live, episodes, mock, running }: { live: LiveStore; episodes: EpisodeResult[]; mock: boolean; running: boolean }) {
   useLive(live)
   const v = live.points.length ? live.points[live.points.length - 1].v : {}
-  const done = episodes.reduce((a, e) => a + (e.cost_usd ?? 0), 0)
+  // what each attempt cost: the core's figure, or budget-guard's when it bills a mock for a test (count_mock)
+  const costOf = (e: EpisodeResult) => e.cost_usd || ((e as unknown as Record<string, { attempt_usd?: number }>)['budget-guard']?.attempt_usd ?? 0)
+  const done = episodes.reduce((a, e) => a + costOf(e), 0)
   const spent = Math.max(done, running && typeof v.spent_usd === 'number' ? v.spent_usd : 0)
   const budget = typeof v.budget_usd === 'number' && v.budget_usd > 0 ? v.budget_usd : null
   const perAttempt = episodes.length ? done / episodes.length : 0

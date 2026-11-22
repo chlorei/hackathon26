@@ -21,7 +21,7 @@ from .config import PluginSpec
 from .plugin import Context, EndEpisode, Plugin, PluginContext, StopEpisode
 from .standard import HOOKS, PluginStandardError, Problem
 
-BUILTIN_MODULES = ("success_check", "failure_monitor", "camera_check", "recovery", "recorder", "harvester")
+BUILTIN_MODULES = ("success_check", "failure_monitor", "camera_check", "recovery", "recorder", "harvester", "budget_guard")
 LOCAL_DIRS = (Path("~/.dreamkit/plugins").expanduser(), Path("plugins"))
 GENERATED_DIR = "plugins-generated"  # the Create tab's checked packages, beside the config's plugins/ folder
 ## Hooks that run inside a control step and count against the budget (§5).

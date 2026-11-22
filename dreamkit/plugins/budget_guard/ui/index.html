@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>budget-guard</title></head>
+<body>
+<!-- PLUGIN_STANDARD §7a: the server links the theme and puts this plugin's record in window.DK_PLUGIN;
+     dk.plugin (/theme/dreamkit-page.js) draws the standard page: what it is, what it did in this run, its settings -->
+<script src="/theme/dreamkit-page.js"></script>
+<script>
+// budget-guard: how much of the budget the run used, attempt by attempt, and where it stopped the run.
+dk.plugin({
+  how: (P) => [
+    dk.h('p', {}, `It adds up what the model's calls cost (the price per robot-hour in dreamkit.yaml) and warns at ${P.warn_pct.join('% and ')}% of a $${P.budget_usd} budget.`),
+    dk.h('p', {}, `At ${P.stop_pct}% it calls the budget used up, and recovery ${P.at_stop === 'finish' ? 'lets the attempt finish, then ends the run' : 'drives the arms home and ends the run at once'}, so the robot never stops mid-motion because the credits ran out.${P.count_mock ? ' A mock run is billed as Dream-1 here (count_mock).' : ''}`),
+  ],
+  numbers: (c) => {
+    const last = [...c.episodes].reverse().find((e) => e['budget-guard'])
+    const g = (last && last['budget-guard']) || {}
+    const spent = g.spent_usd ?? 0, budget = g.budget_usd ?? c.P.budget_usd
+    const stop = c.episodes.find((e) => e['budget-guard'] && e['budget-guard'].stopped)
+    return [
+      { label: 'spent', value: `$${dk.fmt(spent, 2)}`, sub: `of $${dk.fmt(budget, 2)} (${Math.round((100 * spent) / budget)}%)`, tone: spent / budget >= c.P.stop_pct / 100 ? 'bad' : spent / budget >= 0.8 ? 'warn' : null },
+      { label: 'run stopped', value: stop ? `attempt ${stop.episode}` : 'no', sub: stop ? 'budget used up, stopped safely' : 'it never had to', tone: stop ? 'bad' : 'ok' },
+    ]
+  },
+  extra: (c) => {
+    const rows = c.episodes.filter((e) => e['budget-guard'])
+    if (!rows.length) return null
+    const budget = rows[rows.length - 1]['budget-guard'].budget_usd
+    return dk.card('Spent by the end of each attempt', dk.bars(rows.map((e) => {
+      const g = e['budget-guard']
+      return { label: String(e.episode), value: g.spent_usd, tone: g.stopped ? 'bad' : g.spent_usd / budget >= 0.8 ? 'warn' : 'info',
+        title: `attempt ${e.episode}: $${dk.fmt(g.attempt_usd, 3)} this attempt, $${dk.fmt(g.spent_usd, 3)} in all${g.stopped ? ' — stopped here' : ''}` }
+    }), { max: budget, unit: ' $' }), dk.h('p', { class: 'dk-faint' }, `the chart's top is the budget, $${dk.fmt(budget, 2)}; red: where the run stopped`))
+  },
+  quiet: (c) => `Nothing to report: the run stayed well inside its budget in all ${c.episodes.length} attempts.`,
+})
+</script>
+</body>
+</html>
