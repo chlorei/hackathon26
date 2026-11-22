@@ -79,6 +79,16 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
           <p className="text-[13px] text-dim">Across {policy === 'all' ? 'all' : policy} runs</p>
           <p className="mt-1 text-[40px] font-semibold leading-none">{all.length ? Math.round((100 * ok) / all.length) : 0}<span className="text-[20px] text-dim">%</span></p>
           <p className="mt-2 text-[13px] text-dim">{ok} of {all.length} attempts worked in {list.length} runs</p>
+          {(() => {
+            const spent = list.reduce((a, r) => a + (r.cost_usd ?? 0), 0)
+            return (
+              <p className="mt-2 border-t border-line pt-2 text-[13px] text-dim">
+                Spent <b className="text-ink tabular-nums">${spent.toFixed(2)}</b>
+                {ok ? <> · <b className="text-ink tabular-nums">${(spent / ok).toFixed(2)}</b> per success</> : null}
+                {policy === 'mock' ? ' (mock runs bill nothing)' : ''}
+              </p>
+            )
+          })()}
         </Panel>
         <Panel>
           <PanelTitle>Why attempts failed</PanelTitle>

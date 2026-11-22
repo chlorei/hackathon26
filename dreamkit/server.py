@@ -21,7 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config as config_mod
-from . import registry, storage
+from . import cost, registry, storage
 from .manager import describe, discover
 
 UI_DIST = Path(__file__).resolve().parent / "ui_dist"
@@ -331,7 +331,11 @@ def create_app(config_path: str | Path) -> FastAPI:
     @app.get("/api/runs")
     def list_runs():
         runs = storage.list_runs(runs_root())
+        cfg, _ = load_cfg()
         for r in runs:
+            if r.get("cost_usd") is None:  # a run from before dreamkit.cost: the same formula, from its calls
+                calls = sum(int(e.get("requests") or 0) for e in r.get("episodes") or [])
+                r["cost_usd"] = round(cost.usd(calls, cost.price_per_hour(r.get("model"), bool(r.get("mock")), cfg.prices)), 4)
             if r.get("status") == "running" and not _is_live(runs_root() / r["id"], r):
                 r["status"] = "interrupted"  # its loop is gone
         return {"runs": runs}
