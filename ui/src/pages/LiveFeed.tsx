@@ -9,17 +9,14 @@ type Line = { key: string; plugin: string; level: EventRecord['level']; text: st
 
 const NUM = /-?\d+(?:\.\d+)?/g
 
-/** "model round trip 2347 ms, slow" ×15 -> "model round trip avg 2.3 s, slow" (the mean of the first number). */
+/** "model round trip 2347 ms, slow" ×15 -> "model round trip avg 2.3 s, slow". An average means something only for
+a latency; anything else (a count "(2/3)", a second "at 14.9 s") shows its latest message. */
 function collapsed(template: string, events: EventRecord[]): string {
-  const firsts = events.map((e) => Number((e.message.match(NUM) ?? [])[0])).filter((v) => !Number.isNaN(v))
-  if (!firsts.length) return template.replace(/#/g, '…')
-  const avg = firsts.reduce((a, v) => a + v, 0) / firsts.length
-  if (/# ms\b/.test(template)) {
-    const shown = avg >= 1000 ? `avg ${(avg / 1000).toFixed(1)} s` : `avg ${Math.round(avg)} ms`
-    return template.replace(/# ms\b/, shown).replace(/#/g, '…')
-  }
-  const whole = firsts.every((v) => Number.isInteger(v))
-  return template.replace('#', `avg ${whole && Number.isInteger(avg) ? avg : avg.toFixed(1)}`).replace(/#/g, '…')
+  if (!/# ms\b/.test(template)) return events[events.length - 1].message
+  const ms = events.map((e) => Number((e.message.match(/(-?\d+(?:\.\d+)?) ms\b/) ?? [])[1])).filter((v) => !Number.isNaN(v))
+  const avg = ms.reduce((a, v) => a + v, 0) / Math.max(1, ms.length)
+  const shown = avg >= 1000 ? `avg ${(avg / 1000).toFixed(1)} s` : `avg ${Math.round(avg)} ms`
+  return template.replace(/# ms\b/, shown).replace(/#/g, '…')
 }
 
 /** Events of one attempt as lines: identical messages (numbers aside) of a plugin become one line. */

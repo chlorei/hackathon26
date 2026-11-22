@@ -138,8 +138,6 @@ function NowCard({ events, episodes, current, running, live }: {
   const verdict = [...mine].reverse().find((e) => e.data?.kind === 'verdict' || (e.level === 'error' && e.data?.reason))
   const recovering = [...mine].reverse().find((e) => e.plugin === 'recovery' && e.data?.action)
   const last = [...mine].reverse().find((e) => (e.level !== 'info' || e.plugin === 'failure-monitor') && !/model round trip/.test(e.message))
-  const done = episodes.length
-  const ok = episodes.filter((e) => e.success).length
   const tone = !current ? 'idle' : recovering && (!verdict || (tOf(recovering) ?? 0) >= (tOf(verdict) ?? 0)) ? 'recover'
     : verdict ? 'bad' : 'ok'
   const headline = !current ? (running ? 'Between attempts' : 'Run finished')
@@ -163,7 +161,7 @@ function NowCard({ events, episodes, current, running, live }: {
           {current ? `Attempt ${current.episode} · scene ${current.scene + 1}${current.attempt > 1 ? ` · retry ${current.attempt - 1}` : ''}` : 'Now'}
         </span>
         {current && <span className="text-[15px] font-semibold text-signal">{live.t.toFixed(1)} s</span>}
-        <span className="ml-auto text-dim">{ok} of {done} attempts worked so far</span>
+        <span className="ml-auto text-dim">{workedText(episodes)}</span>
       </div>
       <p className={clsx('mt-2 text-[26px] font-semibold leading-tight tracking-[-0.01em]',
         tone === 'bad' && 'text-bad', tone === 'recover' && 'text-signal', tone === 'ok' && 'text-ink', tone === 'idle' && 'text-dim')}>
@@ -320,6 +318,15 @@ function LiveStrip({ live, marks }: { live: LiveStore; marks: Mark[] }) {
   return <AttemptStrip duration={span} marks={marks} playhead={live.t} live />
 }
 
+/** '3 of 5 attempts worked so far', counting only the judged ones: an attempt nobody could judge is not a failure. */
+function workedText(episodes: EpisodeResult[]): string {
+  const judged = episodes.filter((e) => typeof e.success === 'boolean')
+  const ok = judged.filter((e) => e.success).length
+  const open = episodes.length - judged.length
+  if (!judged.length) return open ? `${open} attempt${open === 1 ? '' : 's'}, not judged yet` : 'no attempt finished yet'
+  return `${ok} of ${judged.length} attempts worked so far${open ? ` · ${open} not judged` : ''}`
+}
+
 /** An attempt's failure in a few plain words: no 'at 0.0 s', a chain of moments cut to its first and last. */
 function whyFailed(e: EpisodeResult): string {
   if (e.success == null) return `ran ${e.duration_s.toFixed(0)} s; did it work? The arm alone cannot tell: mark it in History`
@@ -352,10 +359,9 @@ function Attempts({ episodes, current, onOpen }: {
   onOpen: (episode: number) => void
 }) {
   if (!episodes.length && !current) return null
-  const ok = episodes.filter((e) => e.success).length
   return (
     <Panel>
-      <PanelTitle right={<span className="text-[13px] text-dim">{ok} of {episodes.length} worked, {plural(new Set(episodes.map((e) => e.scene)).size, 'scene')} so far</span>}>
+      <PanelTitle right={<span className="text-[13px] text-dim">{workedText(episodes)}, {plural(new Set(episodes.map((e) => e.scene)).size, 'scene')}</span>}>
         Attempts
       </PanelTitle>
       <ul className="divide-y divide-line border-t border-line">

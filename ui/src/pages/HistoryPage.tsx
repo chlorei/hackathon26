@@ -39,11 +39,13 @@ function judgeHint(why: string): string {
   return why
 }
 function judgeText(r: RunInfo): ReactNode {
-  if (!(r.plugins ?? []).includes('vision-judge')) return <>off in this run · {GO_PLUGINS('vision-judge')}</>
+  // runs before the rename called it monitor-stats
+  const name = (r.plugins ?? []).includes('vision-judge') ? 'vision-judge' : (r.plugins ?? []).includes('monitor-stats') ? 'monitor-stats' : null
+  if (!name) return <>off in this run · {GO_PLUGINS('vision-judge')}</>
   const eps = (r.episodes ?? []).filter(valid)
-  const judged = eps.filter((e) => typeof field(e, 'vision-judge')?.success === 'boolean' && typeof e.success === 'boolean')
-  const agree = judged.filter((e) => field(e, 'vision-judge')!.success === e.success).length
-  const why = [...new Set(eps.map((e) => field(e, 'vision-judge')?.error as string | undefined).filter(Boolean))]
+  const judged = eps.filter((e) => typeof field(e, name)?.success === 'boolean' && typeof e.success === 'boolean')
+  const agree = judged.filter((e) => field(e, name)!.success === e.success).length
+  const why = [...new Set(eps.map((e) => field(e, name)?.error as string | undefined).filter(Boolean))]
   const parts = [judged.length ? `${agree} of ${judged.length} agree with success-check` : '']
   if (why.length) parts.push(`${eps.length - judged.length} not judged: ${[...new Set(why.map((w) => judgeHint(w ?? "")))].join('; ')}`)
   return parts.filter(Boolean).join(' · ') || 'no verdict recorded'
