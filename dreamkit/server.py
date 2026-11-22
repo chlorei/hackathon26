@@ -611,6 +611,15 @@ def create_app(config_path: str | Path) -> FastAPI:
         return {"apps": out, "problems": host.problems, "world": world}
 
     if (UI_DIST / "index.html").is_file():
+        @app.middleware("http")
+        async def fresh_panel(request: Request, call_next):
+            # the page that names the current build is never cached (its assets are, by their hashed names): a browser
+            # that kept an old index.html would keep showing the old panel after an update
+            response = await call_next(request)
+            if request.url.path in ("/", "/index.html"):
+                response.headers["Cache-Control"] = "no-cache"
+            return response
+
         app.mount("/", StaticFiles(directory=UI_DIST, html=True), name="ui")
     else:
         @app.get("/")
