@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dreamkit.stats import wilson  # noqa: E402
 
+REFUSALS = ("model_error", "pool_full", "error")  # the API refused or could not be reached: not the model's doing
 EXPORT = ROOT / "docs" / "results" / "dream1-attempts.json"
 
 
@@ -33,8 +34,8 @@ def _model_error_kind(e: dict) -> str | None:
     if e.get("reason") != "model_error":
         return None
     text = str((e.get("details") or {}).get("message") or e.get("message") or "")
-    for key, kind in (("could not reach", "network: could not reach the API"), ("DreamTimeout", "timeout (45 s)"),
-                      ("NO_CAPACITY", "no capacity"), ("SessionExpired", "session expired")):
+    for key, kind in (("could not reach", "network: could not reach the API"), ("pool", "server: at max capacity"), ("DreamTimeout", "timeout (45 s)"),
+                      ("NO_CAPACITY", "server: no capacity"), ("SessionExpired", "session expired")):
         if key in text:
             return kind
     return "other"
@@ -54,7 +55,7 @@ def export(runs: Path) -> list[dict]:
                 "task": e["task"], "success": e.get("success"), "reason": e.get("reason"),
                 "model_error": _model_error_kind(e), "duration_s": e.get("duration_s"), "requests": e.get("requests"),
                 "cost_usd": e.get("cost_usd"), "rtt_mean_ms": lat.get("mean_ms"), "rtt_p95_ms": lat.get("p95_ms"),
-                "recoveries": (e.get("recovery") or {}).get("count", 0),
+                "recoveries": (e.get("recovery") or {}).get("count", 0), "judged_by": e.get("judged_by"),
                 "judge_success": judge.get("success") if isinstance(judge.get("success"), bool) else None,
                 "judge_error": bool(judge.get("error")),
             })
@@ -71,15 +72,18 @@ def report(rows: list[dict]) -> None:
     print(f"real Dream-1 runs: {len(runs)} ({', '.join(runs)}), attempts: {len(rows)}")
     ok = sum(1 for r in rows if r["success"])
     print("success, every attempt:", pct(ok, len(rows)))
-    ran = [r for r in rows if r["reason"] not in ("model_error", "error")]
-    print("success, attempts where the model answered:", pct(sum(1 for r in ran if r["success"]), len(ran)))
+    refused = [r for r in rows if r["reason"] in REFUSALS]
+    stopped = [r for r in rows if r["reason"] == "stopped"]
+    print(f"server/network refusals (not Dream-1 failures): {len(refused)}; stopped by the user: {len(stopped)}")
+    ran = [r for r in rows if r["reason"] not in (*REFUSALS, "stopped")]
+    print("Dream-1 success, attempts where the model worked:", pct(sum(1 for r in ran if r["success"]), len(ran)))
     for fam in ("apple→bowl", "orange→bowl", "banana→plate"):
         sub = [r for r in ran if _family(r["task"]) == fam]
         if sub:
             print(f"  {fam}: {pct(sum(1 for r in sub if r['success']), len(sub))}")
-    reasons = collections.Counter(r["reason"] for r in rows if r["success"] is False)
-    print("failure reasons:", dict(reasons.most_common()))
-    print("model errors:", dict(collections.Counter(r["model_error"] for r in rows if r["model_error"]).most_common()))
+    reasons = collections.Counter(r["reason"] for r in ran if r["success"] is False)
+    print("Dream-1 failure reasons:", dict(reasons.most_common()))
+    print("refusals:", dict(collections.Counter(r["model_error"] for r in rows if r["model_error"]).most_common()))
     rtt = [r["rtt_mean_ms"] for r in rows if r["rtt_mean_ms"]]
     p95 = [r["rtt_p95_ms"] for r in rows if r["rtt_p95_ms"]]
     if rtt:
@@ -92,8 +96,14 @@ def report(rows: list[dict]) -> None:
     print(f"a successful attempt took {statistics.mean(good):.1f} s on average")
     rec = [r for r in rows if r["recoveries"]]
     print(f"recovery stepped in on {len(rec)} attempts; {sum(1 for r in rec if r['success'])} of them then succeeded")
-    judged = [r for r in rows if r["judge_success"] is not None and r["success"] is not None]
+    # accuracy only where the simulator (success-check) decided: where the camera decided, it agrees by definition
+    judged = [r for r in rows if r["judge_success"] is not None and r["success"] is not None
+              and r.get("judged_by") in (None, "world")]
     agree = sum(1 for r in judged if r["judge_success"] == r["success"])
+    last = rows[-1]["run"] if rows else None
+    lj = [r for r in judged if r["run"] == last]
+    print(f"camera judge in the last run ({last}): {sum(1 for r in lj if r['judge_success'] == r['success'])} of "
+          f"{len(lj)} agree with success-check")
     print(f"camera judge: judged {len(judged)} of {len(rows)} attempts, agreed with the simulator's success-check on "
           f"{agree} of {len(judged)}; not judged: {len(rows) - len(judged)} "
           f"({sum(1 for r in rows if r['judge_error'])} of them because its model call failed: quota, network)")

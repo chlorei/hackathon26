@@ -24,7 +24,7 @@ three attempts 107 s. Python 3.11–3.13 and [uv](https://docs.astral.sh/uv/) ne
 | The credits run out mid-run | **budget-guard** warns at 50% and 80%, and at 95% sends the arms home and stops the run |
 | Recording demonstrations for fine-tuning | **harvester** turns good attempts into LeRobot datasets that pass Dream Labs' `validate_dataset`; the **Data** tab records, checks, uploads and fine-tunes (`dreamkit datasets train`) |
 
-**Results** (3 real Dream-1 runs, 152 attempts, and 12 recorded scenarios): [docs/RESULTS.md](docs/RESULTS.md) ·
+**Results** (6 real Dream-1 runs, 172 attempts — 30% success where the model worked — and 12 recorded scenarios): [docs/RESULTS.md](docs/RESULTS.md) ·
 **[Robustness](#robustness)** · **Video:** VIDEO_LINK · **Slides:** SLIDES_LINK
 
 ## How it fits
@@ -368,6 +368,7 @@ simulator skip themselves there and run locally).
 | **The standard is checked at import**: a plugin that breaks [PLUGIN_STANDARD.md](docs/PLUGIN_STANDARD.md) does not even import, and the error says the rule, the file:line and the fix. | [`standard.py`](dreamkit/standard.py) | `dreamkit check --all` |
 | **budget-guard stops before the credits run out**: at 95% of the budget the arms go home and the run ends. | [`budget_guard`](dreamkit/plugins/budget_guard/plugin.py), [`tests/plugins/test_budget_guard.py`](tests/plugins/test_budget_guard.py) | budget-guard with `budget_usd: 0.05, count_mock: true`, then `python examples/sim_loop.py --mock --episodes 6` |
 | **When the model fails, the loop goes on**: a model error ends that attempt with a reason; 5 in a row and recovery stops the run instead of spinning. A camera judge without a key or quota writes *not judged* and the run continues. | [`recovery`](dreamkit/plugins/recovery/plugin.py), [`llm.py`](dreamkit/llm.py), [`tests/plugins/test_recovery.py`](tests/plugins/test_recovery.py) | `dreamkit install vision-judge`, then without `GEMINI_API_KEY`: `python examples/sim_loop.py --mock --episodes 1` → *not judged: GEMINI_API_KEY is not set* |
+| **When Dream-1's servers are full, the run stops itself.** Real run `20261122-160346-2fd1`: the API answered `DA-2000 NO_CAPACITY` 5 times in a row, and recovery ended the run (*5 attempts in a row ended in a model error: the run stops*) instead of spinning. | [`recovery`](dreamkit/plugins/recovery/plugin.py), [`tests/plugins/test_recovery.py`](tests/plugins/test_recovery.py) | `pytest tests/plugins/test_recovery.py` |
 | **A broken camera is caught**: black, uniform or frozen, before the next model call. | [`camera_check`](dreamkit/plugins/camera_check/plugin.py), [`tests/plugins/test_camera_check.py`](tests/plugins/test_camera_check.py) | `python examples/sim_loop.py --mock --fault-camera top --fault-kind black` |
 | **Mock and replay need no network and no credits**: the scripted arm in the simulator, and 12 recorded attempts every plugin test replays. | [`mock.py`](dreamkit/mock.py), [`testing.py`](dreamkit/testing.py), [`dreamkit/fixtures/`](dreamkit/fixtures) | `pytest -q` |
 | **Generated plugins pass the same checks as installed ones** (`dreamkit check`, its replay tests, the 1 ms bench) and a scan of the code: no network, files outside its folder, subprocesses or dynamic code. Honestly: a filter, not a sandbox — read the code before you keep it. | [`create.py`](dreamkit/create.py), [`tests/test_create.py`](tests/test_create.py) | `pytest tests/test_create.py` |
@@ -381,7 +382,7 @@ simulator skip themselves there and run locally).
   an apple dropped and picked up again; it now judges each try that recovery cut short on its own, and needs key
   frames around the moments failure-monitor marks, or more frames.
 - **Free Gemini quotas.** About 20 requests a model a day: on a long run most attempts went *not judged*
-  (114 of 152, see [RESULTS](docs/RESULTS.md)). The judge falls back across models and to Claude, and says *not judged*
+  (129 of 172, see [RESULTS](docs/RESULTS.md); `dreamkit judge --all-unjudged` judges them again later). The judge falls back across models and to Claude, and says *not judged*
   instead of guessing.
 - **Create writes plugins with a model, and checks them with a filter, not a sandbox.** A weaker model often needs a
   second or third try to pass the checks.

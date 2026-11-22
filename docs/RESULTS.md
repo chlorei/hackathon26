@@ -3,9 +3,9 @@
 What dreamkit measured, on real Dream-1 runs and on recorded scenarios. Every number below has the date it was
 measured and the command that gives it again. Nothing here is estimated.
 
-**How much real data there is:** 3 runs with Dream-1 in Dream Labs' MuJoCo simulator, **152 attempts**, on
-2026-11-21 and 2026-11-22. That is enough to see where the attempts go wrong and what they cost; it is too few
-to rank models or prompts with confidence (see the intervals).
+**How much real data there is:** 6 runs with Dream-1 in Dream Labs' MuJoCo simulator, **172 attempts**, on
+2026-11-21 and 2026-11-22. Enough to see where attempts go wrong and what they cost; too few to rank models or
+prompts with confidence (see the intervals).
 
 The run folders (videos, frames, about 1 GB) stay on our machine. One row per attempt is in git:
 [`docs/results/dream1-attempts.json`](results/dream1-attempts.json) (no messages, addresses, session ids or paths).
@@ -16,39 +16,38 @@ python tools/results.py          # every number in sections 1–2, from that fil
 
 ## 1. Dream-1 in the simulator
 
-Runs: `20261121-235024-d6d6` (1 attempt), `20261121-235303-b226` (1 attempt), `20261122-123523-5c72` (150 attempts,
-12:35–14:49, recorded through the Data tab: apple → bowl, orange → bowl, banana → plate, 24 phrasings of the task).
-Success was decided by the simulator (success-check: the object rests in the target and the gripper let go).
+Measured 2026-11-22 with `python tools/results.py`. Success was decided by the simulator (success-check). The
+150-attempt run was recorded through the Data tab (apple → bowl, orange → bowl, banana → plate, 24 phrasings).
 
-| | |
+**104 of the 172 attempts never reached the model**: the API refused them or could not be reached. They are
+counted separately, **not** as Dream-1 failures:
+
+| Server/network refusals | Attempts |
 |---|---|
-| Success, every attempt | **17 / 152 = 11%** (95% Wilson interval 7–17%) |
-| Success where the model answered | **17 / 53 = 32%** (21–45%) |
-| apple → bowl / orange → bowl / banana → plate | 8/20 = 40% (22–61%) · 6/18 = 33% (16–56%) · 3/15 = 20% (7–45%) |
-| Model round trip | median of per-attempt means **2.57 s**, median p95 **3.48 s** (59 attempts with calls) |
-| Cost | **$1.56** for 1,203 model calls → **$0.092 per success** |
-| A successful attempt took | 39.3 s on average |
+| network: could not reach the API (our connection dropped, attempts 31–123 of the long run) | 92 |
+| server at max capacity (`DA-2000 NO_CAPACITY`, pool full) | 6 |
+| session expired | 3 |
+| timeout after 45 s | 2 |
+| other loop error | 1 |
 
-**Why attempts failed** (failure-monitor's verdict, one per attempt):
+(2 more attempts were stopped by us and are left out too.)
 
-| Reason | Attempts | What it was |
-|---|---|---|
-| model error | 98 | 92 *could not reach the API* (our network/DNS dropped during attempts 31–123), 3 session expired, 2 timeouts after 45 s, 1 *no capacity* |
-| slow model | 30 | the arm waited for the next chunk past the 700 ms limit |
-| grasped air | 6 | a gripper closed on nothing |
-| error | 1 | the loop itself |
-
-The honest reading: most failures of the long run were **ours** (the network went away: 92 of attempts 31–123
-could not reach the API), not Dream-1's. dreamkit made that visible in one line instead of 98 rows; since then **recovery stops a run after 5
-model errors in a row** (`stop_after_model_errors`), so such a run no longer spins.
+| Dream-1, attempts where the model worked | |
+|---|---|
+| Success | **20 / 66 = 30%** (95% Wilson interval 21–42%) |
+| apple → bowl / orange → bowl / banana → plate | 11/33 = 33% (20–50%) · 6/18 = 33% (16–56%) · 3/15 = 20% (7–45%) |
+| Why the rest failed | slow model 30 (the arm waited past 700 ms for a chunk) · timeout 9 · grasped air 6 |
+| Model round trip | median of per-attempt means **784 ms**, median p95 **2.19 s** (74 attempts with calls) |
+| Cost | **$2.09** for 1,604 model calls → **$0.105 per success** |
+| A successful attempt took | 37.5 s on average |
 
 ## 2. What the plugins did on those runs
 
 | Plugin | Result |
 |---|---|
-| recovery | stepped in on **40** attempts (25 × lift and continue, 15 × arms home and ask again); **8** of them then succeeded |
-| camera judge (monitor-stats, now vision-judge) | judged **38** attempts, agreed with the simulator on **32 / 38 = 84%**; 114 not judged, 21 of them because its Gemini call failed (free-tier quota, network) |
-| budget-guard | $1.56 of the $5.00 budget used; never had to stop |
+| recovery | stepped in on **41** attempts; **8** of them then succeeded. When Dream-1's servers were full (run `20261122-160346-2fd1`), it **stopped the run itself after 5 refusals in a row** instead of spinning |
+| vision-judge (camera) vs success-check (simulator) | agreed on **36 / 43 = 84%** of the attempts both judged (in the last run, 1 of 1). 129 not judged: 31 because its Gemini call failed (free-tier quota, 503), the rest got no verdict. `dreamkit judge --all-unjudged` judged 21 of them again later, until the quota (429) stopped it |
+| budget-guard | never had to stop a real run |
 
 ## 3. Recorded scenarios (no model, no credits)
 
