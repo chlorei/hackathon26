@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { CameraOff, FolderOpen } from 'lucide-react'
-import { api, atOf, REASON_LABEL, tOf, type EpisodeResult, type EventRecord } from '../api'
+import { api, atOf, REASON_LABEL, tOf, type DemoState, type EpisodeResult, type EventRecord } from '../api'
+import { toast } from '../toast'
 import { useLive, useRunStream, type LiveStore } from '../useRunStream'
 import Feed from './LiveFeed'
 import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginPageDrawer, Sparkline, Tag, type Mark, type PluginPage } from '../ui'
@@ -10,16 +11,20 @@ import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTit
 const CAMS: Record<string, string> = { top: 'Overhead', left: 'Left wrist', right: 'Right wrist' }
 
 // The same API as README.md: five lines, the loop around them is yours.
-const SNIPPET = `client = dreamkit.wrap(dream.DreamClient())        # the one line
+const SNIPPET = `import dream, dreamkit
+
+client = dreamkit.wrap(dream.DreamClient())        # the one line
 with client.episode("put apple into the bowl", env=env):
     reply = client.get_action()                       # plugins run around the model
     env.step(left, right)                             # each row of the reply
     client.step(env, command=(left, right))           # robot: state=... instead of env`
-const MOCK = 'dreamkit sim --mock dropped,grasped_air,success'
 
 /** Watches whatever run the user's loop is writing. It never starts anything. */
 export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episode?: number) => void }) {
   const live = useQuery({ queryKey: ['live'], queryFn: api.live, refetchInterval: 2000 })
+  const demo = useQuery({ queryKey: ['demo'], queryFn: api.demo, refetchInterval: 3000 })
+  const startDemo = useMutation({ mutationFn: api.startDemo, onSuccess: () => demo.refetch(), onError: (e: Error) => toast(`Could not start: ${e.message}`) })
+  const stopDemo = useMutation({ mutationFn: api.stopDemo, onSuccess: () => { demo.refetch(); live.refetch() } })
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   for (const p of plugins.data?.plugins ?? []) ICON_BY_PLUGIN[p.name] = p.icon
   const pages = useMemo(() => pagesOf(plugins.data?.plugins), [plugins.data])
@@ -37,13 +42,15 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
   const marks = useMemo<Mark[]>(() => (current ? marksFrom(stream.events, current.episode) : []), [stream.events, current])
   const toggleCams = () => { localStorage.setItem('dk-cams', showCams ? '0' : '1'); setShowCams(!showCams) }
 
-  if (!runId) return <Waiting />
+  if (!runId) return <Waiting demo={demo.data} onDemo={(policy) => startDemo.mutate(policy)} />
 
   return (
     <div className="space-y-4">
     <StatusBar task={stream.task || live.data?.task || 'Run'} mode={stream.mode} running={running} mock={Boolean(live.data?.mock)}
       model={live.data?.model} current={current} episodes={stream.episodes} live={stream.live}
-      onFolder={() => api.reveal(runId)} onHistory={() => onOpenRun(runId)} />
+      onFolder={() => api.reveal(runId)} onHistory={() => onOpenRun(runId)}
+      onStop={demo.data?.running && running ? () => stopDemo.mutate() : undefined} stopping={stopDemo.isPending}
+      onNewDemo={!running && demo.data?.available && !demo.data.running ? () => startDemo.mutate('mock') : undefined} />
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
       <div className="min-w-0 space-y-4">
         <NowCard events={stream.events} episodes={stream.episodes} current={current} running={running} live={stream.live} />
@@ -98,11 +105,13 @@ export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episod
 }
 
 /** The run in one line: task, attempt, clock, successes, the model's mean round trip, money spent when known. */
-function StatusBar({ task, mode, running, mock, model, current, episodes, live, onFolder, onHistory }: {
+function StatusBar({ task, mode, running, mock, model, current, episodes, live, onFolder, onHistory, onStop, stopping, onNewDemo }: {
   task: string; mode?: string; running: boolean; mock: boolean; model?: string
   current: { episode: number; scene: number; attempt: number } | null
   episodes: EpisodeResult[]; live: LiveStore
   onFolder: () => void; onHistory: () => void
+  onStop?: () => void; stopping?: boolean  // the demo the panel started
+  onNewDemo?: () => void  // a finished run: start the demo again
 }) {
   const ok = episodes.filter((e) => e.success).length
   const lat = episodes.map((e) => ((e as unknown as Record<string, unknown>)['failure-monitor'] as { latency?: { mean_ms?: number; calls?: number } } | undefined)?.latency)
@@ -132,6 +141,8 @@ function StatusBar({ task, mode, running, mock, model, current, episodes, live, 
         {item('Model round trip', meanMs == null ? (mock ? 'mock' : '–') : meanMs >= 1000 ? `${(meanMs / 1000).toFixed(1)} s avg` : `${Math.round(meanMs)} ms avg`, calls ? `${calls} calls` : undefined)}
         <Spent live={live} episodes={episodes} mock={mock} running={running} />
         <div className="ml-auto flex gap-1">
+          {onStop && <Button variant="stop" onClick={onStop} disabled={stopping}>{stopping ? 'Stopping…' : 'Stop'}</Button>}
+          {onNewDemo && <Button variant="quiet" onClick={onNewDemo} title="Try demo again (free, simulator)">New demo</Button>}
           <Button variant="quiet" onClick={onFolder}><FolderOpen className="h-4 w-4" /> Folder</Button>
           <Button variant="quiet" onClick={onHistory}>History</Button>
         </div>
@@ -184,24 +195,83 @@ function NowCard({ events, episodes, current, running, live }: {
   )
 }
 
-function Waiting() {
+const STEPS = [
+  { n: 1, title: 'Install dreamkit and make a config', code: 'pip install dreamkit && dreamkit init' },
+  { n: 2, title: 'Wrap your Dream-1 client: one line', code: 'client = dreamkit.wrap(dream.DreamClient())' },
+  { n: 3, title: 'Run your loop', code: 'python my_robot.py', after: 'this page comes alive' },
+]
+
+/** No run yet: try the demo here, or connect your own robot in three steps. */
+function Waiting({ demo, onDemo }: { demo?: DemoState; onDemo: (policy: 'mock' | 'dream') => void }) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState(false)
   const copy = (what: string) => { void navigator.clipboard.writeText(what); setCopied(what) }
+  const starting = demo?.running
+  const copyButton = (what: string) => (
+    <button className="shrink-0 text-[13px] text-dim hover:text-ink" onClick={() => copy(what)}>{copied === what ? 'Copied' : 'Copy'}</button>
+  )
   return (
-    <div className="mx-auto max-w-[760px] pt-10">
-      <h1 className="text-[22px] font-semibold">No run yet</h1>
-      <p className="mt-1.5 text-[15px] text-dim">Start a loop wrapped in dreamkit; this page picks it up on its own.</p>
-      <Panel className="mt-5">
-        <PanelTitle right={<button className="text-[13px] text-dim hover:text-ink" onClick={() => copy(SNIPPET)}>{copied === SNIPPET ? 'Copied' : 'Copy'}</button>}>
-          In your loop
-        </PanelTitle>
-        <pre className="overflow-x-auto border-t border-line px-5 py-3.5 font-mono text-[12.5px] leading-relaxed text-ink">{SNIPPET}</pre>
-      </Panel>
-      <div className="mt-4 flex flex-wrap items-center gap-2 text-[14px] text-dim">
-        Or try it free on Dream Labs' simulator:
-        <code className="rounded bg-raised px-2 py-0.5 font-mono text-[13px] text-ink">{MOCK}</code>
-        <button className="text-[13px] text-dim hover:text-ink" onClick={() => copy(MOCK)}>{copied === MOCK ? 'Copied' : 'Copy'}</button>
+    <div className="mx-auto max-w-[760px] space-y-5 pt-10">
+      <div>
+        <h1 className="text-[24px] font-semibold">No robot running yet</h1>
+        <p className="mt-1.5 text-[15px] text-dim">Watch dreamkit at work on Dream Labs' simulator, or connect your own robot.</p>
       </div>
+      {demo?.available !== false && (
+        <Panel className="flex flex-wrap items-center gap-3 px-5 py-4">
+          <Button variant="go" disabled={starting} onClick={() => onDemo('mock')}>
+            {starting && demo?.policy === 'mock' ? 'Starting the demo…' : 'Try demo (free, simulator)'}
+          </Button>
+          {!confirm ? (
+            <Button disabled={starting || !demo?.dream_key} onClick={() => setConfirm(true)}
+              title={demo?.dream_key ? 'Dream-1 drives the simulated arms: 2 attempts' : 'Add DREAM_API_KEY to .env (or ~/.dreamlabs/credentials) first'}>
+              Run with Dream-1
+            </Button>
+          ) : (
+            <span className="flex flex-wrap items-center gap-2 rounded-lg bg-raised px-3 py-1.5 text-[13.5px]">
+              This uses Dream-1 credits (2 attempts, about $0.05).
+              <Button variant="go" onClick={() => { setConfirm(false); onDemo('dream') }}>Run</Button>
+              <Button variant="quiet" onClick={() => setConfirm(false)}>Cancel</Button>
+            </span>
+          )}
+          <p className="w-full text-[13px] text-dim">
+            {starting ? 'The simulator is starting; this page switches to the run in a few seconds.'
+              : 'The demo drops the apple on purpose in attempts 1 and 3, so you see the plugins notice it and recovery step in.'}
+            {!demo?.dream_key && ' Dream-1 needs a Dream API key.'}
+          </p>
+        </Panel>
+      )}
+      <Panel>
+        <PanelTitle>Or connect your own robot in 3 steps</PanelTitle>
+        <ol className="space-y-3 border-t border-line px-5 py-4">
+          {STEPS.map((s) => (
+            <li key={s.n} className="flex gap-3">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-ink text-[12px] font-bold text-panel">{s.n}</span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[14px] font-medium">{s.title}</p>
+                <div className="mt-1 flex items-center gap-3">
+                  <code className="min-w-0 flex-1 truncate rounded bg-raised px-2.5 py-1 font-mono text-[13px]">{s.code}</code>
+                  {copyButton(s.code)}
+                  {s.after && <span className="shrink-0 text-[13px] text-dim">→ {s.after}</span>}
+                </div>
+                {s.n === 2 && (
+                  <details className="mt-2 text-[13px]">
+                    <summary className="cursor-pointer text-dim hover:text-ink">The full loop</summary>
+                    <div className="mt-2 flex items-start gap-3">
+                      <pre className="min-w-0 flex-1 overflow-x-auto rounded bg-raised px-3 py-2.5 font-mono text-[12.5px] leading-relaxed">{SNIPPET}</pre>
+                      {copyButton(SNIPPET)}
+                    </div>
+                  </details>
+                )}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </Panel>
+      {demo && (
+        <p className="text-[13px] text-dim">
+          Plugins enabled: {demo.plugins.length ? demo.plugins.join(', ') : 'none'} · <a href="#/plugins" className="text-signal hover:underline">Change →</a>
+        </p>
+      )}
     </div>
   )
 }

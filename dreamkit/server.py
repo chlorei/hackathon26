@@ -7,7 +7,10 @@ import asyncio
 import base64
 import inspect
 import json
+import os
 import shutil
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -44,6 +47,17 @@ class InstallRequest(BaseModel):
 class CreateRequest(BaseModel):
     messages: list[dict[str, str]]  # the chat so far: [{"role": "user" | "assistant", "text": ...}]
     files: dict[str, str] | None = None  # the current package, when the chat refines it
+
+
+class DemoRequest(BaseModel):
+    policy: str = "mock"  # mock: free, scripted failures; dream: Dream-1 on the simulator (uses credits)
+
+
+SIM_LOOP = Path(__file__).resolve().parent.parent / "examples" / "sim_loop.py"  # a source checkout has it
+DEMO_ARGS = {
+    "mock": ["--mock", "--episodes", "3", "--behaviors", "dropped,success,dropped"],
+    "dream": ["--episodes", "2", "--seconds", "30"],
+}
 
 
 class CatalogRequest(BaseModel):
@@ -360,6 +374,64 @@ def create_app(config_path: str | Path) -> FastAPI:
                         headers={"Content-Disposition": f'attachment; filename="{job.name}.zip"'})
 
     # -- runs (the monitor) ------------------------------------------------------------------------------------
+    # -- the demo button on Live: the panel starts the reference loop (examples/sim_loop.py) as its own process. The
+    # loop stays what it always is, independent of the panel: this only presses start and stop, one run at a time.
+    demo: dict[str, Any] = {"proc": None, "policy": None, "started": None}
+
+    def dream_key(base: Path) -> bool:
+        from . import llm
+
+        llm.load_env(base)  # DREAM_API_KEY from the project's .env, for the button and for the loop it starts
+        if os.getenv("DREAM_API_KEY"):
+            return True
+        creds = Path(os.getenv("DREAM_CREDENTIALS") or "~/.dreamlabs/credentials").expanduser()
+        try:
+            return any(line.strip().startswith("DREAM_API_KEY=") and line.split("=", 1)[1].strip().strip("\"'")
+                       for line in creds.read_text().splitlines())
+        except OSError:
+            return False
+
+    def demo_running() -> bool:
+        proc = demo["proc"]
+        return proc is not None and proc.poll() is None
+
+    @app.get("/api/demo")
+    def demo_state():
+        cfg, base = load_cfg()
+        return {"running": demo_running(), "policy": demo["policy"] if demo_running() else None,
+                "started": demo["started"] if demo_running() else None, "available": SIM_LOOP.is_file(),
+                "dream_key": dream_key(base), "plugins": [s.name for s in cfg.plugins if s.enabled]}
+
+    @app.post("/api/demo")
+    def demo_start(body: DemoRequest):
+        if body.policy not in DEMO_ARGS:
+            raise HTTPException(400, "policy must be mock or dream")
+        if not SIM_LOOP.is_file():
+            raise HTTPException(404, "examples/sim_loop.py is not here (a source checkout of dreamkit has it)")
+        if demo_running() or live_run()["id"]:
+            raise HTTPException(409, "a run is already going: one at a time")
+        _, base = load_cfg()
+        if body.policy == "dream" and not dream_key(base):
+            raise HTTPException(400, "no Dream API key: add DREAM_API_KEY to .env (or ~/.dreamlabs/credentials)")
+        log = Path("~/.dreamkit/demo.log").expanduser()
+        log.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [sys.executable, str(SIM_LOOP), *DEMO_ARGS[body.policy], "--config", str(config_path)]
+        demo.update(proc=subprocess.Popen(cmd, cwd=str(base), stdout=log.open("w"), stderr=subprocess.STDOUT,
+                                          env=dict(os.environ), start_new_session=True),
+                    policy=body.policy, started=time.time())
+        return demo_state()
+
+    @app.delete("/api/demo")
+    def demo_stop():
+        proc = demo["proc"]
+        if proc is not None and proc.poll() is None:
+            proc.send_signal(signal.SIGINT)  # the loop's Ctrl-C: it closes the run as stopped
+            try:
+                proc.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                proc.terminate()
+        return demo_state()
+
     @app.get("/api/live")
     def live_run():
         """The run the user's loop is writing right now, if any."""

@@ -40,6 +40,25 @@ function linesOf(events: EventRecord[]): Line[] {
   })
 }
 
+/** Plumbing, not news: the loop's mode, the model's round trips. Folded into one line per attempt. */
+const isTechnical = (l: Line) => l.plugin === 'dreamkit' || /model round trip/.test(l.text)
+
+/** An attempt's technical lines behind one fold. */
+function Technical({ lines, pages, onPage, onWatch }: {
+  lines: Line[]; pages: Set<string>; onPage: (plugin: string, episode: number | null) => void; onWatch: (episode: number) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const n = lines.reduce((a, l) => a + l.events.length, 0)
+  return (
+    <div className="border-t border-line/50">
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-2 px-4 py-1.5 pl-9 text-left text-[12px] text-faint hover:text-dim">
+        {open ? '▾' : '▸'} {n} technical {n === 1 ? 'event' : 'events'} <span className="truncate">({[...new Set(lines.map((l) => l.text.replace(/ avg .*/, '').slice(0, 28)))].join(', ')})</span>
+      </button>
+      {open && lines.map((line) => <FeedLine key={line.key} line={line} pages={pages} onPage={onPage} onWatch={onWatch} />)}
+    </div>
+  )
+}
+
 const isVerdict = (e: EventRecord) => e.plugin === 'failure-monitor' && e.level === 'error' && Boolean(e.data.reason)
 
 export default function Feed({ events, episodes, current, running, onWatch, pages, onPage }: {
@@ -117,9 +136,13 @@ export default function Feed({ events, episodes, current, running, onWatch, page
                   ))}
                 </div>
               )}
-              {expanded && linesOf(evs).map((line) => (
-                <FeedLine key={line.key} line={line} pages={pages} onPage={onPage} onWatch={onWatch} />
-              ))}
+              {expanded && (() => {
+                const lines = linesOf(evs)
+                const tech = lines.filter(isTechnical)
+                return [...lines.filter((l) => !isTechnical(l)).map((line) => (
+                  <FeedLine key={line.key} line={line} pages={pages} onPage={onPage} onWatch={onWatch} />
+                )), tech.length ? <Technical key="tech" lines={tech} pages={pages} onPage={onPage} onWatch={onWatch} /> : null]
+              })()}
             </section>
           )
         })}
