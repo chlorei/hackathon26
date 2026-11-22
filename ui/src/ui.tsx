@@ -175,6 +175,12 @@ export function PluginPageDrawer({ page, onClose }: { page: PluginPage | null; o
         onClose()
         window.location.hash = `/plugins/${encodeURIComponent(page.plugin)}`
       }
+      if (e.data?.type === 'dreamkit:watch' && e.data.run && e.data.episode) {  // a moment on the page: its video
+        sessionStorage.setItem('dk-seek', JSON.stringify({ run: String(e.data.run), episode: Number(e.data.episode), t: Number(e.data.t) }))
+        onClose()
+        window.location.hash = `/history/${encodeURIComponent(String(e.data.run))}/${Number(e.data.episode)}`
+        window.dispatchEvent(new Event('dk-seek'))  // the attempt may already be open
+      }
     }
     window.addEventListener('keydown', onKey)
     window.addEventListener('message', onMessage)

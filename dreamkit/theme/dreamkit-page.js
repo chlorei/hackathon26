@@ -113,9 +113,14 @@
     const select = (i) => { dots.forEach((d, j) => d && d.classList.toggle('sel', i === j)); rows.forEach((r, j) => r.classList.toggle('sel', i === j)) }
     items.forEach((it, i) => {
       if (it.t != null) dots[i] = s('circle', { class: TONE[it.level] || 'info', cx: x(it.t), cy: 12, r: 5, on: { click: () => select(i) } }, s('title', {}, `${fmt(it.t)} s · ${it.text}`))
+      // the panel opens the attempt's video at this second (a sandboxed page cannot navigate it; it asks)
+      const watch = it.t != null && (ep.videos || []).length
+        ? h('button', { class: 'dk-watch', title: `Watch attempt ${ep.episode} from ${fmt(Math.max(0, it.t - 1))} s`,
+            on: { click: (e) => { e.stopPropagation(); parent.postMessage({ type: 'dreamkit:watch', run: RUN, episode: ep.episode, t: it.t }, '*') } } }, '▶ watch')
+        : h('span')
       rows[i] = h('li', { class: 'dk-ev', tabindex: 0, on: { click: () => select(i), keydown: (e) => { if (e.key === 'Enter') select(i) } } },
         h('span', { class: 'dk-ev-t' }, it.t == null ? '' : `${fmt(it.t)} s`), h('span', { class: dotClass(it.level) }),
-        h('span', { class: `dk-ev-m${it.level === 'error' ? ' dk-bad' : it.level === 'warn' ? ' dk-warn' : ''}` }, it.text))
+        h('span', { class: `dk-ev-m${it.level === 'error' ? ' dk-bad' : it.level === 'warn' ? ' dk-warn' : ''}` }, it.text), watch)
     })
     const tl = s('svg', { class: 'dk-chart dk-tl', viewBox: `0 0 ${W} 32`, role: 'img', 'aria-label': `attempt ${ep.episode} timeline` },
       s('line', { class: 'track', x1: x(0), x2: x(ep.duration_s || dur), y1: 12, y2: 12 }),

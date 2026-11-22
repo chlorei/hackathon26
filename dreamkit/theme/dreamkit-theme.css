@@ -137,7 +137,7 @@ kbd { background: var(--dk-panel); border: 1px solid var(--dk-line); border-bott
 .dk-attempt p { margin: 4px 0 0; font-size: 13px; }
 .dk-attempt-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; font-size: 13.5px; margin-bottom: 4px; }
 .dk-evs { list-style: none; margin: 4px 0 0; padding: 0; }
-.dk-ev { display: grid; grid-template-columns: 52px 12px 1fr; gap: 8px; align-items: baseline; padding: 4px 6px;
+.dk-ev { display: grid; grid-template-columns: 52px 12px 1fr auto; gap: 8px; align-items: baseline; padding: 4px 6px;
          margin: 0 -6px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 .dk-ev:hover { background: var(--dk-raised); }
 .dk-ev.sel { background: var(--dk-signal-soft); }
@@ -177,3 +177,5 @@ kbd { background: var(--dk-panel); border: 1px solid var(--dk-line); border-bott
 .dk-how li { margin: 2px 0; }
 .dk-page code { font-family: var(--dk-font-mono); font-size: 12px; background: var(--dk-raised); padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
 .dk-page details summary { cursor: pointer; font-size: 13.5px; }
+.dk-watch { border: 0; background: none; padding: 0 2px; font: inherit; font-size: 12px; color: var(--dk-signal); cursor: pointer; white-space: nowrap; }
+.dk-watch:hover { text-decoration: underline; }

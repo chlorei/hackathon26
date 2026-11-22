@@ -503,6 +503,37 @@ function EpisodeView({ runId, ep, seconds, pages, onPage }: {
   const src = mode === 'recap' && ep.recap?.video ? `/media/${runId}/${ep.recap.video}` : cam ? `/media/${runId}/${videoOf[cam]}` : null
 
   useEffect(() => {
+    // a plugin page asked to watch a moment of this attempt (on arrival, or while it is already open)
+    let id: ReturnType<typeof setInterval> | undefined
+    const go = () => {
+      const raw = sessionStorage.getItem('dk-seek')
+      if (!raw) return
+      const want = JSON.parse(raw) as { run: string; episode: number; t: number }
+      if (want.run !== runId || want.episode !== ep.episode) return
+      sessionStorage.removeItem('dk-seek')
+      // the full camera video, not the recap clip: its load handler starts it at `now`; for 3 s we make sure
+      const at = Math.max(0, want.t - 1)
+      setNow(at)
+      setMode('full')
+      const until = Date.now() + 3000
+      let done = false
+      clearInterval(id)
+      id = setInterval(() => {
+        const v = video.current
+        if (done || Date.now() > until) return clearInterval(id)
+        if (v && v.readyState >= 1 && !v.currentSrc.includes('recap')) {
+          done = true
+          v.currentTime = at
+          void v.play().catch(() => undefined)
+        }
+      }, 100)
+    }
+    go()
+    window.addEventListener('dk-seek', go)
+    return () => { window.removeEventListener('dk-seek', go); clearInterval(id) }
+  }, [runId, ep.episode])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     // follow the video with a cheap timer instead of re-rendering on every timeupdate
     const id = setInterval(() => video.current && setNow(video.current.currentTime), 200)
     return () => clearInterval(id)
