@@ -200,6 +200,12 @@ td .play{border:0;background:var(--soft);border-radius:6px;cursor:pointer;paddin
 .cmp{display:grid;grid-template-columns:150px 1fr;gap:10px 16px;align-items:center;padding:10px 0;border-bottom:1px solid var(--soft)}
 .cmp:last-child{border-bottom:0}
 .lock{color:var(--muted);font-size:13px}
+.have{color:var(--muted);font-size:12px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.have b{color:var(--ink)}
+.taskrows.withhave{grid-template-columns:auto 1fr 120px 110px}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}
+.vid .nav{display:flex;gap:6px;padding:0 14px 12px;align-items:center;flex-wrap:wrap}
+.vid .marked{color:var(--bad);font-weight:700}
 </style>
 </head>
 <body>
@@ -220,6 +226,9 @@ td .play{border:0;background:var(--soft);border-radius:6px;cursor:pointer;paddin
   <div class="bar2"><span id="vidTitle" class="hint" style="flex:1"></span>
     <button class="btn sm" data-role="overhead">Overhead</button><button class="btn sm" data-role="wrist_l">Left wrist</button>
     <button class="btn sm" data-role="wrist_r">Right wrist</button><button class="btn sm" id="vidClose">Close</button></div>
+  <div class="nav"><button class="btn sm" id="vidPrev">‹ Prev</button><button class="btn sm" id="vidNext">Next ›</button>
+    <button class="btn sm danger" id="vidMark">Mark for removal</button>
+    <span class="hint"><kbd>←</kbd><kbd>→</kbd> episode · <kbd>X</kbd> mark · <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> camera · <kbd>Esc</kbd> close</span></div>
 </dialog>
 
 <template id="teleopTpl">
@@ -256,6 +265,9 @@ const money = x => (x == null ? "–" : "$" + (x < 1 ? x.toFixed(3) : x.toFixed(
 const PER_EPISODE_USD = 60 / 2.4 / 2250 * 3; // a 60 s episode, one call per 2.4 s, $3 per robot-hour (2250 calls)
 const MIN_PER_TASK = 20;
 let tasks = [], list = [], sel = null, detail = null, source = "scripted", extraNames = [], chosen = new Set();
+// "upto": the number per task is the total the dataset should reach; "add": that many new episodes
+let fillMode = "upto", reviewFilter = "all";
+const have = task => (detail?.balance || []).find(t => t.task === task)?.episodes || 0;
 const sig = {};
 
 async function api(path, body) {
@@ -274,6 +286,12 @@ function failure(log, fallback) {
   const text = why ? unpath(why.replace(/^.*?(\w*(Error|Exception)):\s*/, "")).trim() : fallback;
   return `<span>${esc(text || fallback)}</span><details class="hint" style="margin-top:4px"><summary style="cursor:pointer">Details</summary>
     <pre class="log" style="margin-top:6px">${esc(lines.slice(-40).join("\n"))}</pre></details>`;
+}
+function duration(sec) {
+  if (!(sec > 0)) return "a moment";
+  if (sec < 90) return `${Math.round(sec)} s`;
+  if (sec < 5400) return `${Math.round(sec / 60)} min`;
+  return `${(sec / 3600).toFixed(1)} h`;
 }
 function when(t) {
   if (typeof t !== "number") return "";
@@ -358,7 +376,7 @@ function renderCollect(d) {
     ? `<div class="actions" style="margin-top:0"><span class="hint">Nothing recorded in this dataset yet.</span><button class="btn primary" id="cOpen">Record</button></div>` : "";
   $("#collectForm").classList.toggle("hidden", closed);
   if (closed) { $("#cOpen").onclick = () => { formOpen = true; renderCollect(d); }; }
-  if (changed("collectForm", [source, recording, tasks.length])) {
+  if (changed("collectForm", [source, recording, tasks.length, fillMode])) {
     const seg = [["scripted", "Scripted expert · free"], ["dream-1", "Dream-1 · uses credits"], ["teleop", "Teleop · you drive"]]
       .map(([k, l]) => `<button type="button" data-src="${k}" class="${source === k ? "on" : ""}">${l}</button>`).join("");
     const what = {scripted: "An IK expert that knows where everything is does the task. Only successful episodes are kept.",
@@ -366,10 +384,15 @@ function renderCollect(d) {
       teleop: "Drive an arm with the keyboard; press Record, do the task, Save. Every saved episode lands in this dataset."}[source];
     let form = `<div class="seg" id="srcSeg">${seg}</div><div class="hint" style="margin:-6px 0 12px">${what}</div>`;
     if (source !== "teleop") {
-      const def = source === "scripted" ? 30 : 10;
-      form += `<div class="taskrows">${tasks.map(t => `<input type="checkbox" class="tk" value="${esc(t.name)}" checked>
+      const def = fillMode === "upto" ? Math.max(source === "scripted" ? 30 : 10, MIN_PER_TASK) : (source === "scripted" ? 30 : 10);
+      const modes = [["upto", "Fill up to"], ["add", "Add more"]]
+        .map(([k, l]) => `<button type="button" data-mode="${k}" class="${fillMode === k ? "on" : ""}">${l}</button>`).join("");
+      form += `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><div class="seg" id="modeSeg" style="margin-bottom:10px">${modes}</div>
+          <span class="hint" style="margin-bottom:10px">${fillMode === "upto" ? "The number is how many each task should have in the end; only the missing ones are recorded." : "The number is how many new episodes to keep for each task."}</span></div>
+        <div class="taskrows withhave">${tasks.map(t => `<input type="checkbox" class="tk" value="${esc(t.name)}" checked>
           <div><div class="tn">${esc(t.name)}</div><div class="tp">${esc(t.prompt)}</div></div>
-          <input type="number" class="tn-n" data-task="${esc(t.name)}" min="1" max="500" value="${def}" title="episodes to keep">`).join("")}</div>
+          <div class="have" data-have="${esc(t.name)}"></div>
+          <input type="number" class="tn-n" data-task="${esc(t.name)}" min="1" max="500" value="${def}" title="${fillMode === "upto" ? "episodes this task should have" : "new episodes to keep"}">`).join("")}</div>
         <div class="grid4">
           <div class="field"><label>Object jitter, m</label><input id="cJitter" type="number" step="0.01" min="0" placeholder="task default"></div>
           <div class="field"><label>Lighting ±</label><input id="cLight" type="number" step="0.05" min="0" placeholder="task default"></div>
@@ -381,12 +404,15 @@ function renderCollect(d) {
     }
     $("#collectForm").innerHTML = form;
     document.querySelectorAll("#srcSeg button").forEach(b => b.onclick = () => { source = b.dataset.src; renderCollect(detail || d); });
+    document.querySelectorAll("#modeSeg button").forEach(b => b.onclick = () => { fillMode = b.dataset.mode; renderCollect(detail || d); });
     if (source !== "teleop") {
-      document.querySelectorAll("#collectForm input").forEach(i => i.addEventListener("input", estimate));
+      document.querySelectorAll("#collectForm input").forEach(i => i.addEventListener("input", () => { showHave(); estimate(); }));
       $("#cGo").onclick = startRecording;
       estimate();
     }
   }
+  showHave();
+  if ($("#cEst")) estimate();
   $("#teleHost").classList.toggle("hidden", source !== "teleop");
   if (source === "teleop") pollTeleop();
   // live progress
@@ -394,13 +420,19 @@ function renderCollect(d) {
   if (changed("collectLive", [p, recording])) {
     let html = "";
     if (p && (recording || p.status === "running")) {
-      const rows = Object.entries(p.plan || {}).map(([t, want]) => {
-        const k = p.kept[t] || 0, tr = p.tried[t] || 0;
+      const plan = Object.entries(p.plan || {});
+      const triedAll = plan.reduce((a, [t]) => a + (p.tried[t] || 0), 0);
+      let left = 0;  // attempts still to go, from each task's own success rate so far
+      const rows = plan.map(([t, want]) => {
+        const k = p.kept[t] || 0, tr = p.tried[t] || 0, rate = tr ? k / tr : null;
+        left += Math.max(0, want - k) / Math.max(rate ?? 1, 0.1);
         return `<div class="bal"><div class="tn">${esc(t)}${p.current === t ? ' <span class="dot run"></span>' : ""}</div>
           <div class="bar"><i style="width:${Math.min(100, 100 * k / want)}%"></i></div>
-          <div class="hint"><b style="color:var(--ink)">${k}</b> / ${want} kept · ${tr} tried</div></div>`;
+          <div class="hint"><b style="color:var(--ink)">${k}</b> / ${want} new · ${tr} tried${rate != null ? ` · ${pct(rate)} succeed` : ""}</div></div>`;
       }).join("");
-      const last = p.last ? `Last: ${esc(p.last.task)} seed ${p.last.seed} → ${esc(p.last.reason)} (${p.last.kept ? "kept" : "dropped"})` : "Loading the simulator…";
+      const perAttempt = triedAll && p.started ? (Date.now() / 1000 - p.started) / triedAll : null;
+      const eta = perAttempt ? ` · about ${duration(perAttempt * left)} left` : "";
+      const last = p.last ? `Last: ${esc(p.last.task)} seed ${p.last.seed} → ${esc(p.last.reason)} (${p.last.kept ? "kept" : "dropped"})${eta}` : "Loading the simulator…";
       html = `<div class="card" style="margin-top:14px"><h3>Recording · ${esc(p.source)} · episodes appear in Check as they are saved</h3>${rows}
         <div class="actions"><span class="hint">${last}</span><button class="btn danger" id="cStop">Stop</button></div></div>`;
     } else if (p && p.status && p.status !== "running") {
@@ -416,10 +448,22 @@ function renderCollect(d) {
   }
   $("#state1").textContent = recording ? "recording…" : (d.episodes ? `${d.episodes} episodes so far` : "");
 }
+// how many each task already has, and what this recording would add (kept fresh while episodes arrive)
+function showHave() {
+  document.querySelectorAll("#collectForm [data-have]").forEach(el => {
+    const t = el.dataset.have, h = have(t), want = +document.querySelector(`.tn-n[data-task="${t}"]`)?.value || 0;
+    const on = document.querySelector(`#collectForm .tk[value="${t}"]`)?.checked;
+    const add = fillMode === "upto" ? Math.max(0, want - h) : want;
+    el.innerHTML = `has <b>${h}</b>${on ? ` → ${add ? `+${add}` : "enough"}` : ""}`;
+  });
+}
 function mixFromForm() {
   const mix = {};
   document.querySelectorAll("#collectForm .tk").forEach(c => {
-    if (c.checked) mix[c.value] = +document.querySelector(`.tn-n[data-task="${c.value}"]`).value || 0;
+    if (!c.checked) return;
+    const want = +document.querySelector(`.tn-n[data-task="${c.value}"]`).value || 0;
+    const add = fillMode === "upto" ? Math.max(0, want - have(c.value)) : want;
+    if (add > 0) mix[c.value] = add;
   });
   return mix;
 }
@@ -427,14 +471,18 @@ function estimate() {
   const el = $("#cEst"); if (!el) return;
   const mix = mixFromForm(), n = Object.values(mix).reduce((a, b) => a + b, 0), maxs = +($("#cMax")?.value) || 60;
   const per = PER_EPISODE_USD * maxs / 60;
+  if (!n) { el.textContent = fillMode === "upto" ? "Every ticked task already has that many episodes: raise a number to record more." : "Nothing to record."; return; }
   el.textContent = source === "scripted"
-    ? `${n} episodes · free · roughly ${Math.round(n * 0.5)}–${n} min`
+    ? `${n} new episodes · free · roughly ${Math.round(n * 0.5)}–${n} min`
     : `${n} successes wanted · ~${money(per)} per attempt · ~${money(n * 5 * per)} if Dream-1 succeeds 1 in 5`;
 }
 async function startRecording() {
   $("#collectErr").textContent = "";
   const mix = mixFromForm();
-  if (!Object.keys(mix).length) { $("#collectErr").textContent = "Tick at least one task."; return; }
+  if (!Object.keys(mix).length) {
+    $("#collectErr").textContent = fillMode === "upto" ? "Every ticked task already has that many episodes." : "Tick at least one task.";
+    return;
+  }
   if (source !== "scripted") {
     const n = Object.values(mix).reduce((a, b) => a + b, 0);
     const per = PER_EPISODE_USD * (+$("#cMax").value || 60) / 60;  // each task gets at most 5 attempts per episode it needs
@@ -448,7 +496,7 @@ async function startRecording() {
 
 // 2 · Check
 function renderReview(d) {
-  if (!changed("review", [d.rows, d.balance, d.warnings, d.busy, [...chosen]])) return;
+  if (!changed("review", [d.rows, d.balance, d.warnings, d.busy, [...chosen], reviewFilter])) return;
   $("#state2").textContent = d.warnings.length ? `${d.warnings.length} thing${d.warnings.length > 1 ? "s" : ""} to look at` : (d.episodes ? "looks balanced" : "");
   if (!d.episodes) { $("#review").innerHTML = '<div class="hint">Nothing yet. Episodes show up here the moment they are saved.</div>'; return; }
   const sources = [...new Set(d.rows.map(r => r.source))];
@@ -457,7 +505,15 @@ function renderReview(d) {
       <div class="bar"><i style="width:${100 * t.episodes / goal}%"></i><b style="left:${100 * MIN_PER_TASK / goal}%" title="aim: ${MIN_PER_TASK}"></b></div>
       <div class="hint"><b style="color:var(--ink)">${t.episodes}</b> episodes · ${t.prompts} wording${t.prompts > 1 ? "s" : ""}</div></div>`).join("");
   const now = Date.now() / 1000;
-  const rows = d.rows.slice(0, 300).map(r => `<tr class="${r.created && now - r.created < 8 ? "new" : ""}">
+  if (reviewFilter !== "all" && !d.rows.some(r => r.task === reviewFilter || r.source === reviewFilter)) reviewFilter = "all";
+  const shown = d.rows.filter(r => reviewFilter === "all" || r.task === reviewFilter || r.source === reviewFilter);
+  vidOrder = shown.map(r => r.index);
+  const LIMIT = 300;
+  const chip = (k, label, n) => `<button class="tab ${reviewFilter === k ? "on" : ""}" data-filter="${esc(k)}">${esc(label)} <span class="hint">${n}</span></button>`;
+  const filters = [chip("all", "All", d.rows.length), ...d.balance.map(t => chip(t.task, t.task, t.episodes)),
+    ...(sources.length > 1 ? sources.map(x => chip(x, x, d.rows.filter(r => r.source === x).length)) : [])].join("");
+  const allShown = shown.length && shown.every(r => chosen.has(r.index));
+  const rows = shown.slice(0, LIMIT).map(r => `<tr class="${r.created && now - r.created < 8 ? "new" : ""}">
       <td><input type="checkbox" class="pick" value="${r.index}" ${chosen.has(r.index) ? "checked" : ""} ${d.busy ? "disabled" : ""} style="width:auto"></td>
       <td>${r.index}</td><td>${esc(r.task)}</td><td title="${esc(r.prompt)}" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.prompt)}</td>
       <td>${esc(r.source)}</td><td>${r.seed ?? "–"}</td><td>${r.seconds} s</td>
@@ -469,8 +525,9 @@ function renderReview(d) {
       <div><div class="v" style="font-size:18px;padding-top:6px">${sources.map(esc).join(", ")}</div><div class="l">sources</div></div></div>
     ${bal}
     ${d.warnings.map(w => `<div class="warn">${esc(w)}</div>`).join("")}
-    <details id="epList" style="margin-top:14px" ${(reviewOpen ?? d.episodes <= 60) ? "open" : ""}><summary>Episodes (newest first)</summary>
-      <table style="margin-top:8px"><thead><tr><th></th><th>#</th><th>Task</th><th>Prompt</th><th>Source</th><th>Seed</th><th>Length</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+    <details id="epList" style="margin-top:14px" ${(reviewOpen ?? d.episodes <= 60) ? "open" : ""}><summary>Episodes (newest first)${shown.length > LIMIT ? ` · showing ${LIMIT} of ${shown.length}` : ""}</summary>
+      <div class="filters">${filters}</div>
+      <table style="margin-top:8px"><thead><tr><th><input type="checkbox" id="selAll" title="select every episode shown" ${allShown ? "checked" : ""} ${d.busy ? "disabled" : ""} style="width:auto"></th><th>#</th><th>Task</th><th>Prompt</th><th>Source</th><th>Seed</th><th>Length</th><th></th></tr></thead><tbody>${rows}</tbody></table>
       <div class="actions"><span class="hint">${d.busy ? "Recording into this dataset: removing waits until it stops." : "Tick episodes you do not want the model to learn from."}</span>
         <button class="btn danger" id="rmBtn" ${chosen.size && !d.busy ? "" : "disabled"}>Remove ${chosen.size || ""} selected</button></div></details>`;
   $("#epList").ontoggle = () => { reviewOpen = $("#epList").open; };
@@ -479,21 +536,53 @@ function renderReview(d) {
     $("#rmBtn").disabled = !chosen.size; $("#rmBtn").textContent = `Remove ${chosen.size || ""} selected`;
   });
   document.querySelectorAll("#review .play").forEach(b => b.onclick = () => openVideo(+b.dataset.i));
+  document.querySelectorAll("#review [data-filter]").forEach(b => b.onclick = () => { reviewFilter = b.dataset.filter; renderReview(detail || d); });
+  $("#selAll").onchange = e => { shown.forEach(r => e.target.checked ? chosen.add(r.index) : chosen.delete(r.index)); renderReview(detail || d); };
   $("#rmBtn").onclick = async () => {
     if (!confirm(`Delete ${chosen.size} episode(s) from ${sel}? This cannot be undone.`)) return;
     try { await api(`api/dataset/${encodeURIComponent(sel)}/remove`, {indices: [...chosen]}); chosen = new Set(); refreshDetail(); refreshList(); }
     catch (e) { $("#reviewErr").textContent = e.message; }
   };
 }
-let vidIndex = 0, reviewOpen = null;
-function openVideo(i, role = "overhead") {
-  vidIndex = i;
+let vidIndex = 0, vidRole = "overhead", vidOrder = [], reviewOpen = null;
+function openVideo(i, role = vidRole) {
+  vidIndex = i; vidRole = role;
+  const r = detail?.rows.find(x => x.index === i);
   $("#vid").src = `api/dataset/${encodeURIComponent(sel)}/video/${i}?role=${role}`;
-  $("#vidTitle").textContent = `episode ${i} · ${role}`;
+  const pos = vidOrder.indexOf(i);
+  $("#vidTitle").innerHTML = `episode ${i}${r ? ` · ${esc(r.task)} · “${esc(r.prompt)}”` : ""} · ${role}` +
+    (pos >= 0 ? ` <span class="hint">(${pos + 1} of ${vidOrder.length})</span>` : "") +
+    (chosen.has(i) ? ' · <span class="marked">marked for removal</span>' : "");
+  $("#vidMark").textContent = chosen.has(i) ? "Unmark" : "Mark for removal";
+  $("#vidMark").disabled = !!detail?.busy;
+  $("#vidPrev").disabled = pos <= 0; $("#vidNext").disabled = pos < 0 || pos >= vidOrder.length - 1;
   if (!$("#vidDlg").open) $("#vidDlg").showModal();
+}
+function stepVideo(delta) {
+  const pos = vidOrder.indexOf(vidIndex) + delta;
+  if (pos >= 0 && pos < vidOrder.length) openVideo(vidOrder[pos]);
+}
+function toggleMark() {
+  if (detail?.busy) return;
+  chosen.has(vidIndex) ? chosen.delete(vidIndex) : chosen.add(vidIndex);
+  if (detail) renderReview(detail);
+  openVideo(vidIndex);
 }
 document.querySelectorAll("#vidDlg [data-role]").forEach(b => b.onclick = () => openVideo(vidIndex, b.dataset.role));
 $("#vidClose").onclick = () => { $("#vid").pause(); $("#vidDlg").close(); };
+$("#vidPrev").onclick = () => stepVideo(-1);
+$("#vidNext").onclick = () => stepVideo(1);
+$("#vidMark").onclick = toggleMark;
+$("#vidDlg").addEventListener("close", () => $("#vid").pause());
+$("#vidDlg").addEventListener("keydown", e => {
+  const roles = {Digit1: "overhead", Digit2: "wrist_l", Digit3: "wrist_r"};
+  if (e.key === "ArrowLeft") { e.preventDefault(); stepVideo(-1); }
+  else if (e.key === "ArrowRight") { e.preventDefault(); stepVideo(1); }
+  else if (["x", "X", "Delete", "Backspace"].includes(e.key)) { e.preventDefault(); toggleMark(); }
+  else if (roles[e.code]) { e.preventDefault(); openVideo(vidIndex, roles[e.code]); }
+  else return;
+  e.stopPropagation();  // before the video's own keys (arrows would also seek)
+}, true);
 
 // 3 · Fine-tune
 function renderTrain(d) {
@@ -507,6 +596,10 @@ function renderTrain(d) {
        : (j.validate?.status === "failed" ? `<span class="dot bad"></span> <span style="color:var(--bad)">${failure(j.validate.log, "the check did not finish")}</span>` : '<span class="dot"></span> not checked since the last change'));
   let ftLine = '<span class="dot"></span> not started';
   if (training) ftLine = `<span class="dot run"></span> ${esc(f.stage || "starting")}… <span class="hint">${lastLine(j.finetune.log)}</span>`;
+  else if (f.stage === "training" && f.started) {
+    const eta = f.started + 7.5 * 3600, late = Date.now() / 1000 > eta;
+    ftLine = `<span class="dot run"></span> training <span class="hint">since ${when(f.started)} · ${late ? "should be done soon" : `usually ready around ${when(eta)}`} · checked every 5 min${f.updated ? `, last ${when(f.updated)}` : ""}</span>`;
+  }
   else if (f.stage) ftLine = `<span class="dot ${f.stage === "done" ? "ok" : (f.stage === "failed" ? "bad" : "run")}"></span> ${esc(f.stage)}${f.error ? ` <span style="color:var(--bad)">${esc(f.error)}</span>` : ""}${f.started ? ` <span class="hint">since ${when(f.started)}</span>` : ""}`;
   else if (j.finetune?.status === "failed") ftLine = `<span class="dot bad"></span> <span style="color:var(--bad)">${failure(j.finetune.log, "fine-tuning did not start")}</span>`;
   $("#state3").textContent = f.model ? "fine-tune ready" : (f.stage || (v?.ok ? "ready to train" : ""));
@@ -516,13 +609,17 @@ function renderTrain(d) {
     <div class="check">${ftLine}
       <button class="btn sm primary" id="tTrain" ${v?.ok && !d.busy && !training && f.stage !== "training" ? "" : "disabled"}>${f.job_id ? "Train again" : "Upload &amp; fine-tune"}</button>
       ${f.stage === "training" ? '<button class="btn sm" id="tJob">Check job</button>' : ""}</div>
-    ${f.model ? `<div class="check"><span class="dot ok"></span> Model <code class="model">${esc(f.model)}</code></div>` : ""}
+    ${f.model ? `<div class="check"><span class="dot ok"></span> Model <code class="model">${esc(f.model)}</code> <button class="btn sm" id="tCopy">Copy</button></div>` : ""}
+    ${(f.previous || []).some(x => x.model) ? `<div class="hint">Earlier fine-tunes of this dataset: ${(f.previous || []).filter(x => x.model).map(x => `<code class="model">${esc(x.model)}</code>`).join(" ")}</div>` : ""}
     <div class="hint" style="margin-top:6px">The check runs locally and sends nothing. Fine-tuning uploads the dataset, uses fine-tuning credits (about $200 a job) and takes about 7–8 hours.</div>`;
   const act = async (a, body) => { $("#trainErr").textContent = ""; try { await api(`api/dataset/${encodeURIComponent(sel)}/${a}`, body || {}); refreshDetail(); } catch (e) { $("#trainErr").textContent = e.message; } };
   $("#tCheck").onclick = () => act("validate");
   const again = f.job_id ? ` A new upload and a new model; ${f.model ? `the current one (${f.model}) stays usable` : "the earlier job is kept in its history"}.` : "";
   $("#tTrain").onclick = () => { if (confirm(`Upload ${sel} (${d.episodes} episodes) and start a Dream-1 fine-tune? It uses fine-tuning credits (about $200) and takes about 7–8 hours.${again}`)) act("finetune", {suffix: sel}); };
   const job = $("#tJob"); if (job) job.onclick = () => act("status");
+  const copy = $("#tCopy");
+  if (copy) copy.onclick = () => navigator.clipboard?.writeText(f.model)
+    .then(() => { copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy"; }, 1500); }).catch(() => {});
 }
 
 // 4 · Compare
@@ -653,6 +750,15 @@ function fillTaskSelects() {
     if (busy() || Date.now() - last > 6000) { last = Date.now(); refreshDetail(); }
   }, 2000);
   setInterval(() => { if (visible()) refreshList(); }, 4000);
+  // a fine-tune takes hours: ask the service how it is going every 5 minutes instead of waiting for a click
+  const statusAsked = {};
+  setInterval(() => {
+    const f = detail?.finetune;
+    if (!sel || f?.stage !== "training" || detail.jobs?.status?.running) return;
+    if (Date.now() - (statusAsked[sel] || 0) < 5 * 60 * 1000) return;
+    statusAsked[sel] = Date.now();
+    api(`api/dataset/${encodeURIComponent(sel)}/status`, {}).then(refreshDetail).catch(() => {});
+  }, 15000);
   setInterval(() => { if (visible() && teleVisible()) pollTeleop(); }, 300);
 })();
 </script>
