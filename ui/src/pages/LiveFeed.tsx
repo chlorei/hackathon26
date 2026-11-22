@@ -111,9 +111,11 @@ export default function Feed({ events, episodes, current, running, onWatch, page
       if (!by.has(k)) by.set(k, [])
       by.get(k)!.push(e)
     }
-    const all = [...by.entries()]
-    return [...all.filter(([k]) => k !== 'run').reverse(), ...all.filter(([k]) => k === 'run')]  // newest attempt on top
-  }, [shown])
+    // every finished attempt has its line, also one no plugin spoke in (a quiet success is news too)
+    if (only === 'all') for (const r of episodes) if (!by.has(String(r.episode))) by.set(String(r.episode), [])
+    const all = [...by.entries()].filter(([k]) => k !== 'run').sort(([a], [b]) => Number(b) - Number(a))
+    return [...all, ...(by.has('run') ? [['run', by.get('run')!] as [string, EventRecord[]]] : [])]  // newest on top
+  }, [shown, episodes, only])
 
   const result = (ep: number) => episodes.find((e) => e.episode === ep)
   const isOpen = (k: string) => open[k] ?? (k !== 'run' && ((running && k === String(current)) || !result(Number(k))))
