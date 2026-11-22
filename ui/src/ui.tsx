@@ -93,7 +93,7 @@ export function Outcome({ success }: { success: boolean | null | undefined }) {
 
 export function when(ts?: number) {
   if (!ts) return ''
-  return new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return new Date(ts * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })  // 'Nov 22, 11:45 AM', whatever the system language
 }
 
 // ---------------------------------------------------------------------------------------------------------------

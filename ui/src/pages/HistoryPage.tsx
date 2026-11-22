@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { ArrowLeft, FolderOpen, Trash2 } from 'lucide-react'
 import { api, ApiError, atOf, recoveriesOf, type EpisodeResult, type RunInfo } from '../api'
 import { count, POLICY_FILTER, reasonLabel, SOURCE_LABEL, TERM } from '../labels'
@@ -39,6 +39,28 @@ function reasonsOf(eps: EpisodeResult[]) {
   return Object.entries(by).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
 }
 
+const DASH = '—'
+const field = (e: EpisodeResult, key: string) => (e as unknown as Record<string, Record<string, unknown> | undefined>)[key]
+/** A real run bills the model's time; mock and scripted ones bill nothing. */
+const isReal = (r: RunInfo) => r.kind === 'dream' && !r.mock
+const costText = (r: RunInfo) => (!isReal(r) ? 'free' : r.cost_usd == null ? DASH : `$${r.cost_usd.toFixed(2)}`)
+/** What a run's camera judge (monitor-stats) did: off, judged (and agreed), or not judged and why. */
+function judgeText(r: RunInfo): string {
+  if (!(r.plugins ?? []).includes('monitor-stats')) return 'off in this run'
+  const eps = (r.episodes ?? []).filter(valid)
+  const judged = eps.filter((e) => typeof field(e, 'monitor-stats')?.success === 'boolean' && typeof e.success === 'boolean')
+  const agree = judged.filter((e) => field(e, 'monitor-stats')!.success === e.success).length
+  const why = [...new Set(eps.map((e) => field(e, 'monitor-stats')?.error as string | undefined).filter(Boolean))]
+  const parts = [judged.length ? `${agree} of ${judged.length} agree with success-check` : '']
+  if (why.length) parts.push(`${eps.length - judged.length} not judged: ${why.join('; ')}`)
+  return parts.filter(Boolean).join(' · ') || 'no verdict recorded'
+}
+function savesText(r: RunInfo): string {
+  if (!(r.plugins ?? []).includes('recovery')) return 'off in this run'
+  const helped = (r.episodes ?? []).filter((e) => recoveriesOf(e) > 0)
+  return helped.length ? `${helped.filter((e) => e.success).length} of ${helped.length} attempts it stepped in` : 'never needed'
+}
+
 function RunList({ onOpen }: { onOpen: (id: string) => void }) {
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 6000 })
   const [filter, setFilter] = useState<Filter>(() => {
@@ -55,7 +77,10 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
   const ok = counted.filter((e) => e.success).length
   const reasons = reasonsOf(counted)
   const counts = { dream: everything.filter((r) => r.kind === 'dream').length, scripted: everything.filter((r) => r.kind === 'scripted').length, all: everything.length }
-  const spent = list.reduce((a, r) => a + (r.cost_usd ?? 0), 0)
+  // money only where it was spent: real runs, whichever filter is on
+  const real = everything.filter(isReal)
+  const spent = real.reduce((a, r) => a + (r.cost_usd ?? 0), 0)
+  const realOk = real.flatMap((r) => r.episodes ?? []).filter((e) => valid(e) && e.success).length
   const top = reasons[0]
   const topLat = top?.reason === reasonLabel('slow_model') ? latencyMs(counted.filter((e) => e.reason === 'slow_model')) : null
   return (
@@ -87,23 +112,23 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
                 : counted.length ? 'No failures.' : 'No attempt was judged yet.'}
             </p>
             <p className="mt-3 border-t border-line pt-3 text-[13px] text-dim">
-              {filter !== 'scripted' && <>Spent <b className="text-ink tabular-nums">${spent.toFixed(2)}</b>{ok ? <> · ${(spent / ok).toFixed(2)} per success</> : null}. </>}
+              {real.length > 0 && <>Spent <b className="text-ink tabular-nums">${spent.toFixed(2)}</b>{realOk ? <> · ${(spent / realOk).toFixed(2)} per success</> : null} <span className="text-faint">(real runs only)</span>. </>}
               {invalid > 0 && <span title="Runs without attempts, and attempts whose task names no object and target dreamkit can read (nothing judged them)">{count(invalid, 'invalid attempt')} not counted.</span>}
             </p>
           </Panel>
           <Panel>
             <PanelTitle>Why attempts failed</PanelTitle>
             {!reasons.length ? <p className="px-5 pb-4 text-[14px] text-dim">No failures in these runs.</p> : (
-              <div className="px-2 pb-3" style={{ height: reasons.length * 24 + 34 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={reasons} layout="vertical" margin={{ left: 8, right: 16 }}>
-                    <XAxis type="number" allowDecimals={false} domain={[0, Math.max(1, reasons[0].n)]} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
-                    <YAxis type="category" dataKey="reason" tick={{ fill: 'var(--dk-dim)', fontSize: 12 }} width={150} interval={0} axisLine={false} tickLine={false} />
-                    <Tooltip {...TIP} cursor={{ fill: 'var(--dk-raised)' }} />
-                    <Bar dataKey="n" name="attempts" fill="var(--dk-bad)" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={12} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <ul className="px-5 pb-4 text-[13.5px]">
+                {reasons.slice(0, 6).map((x) => (
+                  <li key={x.reason} className="grid grid-cols-[minmax(0,150px)_1fr_32px] items-center gap-3 py-1">
+                    <span className="truncate">{x.reason}</span>
+                    <span className="h-2 rounded bg-raised"><span className="block h-2 rounded bg-bad" style={{ width: `${(100 * x.n) / reasons[0].n}%` }} /></span>
+                    <span className="text-right tabular-nums">{x.n}</span>
+                  </li>
+                ))}
+                {reasons.length > 6 && <li className="pt-1 text-[12px] text-faint">and {reasons.length - 6} more</li>}
+              </ul>
             )}
           </Panel>
         </div>
@@ -119,9 +144,9 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
           </div>
         ) : (
           <table className="w-full table-fixed text-[14px]">
-            <colgroup><col className="w-[150px]" /><col /><col className="w-[180px]" /><col className="w-[280px]" /><col className="w-[90px]" /></colgroup>
+            <colgroup><col className="w-[150px]" /><col /><col className="w-[170px]" /><col className="w-[90px]" /><col className="w-[80px]" /><col className="w-[200px]" /></colgroup>
             <thead className="border-b border-line text-left text-[13px] text-dim">
-              <tr>{['Started', 'Task', 'Attempts', 'Result', 'Source'].map((h) => <th key={h} className="px-3 py-2.5 font-normal first:pl-5">{h}</th>)}</tr>
+              <tr>{['Started', 'Task', 'Result', 'Duration', 'Cost', 'Failure reason'].map((h) => <th key={h} className="px-3 py-2.5 font-normal first:pl-5">{h}</th>)}</tr>
             </thead>
             <tbody>
               {list.map((r) => {
@@ -140,11 +165,11 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
                         : <span key={e.episode} className="text-faint" title="invalid: dreamkit cannot read an object and a target in this task">–</span>)}
                       {!eps.length && <span className="tracking-normal text-faint" title="the run recorded no attempt">invalid</span>}
                     </td>
-                    <td className="truncate px-3 py-2.5">
-                      {judged.length ? <><span className="tabular-nums">{worked}/{judged.length}</span>{main && <span className="text-bad"> · {main.reason}</span>}</>
-                        : <span className="text-faint">invalid</span>}
+                    <td className="px-3 py-2.5 whitespace-nowrap text-dim tabular-nums">{eps.length ? `${eps.reduce((a, e) => a + (e.duration_s ?? 0), 0).toFixed(0)} s` : DASH}</td>
+                    <td className={clsx('px-3 py-2.5 whitespace-nowrap tabular-nums', isReal(r) ? 'text-ink' : 'text-faint')}>{costText(r)}</td>
+                    <td className="truncate px-3 py-2.5" title={judged.length ? `${worked} of ${judged.length} worked` : undefined}>
+                      {main ? <span className="text-bad">{main.reason}{reasonsOf(judged).length > 1 ? ` +${reasonsOf(judged).length - 1}` : ''}</span> : <span className="text-faint">{DASH}</span>}
                     </td>
-                    <td className="px-3 py-2.5 text-dim">{SOURCE_LABEL[r.source] ?? r.source}</td>
                   </tr>
                 )
               })}
@@ -218,6 +243,8 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
         {judged.length > 0 && reasonsOf(judged)[0] && <span className="text-dim"> · most failures: {reasonsOf(judged)[0].reason}</span>}
       </p>
 
+      <RunFacts r={r} onPage={(plugin) => setPage({ plugin, runId: id, episode: null })} />
+
       <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
         <Panel className="self-start">
           <PanelTitle>Attempts</PanelTitle>
@@ -250,6 +277,49 @@ function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: numbe
         </div>
         <PluginPageDrawer page={page} onClose={() => setPage(null)} />
       </div>
+    </div>
+  )
+}
+
+/** What the run cost and how its helpers did; each plugin's say about it, with its page one click away. */
+function RunFacts({ r, onPage }: { r: RunInfo; onPage: (plugin: string) => void }) {
+  const eps = r.episodes ?? []
+  const lat = latencyMs(eps)
+  const facts: [string, string][] = [
+    ['Policy', r.mock ? 'mock (scripted failures)' : r.model || 'unknown'],
+    ['Cost', costText(r)],
+    ['Avg model latency', lat == null ? (r.mock ? 'mock: no model' : DASH) : ms(lat)],
+    ['Camera judge', judgeText(r)],
+    ['Recovery saves', savesText(r)],
+  ]
+  // each plugin's word on the run: the verdicts it called, its badges
+  const says = (r.plugins ?? []).map((name) => {
+    const badges = [...new Set(eps.flatMap((e) => ((e.ui?.[name]?.badges ?? []) as { text: string }[]).map((b) => b.text)))]
+    const verdicts = eps.flatMap((e) => (((e as unknown as { verdicts?: { by?: string; reason: string }[] }).verdicts) ?? []).filter((v) => v.by === name))
+    const text = [verdicts.length ? `${count(verdicts.length, 'verdict')}: ${[...new Set(verdicts.map((v) => reasonLabel(v.reason)))].join(', ')}` : '', badges.slice(0, 3).join(' · ')].filter(Boolean).join(' — ')
+    return { name, text }
+  })
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
+      <Panel>
+        <PanelTitle>This run</PanelTitle>
+        <dl className="grid grid-cols-[150px_1fr] gap-x-4 gap-y-1.5 px-5 pb-4 text-[14px]">
+          {facts.map(([k, v]) => [<dt key={k} className="text-dim">{k}</dt>, <dd key={`${k}-v`} className="min-w-0">{v}</dd>])}
+        </dl>
+      </Panel>
+      <Panel>
+        <PanelTitle>What the plugins said</PanelTitle>
+        <ul className="px-3 pb-3">
+          {says.map((p) => (
+            <li key={p.name} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13.5px] hover:bg-raised/50">
+              <PluginIcon name={p.name} className="text-dim" />
+              <span className="w-36 shrink-0 truncate font-medium">{p.name}</span>
+              <span className="min-w-0 flex-1 truncate text-dim" title={p.text}>{p.text || 'nothing to report'}</span>
+              <Button variant="quiet" className="!px-2 !py-0.5 text-[12.5px]" onClick={() => onPage(p.name)}>Open page</Button>
+            </li>
+          ))}
+        </ul>
+      </Panel>
     </div>
   )
 }
