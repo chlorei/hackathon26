@@ -16,3 +16,12 @@ MUJOCO_LOG.TXT
 .env
 plugins-generated/
 dreamkit-data/
+
+# keys never go in git: .env, .env.local, .env.production … (an example file may)
+.env.*
+!.env.example
+# local data and caches
+datasets/
+.ruff_cache/
+*.log
+*.tsbuildinfo
