@@ -106,3 +106,18 @@ def test_no_world_live_loop_finds_grasped_air_and_dropped(make_config):
     assert [e["reason"] for e in eps[:2]] == ["grasped_air", "dropped"]
     assert all(e["details"]["source"] == "robot" for e in eps[:2])
     assert eps[2]["success"] is None  # the robot cannot see the bowl: a person labels it
+
+
+def test_a_tiny_budget_sends_the_arms_home_and_ends_the_run(make_config):
+    """budget-guard with a few cents (a mock billed as Dream-1 for this test only): the run stops safely."""
+    cfg = make_config(plugins=["success-check", "failure-monitor", "recovery",
+                               {"budget-guard": {"budget_usd": 0.02, "count_mock": True}}])
+    code, run, folder = _run(cfg, "--episodes", "4", "--behaviors", "success")
+    assert run["stop_requested"]["by"] == "recovery" and run["stop_requested"]["reason"] == "budget_exhausted"
+    assert len(run["episodes"]) < 4  # no new attempt after the stop
+    events = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()]
+    home = [e for e in events if e.get("plugin") == "recovery" and (e.get("data") or {}).get("action") == "home"
+            and "run stops" in e.get("message", "")]
+    assert home  # the arms were sent home before the run ended
+    stop = [e for e in events if e.get("plugin") == "budget-guard" and (e.get("data") or {}).get("pct") == 95]
+    assert stop and stop[0]["level"] == "error"
