@@ -61,6 +61,79 @@ function savesText(r: RunInfo): string {
   return helped.length ? `${helped.filter((e) => e.success).length} of ${helped.length} attempts it stepped in` : 'never needed'
 }
 
+/** One run in numbers, for the comparison. */
+function statsOf(r: RunInfo) {
+  const eps = (r.episodes ?? []).filter(valid)
+  const ok = eps.filter((e) => e.success).length
+  const lat = latencyMs(r.episodes ?? [])
+  return {
+    rate: eps.length ? ok / eps.length : null, ok, n: eps.length,
+    time: ok ? eps.filter((e) => e.success).reduce((a, e) => a + e.duration_s, 0) / ok : null,
+    cost: costText(r), latency: lat == null ? DASH : ms(lat), reason: reasonsOf(eps)[0]?.reason ?? DASH,
+  }
+}
+
+/** Two runs side by side, and what changed between them. */
+function Compare({ a, b, onClear }: { a: RunInfo; b: RunInfo; onClear: () => void }) {
+  const [x, y] = [statsOf(a), statsOf(b)]
+  const pct = (v: number | null) => (v == null ? DASH : `${Math.round(100 * v)}%`)
+  const rows: [string, string, string][] = [
+    ['Success', `${pct(x.rate)} (${x.ok} of ${x.n})`, `${pct(y.rate)} (${y.ok} of ${y.n})`],
+    ['Time to success', x.time == null ? DASH : `${x.time.toFixed(1)} s`, y.time == null ? DASH : `${y.time.toFixed(1)} s`],
+    ['Most failures', x.reason, y.reason],
+    ['Cost', x.cost, y.cost],
+    ['Model latency', x.latency, y.latency],
+    ['Policy', a.mock ? 'mock' : a.model || DASH, b.mock ? 'mock' : b.model || DASH],
+  ]
+  const delta = x.rate != null && y.rate != null ? Math.round(100 * (y.rate - x.rate)) : null
+  return (
+    <Panel>
+      <PanelTitle right={<Button variant="quiet" onClick={onClear}>Clear</Button>}>Comparing two runs</PanelTitle>
+      <table className="mx-5 mb-3 w-[calc(100%-40px)] table-fixed text-[14px]">
+        <thead className="text-left text-[13px] text-dim">
+          <tr><th className="w-[170px] py-1.5 font-normal" /><th className="py-1.5 font-normal">{when(a.started)} · {a.task}</th><th className="py-1.5 font-normal">{when(b.started)} · {b.task}</th></tr>
+        </thead>
+        <tbody>
+          {rows.map(([k, va, vb]) => (
+            <tr key={k} className="border-t border-line/60"><td className="py-1.5 text-dim">{k}</td><td className="py-1.5">{va}</td><td className="py-1.5">{vb}</td></tr>
+          ))}
+        </tbody>
+      </table>
+      {delta != null && (
+        <p className="px-5 pb-4 text-[14px]">
+          The later run {delta === 0 ? 'succeeded as often' : <b className={delta > 0 ? 'text-ok' : 'text-bad'}>{delta > 0 ? `+${delta}` : delta} points</b>}
+          {Math.min(x.n, y.n) < 20 && <span className="text-dim"> · with fewer than 20 attempts each this can be luck; reliability tells for sure</span>}
+        </p>
+      )}
+    </Panel>
+  )
+}
+
+/** The success rate of each run, oldest first: did it get better? */
+function Trend({ runs }: { runs: RunInfo[] }) {
+  const points = runs.filter((r) => (r.episodes ?? []).some(valid)).slice().reverse().map((r) => {
+    const st = statsOf(r)
+    return { when: when(r.started), rate: Math.round(100 * (st.rate ?? 0)), n: st.n }
+  })
+  if (points.length < 2) return null
+  return (
+    <Panel>
+      <PanelTitle>Success over time</PanelTitle>
+      <div className="h-[150px] px-2 pb-3">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points} margin={{ left: 0, right: 16, top: 8 }}>
+            <CartesianGrid stroke="var(--dk-line)" vertical={false} />
+            <XAxis dataKey="when" tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} interval="preserveStartEnd" axisLine={false} tickLine={false} />
+            <YAxis domain={[0, 100]} ticks={[0, 50, 100]} unit="%" width={44} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
+            <Tooltip {...TIP} formatter={(v, _n, p) => [`${v}% of ${(p.payload as { n: number }).n} attempts`, 'success']} />
+            <Line dataKey="rate" stroke="var(--dk-ok)" strokeWidth={2} dot={{ r: 3 }} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </Panel>
+  )
+}
+
 function RunList({ onOpen }: { onOpen: (id: string) => void }) {
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 6000 })
   const [filter, setFilter] = useState<Filter>(() => {
@@ -68,6 +141,8 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
     return saved && saved in POLICY_FILTER ? saved : 'dream'
   })
   const choose = (f: Filter) => { localStorage.setItem('dk-history-filter', f); setFilter(f) }
+  const [picked, setPicked] = useState<string[]>([])  // up to two runs to compare
+  const pick = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id].slice(-2)))
   if (runs.isError) return <LoadError error={runs.error} what="the runs" />
   const everything = runs.data?.runs ?? []
   const list = everything.filter((r) => filter === 'all' || r.kind === filter)
@@ -134,6 +209,12 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
         </div>
       )}
 
+      {list.length > 1 && <Trend runs={list} />}
+      {picked.length === 2 && (() => {
+        const [a, b] = picked.map((id) => everything.find((r) => r.id === id)).filter(Boolean).sort((p, q) => p!.started - q!.started) as RunInfo[]
+        return a && b ? <Compare a={a} b={b} onClear={() => setPicked([])} /> : null
+      })()}
+      {picked.length === 1 && <p className="text-[13px] text-dim">Pick one more run to compare.</p>}
       <Panel>
         {!list.length ? (
           <div className="px-6 py-8">
@@ -144,9 +225,9 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
           </div>
         ) : (
           <table className="w-full table-fixed text-[14px]">
-            <colgroup><col className="w-[150px]" /><col /><col className="w-[170px]" /><col className="w-[90px]" /><col className="w-[80px]" /><col className="w-[200px]" /></colgroup>
+            <colgroup><col className="w-[40px]" /><col className="w-[150px]" /><col /><col className="w-[170px]" /><col className="w-[90px]" /><col className="w-[80px]" /><col className="w-[200px]" /></colgroup>
             <thead className="border-b border-line text-left text-[13px] text-dim">
-              <tr>{['Started', 'Task', 'Result', 'Duration', 'Cost', 'Failure reason'].map((h) => <th key={h} className="px-3 py-2.5 font-normal first:pl-5">{h}</th>)}</tr>
+              <tr><th className="pl-4 font-normal" title="Tick two runs to compare them" /><th className="px-3 py-2.5 font-normal">Started</th>{['Task', 'Result', 'Duration', 'Cost', 'Failure reason'].map((h) => <th key={h} className="px-3 py-2.5 font-normal">{h}</th>)}</tr>
             </thead>
             <tbody>
               {list.map((r) => {
@@ -157,7 +238,10 @@ function RunList({ onOpen }: { onOpen: (id: string) => void }) {
                 return (
                   <tr key={r.id} tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)}
                     className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-raised/50">
-                    <td className="py-2.5 pr-3 pl-5 whitespace-nowrap text-dim">{when(r.started)}</td>
+                    <td className="pl-4" onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`Compare the run of ${when(r.started)}`} checked={picked.includes(r.id)} onChange={() => pick(r.id)} />
+                    </td>
+                    <td className="py-2.5 pr-3 pl-3 whitespace-nowrap text-dim">{when(r.started)}</td>
                     <td className="truncate px-3 py-2.5" title={r.task}>{r.task || <span className="text-faint">no task</span>}</td>
                     <td className="truncate px-3 py-2.5 tracking-[2px]">
                       {r.status === 'running' && <span className="mr-2 tracking-normal"><Tag tone="signal">running</Tag></span>}
