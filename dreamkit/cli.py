@@ -272,6 +272,16 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_judge(argv: list[str]) -> int:
+    """Judge again the attempts that went 'not judged': vision-judge's saved frames, verdicts back into the run."""
+    try:
+        from vision_judge.rejudge import main as rejudge  # an add-on  # noqa: PLC0415
+    except ImportError:
+        print("dreamkit judge needs the vision-judge add-on: dreamkit install vision-judge", file=sys.stderr)
+        return 1
+    return rejudge(argv)
+
+
 def cmd_new(args) -> int:
     from .template import scaffold
 
@@ -457,7 +467,7 @@ def cmd_harvest(args) -> int:
     return 1
 
 
-_BUILTIN_COMMANDS = {"ui", "init", "sim", "run", "list", "search", "check", "test", "bench", "install", "publish", "new",
+_BUILTIN_COMMANDS = {"ui", "init", "judge", "sim", "run", "list", "search", "check", "test", "bench", "install", "publish", "new",
                      "record", "review", "accuracy", "harvest", "where", "datasets", "migrate"}
 
 
@@ -476,6 +486,8 @@ def _app_command(argv: list[str]) -> int | None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["judge"]:  # its own options (vision-judge's rejudge)
+        return cmd_judge(argv[1:])
     head = [a for a in argv if not a.startswith("-")][:1]
     if head and head[0] not in _BUILTIN_COMMANDS:
         code = _app_command(argv)
@@ -485,6 +497,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-c", "--config", help="dreamkit.yaml (default: ./dreamkit.yaml)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    sub.add_parser("judge", help="judge again the attempts that went 'not judged' (vision-judge add-on): "
+                   "--run <id> or --all-unjudged")
     p = sub.add_parser("ui", help="web panel")
     p.add_argument("-c", "--config", dest="config", default=argparse.SUPPRESS)
     p.add_argument("--host", default="127.0.0.1")

@@ -179,3 +179,58 @@ def test_statistics_across_runs():
     assert aggregate([])["recommendation"] is None
     lo, hi = wilson(7, 10)
     assert (round(lo, 3), round(hi, 3)) == (0.397, 0.892)  # the same numbers as reliability
+
+
+@pytest.mark.parametrize("raw, want", [(True, True), ("true", True), ("Yes", True), (1, True), ("0", False),
+                                       ("false", False), ("no.", False), (0, False)])
+def test_a_yes_or_no_in_any_form_is_a_boolean(raw, want):
+    v = judge_mod.validate({"success": raw, "score": "85%", "frames": [{"status": "ok"}]}, 1)
+    assert v["success"] is want and v["score"] == 85
+
+
+@pytest.mark.parametrize("bad", [{"success": "maybe", "score": 50}, {"success": True, "score": "high"},
+                                 {"success": 2, "score": 50}, {"success": True, "score": 140}])
+def test_what_cannot_be_read_stays_not_judged(bad):
+    with pytest.raises(ValueError):
+        judge_mod.validate({**bad, "frames": [{"status": "ok"}]}, 1)
+
+
+def _unjudged_run(model):
+    """A finished run whose one attempt went 'not judged' (the model was down), its frame saved."""
+    calls, script = model
+    script.append(RuntimeError("no Gemini model available (gemini-3.5-flash-lite: 503)"))
+    result = replay("success_apple_bowl", plugins=["vision-judge"], keep=True)
+    info = json.loads((result.run_dir / "run.json").read_text())
+    assert info["episodes"][0]["success"] is None and "error" in info["episodes"][0]["vision-judge"]
+    return result.run_dir
+
+
+def test_judge_again_later_waits_out_a_503_and_writes_the_verdict_back(model, monkeypatch):
+    from vision_judge import rejudge
+
+    run_dir = _unjudged_run(model)
+    calls, script = model
+    monkeypatch.setattr(rejudge.time, "sleep", lambda s: None)
+    script += [judge_mod.Unavailable("no Gemini model available (gemini-3.6-flash: 503)"), lambda p: reply(p, True)]
+    said = []
+    assert rejudge.rejudge_run(run_dir, "gemini", say=said.append) == (1, 0)
+    assert any("waiting" in s for s in said)  # the 503: a pause, then the same frames again
+    ep = json.loads((run_dir / "run.json").read_text())["episodes"][0]
+    assert ep["vision-judge"]["success"] is True and ep["vision-judge"]["rejudged"] is True
+    assert ep["success"] is True and ep["judged_by"] == "vision"  # nothing else had judged it
+    assert json.loads((run_dir / "ep001" / "result.json").read_text())["success"] is True
+    rows = json.loads((run_dir / "vision-judge" / "attempts.json").read_text())
+    assert "error" not in rows[0] and rows[0]["rejudged"] is True
+    assert rejudge.rejudge_run(run_dir, "gemini", say=said.append) == (0, 0)  # nothing left to judge
+
+
+def test_judge_again_stops_at_once_on_a_429(model):
+    from vision_judge import rejudge
+
+    run_dir = _unjudged_run(model)
+    calls, script = model
+    script.append(judge_mod.Unavailable("quota", quota=True))
+    with pytest.raises(rejudge.QuotaExhausted):
+        rejudge.rejudge_run(run_dir, "gemini", say=lambda s: None)
+    assert len(calls) == 2  # the run's own call, and one now: no retries on a quota
+    assert json.loads((run_dir / "run.json").read_text())["episodes"][0]["success"] is None  # left as it was

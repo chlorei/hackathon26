@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -62,11 +63,38 @@ def _fragment(text: str) -> str:
     return text[:1].lower() + text[1:]
 
 
+TRUE = {"true", "yes", "y", "1", "success", "succeeded", "done"}
+FALSE = {"false", "no", "n", "0", "failure", "failed", "fail"}
+
+
+def as_bool(v: Any) -> bool | None:
+    """A model's yes/no as it writes it: true, "true", "Yes", 1, "0" … ; None when it is none of those."""
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)) and v in (0, 1):
+        return bool(v)
+    if isinstance(v, str):
+        w = v.strip().strip(".").lower()
+        return True if w in TRUE else False if w in FALSE else None
+    return None
+
+
+def as_score(v: Any) -> float | None:
+    """85, 85.0, "85", "85%", "85/100" -> 85.0; None when it is not a number 0-100."""
+    if isinstance(v, str):
+        m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*(?:%|/\s*100)?\s*", v)
+        v = float(m.group(1)) if m else None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v <= 100:
+        return None
+    return float(v)
+
+
 def validate(d: Any, n: int) -> dict[str, Any]:
-    if not isinstance(d, dict) or not isinstance(d.get("success"), bool):
+    success = as_bool(d.get("success")) if isinstance(d, dict) else None
+    if success is None:
         raise ValueError("success must be a boolean")
-    score = d.get("score")
-    if isinstance(score, bool) or not isinstance(score, (int, float)) or not 0 <= score <= 100:
+    score = as_score(d.get("score"))
+    if score is None:
         raise ValueError("score must be a number 0-100")
     frames = d.get("frames")
     if not isinstance(frames, list) or len(frames) != n:
@@ -76,7 +104,6 @@ def validate(d: Any, n: int) -> dict[str, Any]:
         if not isinstance(f, dict) or f.get("status") not in ("ok", "error"):
             raise ValueError(f"frames[{i}].status must be ok or error")
         out.append({"index": i, "status": f["status"], "comment": _fragment(f.get("comment", ""))})
-    success = d["success"]
     code = d.get("reason_code")
     return {
         "success": success,
