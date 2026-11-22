@@ -397,7 +397,19 @@ def create_app(config_path: str | Path) -> FastAPI:
     # -- runs (the monitor) ------------------------------------------------------------------------------------
     # -- the demo button on Live: the panel starts the reference loop (examples/sim_loop.py) as its own process. The
     # loop stays what it always is, independent of the panel: this only presses start and stop, one run at a time.
-    demo: dict[str, Any] = {"proc": None, "policy": None, "started": None}
+    demo: dict[str, Any] = {"proc": None, "policy": None, "started": None, "stopped": False}
+    demo_log = Path("~/.dreamkit/demo.log").expanduser()
+
+    def demo_failed() -> str | None:
+        """The last lines of a demo that ended with an error (not one the user stopped): the panel shows them."""
+        proc = demo["proc"]
+        if proc is None or proc.poll() in (None, 0) or demo["stopped"]:
+            return None
+        try:
+            lines = [ln for ln in demo_log.read_text(errors="replace").splitlines() if ln.strip()]
+        except OSError:
+            lines = []
+        return "\n".join(lines[-8:]) or f"the demo exited with code {proc.poll()}"
 
     def dream_key(base: Path) -> bool:
         from . import llm
@@ -421,7 +433,8 @@ def create_app(config_path: str | Path) -> FastAPI:
         cfg, base = load_cfg()
         return {"running": demo_running(), "policy": demo["policy"] if demo_running() else None,
                 "started": demo["started"] if demo_running() else None, "available": SIM_LOOP.is_file(),
-                "dream_key": dream_key(base), "plugins": [s.name for s in cfg.plugins if s.enabled]}
+                "dream_key": dream_key(base), "plugins": [s.name for s in cfg.plugins if s.enabled],
+                "failed": demo_failed()}
 
     @app.post("/api/demo")
     def demo_start(body: DemoRequest):
@@ -434,18 +447,19 @@ def create_app(config_path: str | Path) -> FastAPI:
         _, base = load_cfg()
         if body.policy == "dream" and not dream_key(base):
             raise HTTPException(400, "no Dream API key: add DREAM_API_KEY to .env (or ~/.dreamlabs/credentials)")
-        log = Path("~/.dreamkit/demo.log").expanduser()
+        log = demo_log
         log.parent.mkdir(parents=True, exist_ok=True)
         cmd = [sys.executable, str(SIM_LOOP), *DEMO_ARGS[body.policy], "--config", str(config_path)]
         demo.update(proc=subprocess.Popen(cmd, cwd=str(base), stdout=log.open("w"), stderr=subprocess.STDOUT,
                                           env=dict(os.environ), start_new_session=True),
-                    policy=body.policy, started=time.time())
+                    policy=body.policy, started=time.time(), stopped=False)
         return demo_state()
 
     @app.delete("/api/demo")
     def demo_stop():
         proc = demo["proc"]
         if proc is not None and proc.poll() is None:
+            demo["stopped"] = True  # its exit code is not a failure to show
             proc.send_signal(signal.SIGINT)  # the loop's Ctrl-C: it closes the run as stopped
             try:
                 proc.wait(timeout=15)

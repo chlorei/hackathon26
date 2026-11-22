@@ -306,4 +306,4 @@ export function wsUrl(path: string): string {
 export { REASON_LABEL } from './labels'
 
 /** The Live page's demo button: the server runs examples/sim_loop.py, one run at a time. */
-export interface DemoState { running: boolean; policy: 'mock' | 'dream' | null; started: number | null; available: boolean; dream_key: boolean; plugins: string[] }
+export interface DemoState { running: boolean; policy: 'mock' | 'dream' | null; started: number | null; available: boolean; dream_key: boolean; plugins: string[]; failed?: string | null }

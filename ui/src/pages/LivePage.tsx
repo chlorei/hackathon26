@@ -201,6 +201,14 @@ const STEPS = [
 ]
 
 /** No run yet: try the demo here, or connect your own robot in three steps. */
+/** What to do about a demo that would not start, from its last lines. */
+function demoHint(log: string): string {
+  if (/simulator not found/i.test(log)) return 'dreamkit cannot find Dream Labs\' simulator: set sim_path in dreamkit.yaml, or pip install dreamlabs.'
+  if (/No module named/i.test(log)) return 'A package is missing in this Python: reinstall (uv pip install -e ".[dev]").'
+  if (/DREAM_API_KEY|api key|401|403/i.test(log)) return 'The Dream API key was refused: check DREAM_API_KEY in .env.'
+  return 'Its last lines are below; ~/.dreamkit/demo.log has all of it.'
+}
+
 function Waiting({ demo, onDemo }: { demo?: DemoState; onDemo: (policy: 'mock' | 'dream') => void }) {
   const [copied, setCopied] = useState<string | null>(null)
   const [confirm, setConfirm] = useState(false)
@@ -237,6 +245,12 @@ function Waiting({ demo, onDemo }: { demo?: DemoState; onDemo: (policy: 'mock' |
               : 'The demo drops the apple on purpose in attempts 1 and 3, so you see the plugins notice it and recovery step in.'}
             {!demo?.dream_key && ' Dream-1 needs a Dream API key.'}
           </p>
+          {!starting && demo?.failed && (
+            <div role="alert" className="w-full rounded-lg border border-bad/40 bg-bad-soft px-3 py-2 text-[13.5px]">
+              <p className="font-medium text-bad">The demo stopped before it began. {demoHint(demo.failed)}</p>
+              <pre className="mt-1.5 max-h-40 overflow-auto font-mono text-[12px] whitespace-pre-wrap text-dim">{demo.failed}</pre>
+            </div>
+          )}
         </Panel>
       )}
       <Panel>

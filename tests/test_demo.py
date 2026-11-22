@@ -45,5 +45,12 @@ def test_the_demo_starts_once_and_stops_like_ctrl_c(tmp_path, monkeypatch):
     assert cmd[1].endswith("sim_loop.py") and "--mock" in cmd and cmd[cmd.index("--config") + 1] == str(cfg)
     assert c.post("/api/demo", json={"policy": "mock"}).status_code == 409  # one run at a time
 
-    assert c.delete("/api/demo").json()["running"] is False
+    stopped = c.delete("/api/demo").json()
+    assert stopped["running"] is False and stopped["failed"] is None  # stopped by the user: not a failure
     assert started[0].signals == [signal.SIGINT]
+
+    # a demo that dies at once (no simulator here): the panel gets its last lines to show
+    assert c.post("/api/demo", json={"policy": "mock"}).json()["failed"] is None
+    (tmp_path / ".dreamkit" / "demo.log").write_text("Traceback ...\nFileNotFoundError: Dream Labs simulator not found\n")
+    started[-1].code = 1
+    assert "simulator not found" in c.get("/api/demo").json()["failed"]
