@@ -1,30 +1,38 @@
 # dreamkit
 
-A plugin library and monitor for Dream-1, **inside your own control loop**. Everyone who drives a robot with Dream-1
-writes the same code around the model: camera checks, motion limits, retries, logs, "did it actually work?". dreamkit
-makes each of those a plugin you switch on with one line, and adds the story nobody has: **Detect → Recover → Learn**.
+[![tests](https://github.com/chlorei/hackathon26/actions/workflows/tests.yml/badge.svg)](https://github.com/chlorei/hackathon26/actions/workflows/tests.yml)
 
-- **failure-monitor** says *why* an attempt failed and *when* ("dropped apple at 8.8 s"), with the video at that second;
-- **recovery** fixes it from where the robot is — arms home and ask again, or back off and continue — no scene reset;
-- **harvester** saves every attempt as a LeRobot v2.1 dataset; the successful ones pass Dream Labs' own
-  `validate_dataset` and are ready for fine-tuning.
-
-**On top of what you already run.** Install the base arm from Dream Labs, put dreamkit over it, change nothing:
+**dreamkit wraps your Dream-1 client in one line and shows why attempts fail, rescues them, counts what they cost
+and collects the data to fine-tune on.**
 
 ```bash
-pip install dreamlabs            # the base: Dream Labs' client, station and YAM simulator
-pip install -e path/to/dreamkit  # the overlay
-
-dreamkit sim                     # Dream Labs' simulator window + REPL, unchanged; type a task, dreamkit watches
-dreamkit sim --mock dropped,grasped_air,success   # same, no model calls: scripted attempts (free)
-dreamkit run -- python my_loop.py                 # any program on dream.DreamClient: your loop, a station script
+git clone https://github.com/chlorei/hackathon26.git dreamkit && cd dreamkit
+uv venv --python 3.12 .venv && source .venv/bin/activate && uv pip install dreamlabs -e ".[dev]"
+./demo.sh        # opens the panel; on Live, "Try demo" runs a free simulated arm (no keys, no credits)
 ```
 
-`dreamkit run` starts the program as is; when it imports `dream`, its `DreamClient` gets the plugins, and when it
-imports Dream Labs' `yam_env`, every `YamEnv.step()` becomes a dreamkit step with the simulator's world. No world
-(a real robot): the steps come from the observations the program sends. One `policy()` … `close()` is one attempt; when
-a plugin ends it (success, camera failure), the program's next `get_action()` stops that task the way any error does.
-The monitor opens at http://127.0.0.1:8800. Writing your own loop? The same in one line:
+Measured on a clean clone (macOS, 2026-11-22): clone 3 s, install 18 s with an empty package cache, the demo's
+three attempts 107 s. Python 3.11–3.13 and [uv](https://docs.astral.sh/uv/) needed; details in [Install](#install).
+
+![Live: the second the apple drops, what failed and what recovery does about it](docs/media/live.jpg)
+
+| What hurts when you run Dream-1 | What dreamkit does about it |
+|---|---|
+| A camera goes black or freezes and the model keeps acting on it | **camera-check** flags it before the next model call; **recovery** stops the arm |
+| An attempt failed, and nobody knows why or when | **failure-monitor** names the cause and the second ("dropped the object at 8.8 s"), with the video there; **vision-judge** says from the camera whether the task was done |
+| Attempts fail half the time | **recovery** takes over from where the arm is (arms home and ask again, or open and lift) instead of a scene reset; **reliability** gives the success rate with its interval and an A/B with proof |
+| The credits run out mid-run | **budget-guard** warns at 50% and 80%, and at 95% sends the arms home and stops the run |
+| Recording demonstrations for fine-tuning | **harvester** turns good attempts into LeRobot datasets that pass Dream Labs' `validate_dataset`; the **Data** tab records, checks, uploads and fine-tunes (`dreamkit datasets train`) |
+
+**Results** (3 real Dream-1 runs, 152 attempts, and 12 recorded scenarios): [docs/RESULTS.md](docs/RESULTS.md) ·
+**[Robustness](#robustness)** · **Video:** VIDEO_LINK · **Slides:** SLIDES_LINK
+
+## How it fits
+
+dreamkit runs **inside your own control loop**: one line wraps Dream Labs' client, and the plugins run around each
+model call and each control step. Everyone who drives a robot with Dream-1 writes the same code around the model —
+camera checks, retries, logs, "did it actually work?" — dreamkit makes each a plugin you switch on, in three
+stages: **Detect → Recover → Learn**.
 
 ```python
 import dream, dreamkit
@@ -42,38 +50,17 @@ with client.episode("put apple into the bowl", env=env):     # one attempt
 client.close()
 ```
 
-The panel (`dreamkit ui`) never starts anything: it watches whatever your loop is doing (Live), manages plugins, and
-keeps the history with videos, recaps and harvested datasets.
+On a real robot, give `step()` what the robot reports instead of `env` (see [On a real robot](#on-a-real-robot)).
+Without changing a line of an existing program: `dreamkit run -- python my_loop.py` patches `dream.DreamClient` in it,
+and `dreamkit sim` opens Dream Labs' simulator REPL with the plugins on. The panel (`dreamkit ui`, port 8800) never
+starts a run of its own besides the demo: it watches your loop (Live), manages plugins, and keeps the history with
+videos, recaps and datasets. Keys go in `.env` next to `dreamkit.yaml`: `DREAM_API_KEY` for Dream-1,
+`GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) for vision-judge and the Create tab. `.env` is never committed.
 
 > **About `--mock`.** The mock policy is a scripted arm that **fails on purpose** — it drops the apple, grasps air,
 > lets go off target, stalls, hits the table — so every plugin can be built and tested without the model or credits.
-> Its numbers (failure rates, "recovery 20% → 100%") say that the *mechanism* works, nothing about Dream-1. Mock runs
-> carry a **mock: scripted failures** badge in the panel and the report. Real numbers come from runs without `--mock`.
-
-## Quickstart
-
-See it first: `./demo.sh` opens the panel; on **Live**, **Try demo** runs a free simulated arm that drops the apple
-on purpose, so you watch the plugins notice it and recovery step in. Then, for your own robot, the same three steps
-as on that page:
-
-1. **Install dreamkit and make a config**
-   ```bash
-   pip install dreamkit && dreamkit init      # dreamkit.yaml: success-check, failure-monitor, camera-check,
-                                              # recovery, reliability, vision-judge (an existing one is kept)
-   ```
-2. **Wrap your Dream-1 client: one line**
-   ```python
-   import dream, dreamkit
-   client = dreamkit.wrap(dream.DreamClient())          # the one line
-   with client.episode("put apple into the bowl", env=env):
-       reply = client.get_action()                       # plugins run around the model
-       env.step(left, right)                             # each row of the reply
-       client.step(env, command=(left, right))           # robot: state=... instead of env
-   ```
-3. **Run your loop**: `python my_robot.py`, and `dreamkit ui` (Live comes alive with it).
-
-Keys go in `.env` next to `dreamkit.yaml`: `DREAM_API_KEY` for Dream-1, `GEMINI_API_KEY` for vision-judge and the
-Create tab.
+> Its numbers say that the *mechanism* works, nothing about Dream-1. Mock runs carry a **mock** badge in the panel.
+> Real numbers come from runs without `--mock` ([docs/RESULTS.md](docs/RESULTS.md)).
 
 ## On a real robot
 
@@ -123,45 +110,38 @@ the bowl — it says unknown instead of guessing.)
 
 ## Install
 
-You need **Python 3.11–3.13**, **git**, **[uv](https://docs.astral.sh/uv/)** (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
-and, only to rebuild the web panel, Node 20+. macOS or Linux.
-
-dreamkit drives Dream Labs' MuJoCo simulator unchanged, so clone both repositories **side by side**:
+You need **Python 3.11–3.13**, **git** and **[uv](https://docs.astral.sh/uv/)**
+(`curl -LsSf https://astral.sh/uv/install.sh | sh`); Node 20+ only to rebuild the web panel. macOS or Linux.
 
 ```bash
-mkdir dream && cd dream
-git clone https://github.com/dreamlabs-co/dreamlabs.git
-git clone https://github.com/chlorei/hackathon26.git dreamkit
-
-cd dreamkit
-uv venv --python 3.12 .venv
-source .venv/bin/activate
-uv pip install ../dreamlabs/dream_library/dream_client -e ".[dev]"
-cp dreamkit.example.yaml dreamkit.yaml      # sim_path already points at ../dreamlabs/...
+git clone https://github.com/chlorei/hackathon26.git dreamkit && cd dreamkit
+uv venv --python 3.12 .venv && source .venv/bin/activate
+uv pip install dreamlabs -e ".[dev]"     # Dream Labs' client, station and YAM simulator from PyPI, and dreamkit
+dreamkit init                            # dreamkit.yaml with the default plugins (an existing one is kept)
 ```
 
-The folder layout this expects:
+Note: `pip install dreamkit` from PyPI is a **different project**; install dreamkit from this repository as above.
+The simulator comes with the `dreamlabs` package. If you work from a checkout of Dream Labs' repository instead,
+set `sim_path` in `dreamkit.yaml` to `<dreamlabs>/dream_library/examples/yam_mujoco`.
 
-```
-dream/
-├── dreamlabs/   Dream Labs' repository (the simulator lives in dream_library/examples/yam_mujoco)
-└── dreamkit/    this repository
-```
+**Add-ons** (in `plugins-external/`, installed on demand; `dreamkit init` lists them commented out until then):
 
-If your `dreamlabs` checkout is somewhere else, set `sim_path` in `dreamkit.yaml`.
+```bash
+dreamkit install vision-judge      # judges success from the camera (GEMINI_API_KEY or ANTHROPIC_API_KEY)
+dreamkit install gripper-check reliability
+```
 
 **Check it works** (no API key, no credits):
 
 ```bash
-python examples/sim_loop.py --mock --episodes 2   # a scripted arm drops the apple; recovery fixes it
-dreamkit ui                                       # in another terminal: http://127.0.0.1:8800, Live page
-pytest -q                                         # every test, no credits
-dreamkit check --all                              # every plugin against the standard
+./demo.sh                                          # the panel, then Live -> Try demo
+python examples/sim_loop.py --mock --episodes 2    # the same loop in the terminal
+pytest -q && dreamkit check --all                  # every test, every plugin against the standard
 ```
 
-**Dream-1 itself** needs an API key from [platform.dreamlabs.ai](https://platform.dreamlabs.ai/api-keys), either in
-`~/.dreamlabs/credentials` (the file the platform's Setup page gives you) or as `export DREAM_API_KEY=dl_live_...`.
-Every model call uses credits.
+**Dream-1 itself** needs an API key from [platform.dreamlabs.ai](https://platform.dreamlabs.ai/api-keys), in
+`~/.dreamlabs/credentials` (the file the platform's Setup page gives you) or as `DREAM_API_KEY` in `.env`. Every
+model call uses credits.
 
 ## Use
 
@@ -266,7 +246,6 @@ sim_path: ../dreamlabs/dream_library/examples/yam_mujoco
 data_dir: dreamkit-data      # runs/ and datasets/ (see Where things are saved)
 plugins:
   - camera-check
-  - success-check
   - failure-monitor: {slow_ms: 700}
   - recovery: {max_recoveries: 3, retry_attempts: 1}
   - recorder: {video_fps: 10}
@@ -280,7 +259,7 @@ plugins:
 | `failure-monitor` | why and when an attempt failed, first cause in time: `dropped` (the gripper never opened), `released_off_target`, `grasped_air`, `not_reached`, `collision`, `fell_off_table`, `stalled`, `slow_model` (model latency), `camera_failure`, `timeout`; live verdicts mid-attempt |
 | `recovery` | the one control plugin. On a live verdict: arms home (`yam_env.home_path`) + `reset_episode()` + same prompt; grasped air: open, lift 5 cm, continue; `camera_failure`: stop; then retry the scene (`retry_attempts`) |
 | `harvester` | every attempt as LeRobot v2.1 (state/action: right arm, right gripper, left arm, left gripper; videos overhead / wrist_l / wrist_r) |
-| `success-check` | object in the bowl / on the plate with the gripper released → success; the attempt ends there |
+| `success-check` | an **evaluation tool**, simulator only: object in the bowl / on the plate with the gripper released → success. It reads the simulator's world, so it never runs in the working loop; the demo, `sim_loop --with-world` and the tests use it |
 | `recorder` | MP4 per camera per attempt; video time = simulated time, so `ep003_top.mp4#t=9.3` is the moment |
 | `camera-check` | flags a black, uniform or frozen camera before the next model call; recovery stops the robot |
 
@@ -373,6 +352,60 @@ actions; the example loop only moves the fruit (scene randomisation).
    harvester adds successful attempts to `datasets/harvest-<task>/`.
 4. **runs/** — the run folder is the only interface: events, live frames, a heartbeat, results, videos.
 5. **panel** — follows that folder, so your loop never depends on it: open or close it any time, over SSH too.
+
+## Robustness
+
+**184 tests · 12 recorded scenarios · run offline** — no simulator, network, model or keys needed for the
+[CI run](https://github.com/chlorei/hackathon26/actions/workflows/tests.yml) on every push (tests that need the
+simulator skip themselves there and run locally).
+
+| What | Where | Check it yourself |
+|---|---|---|
+| **A plugin cannot break the robot's loop.** An exception becomes an error event; 5 in a row and the plugin is switched off. A step that averages over 1 ms, 3 windows of 100 steps running, and it is switched off; slow work goes to `ctx.defer`. | [`manager.py`](dreamkit/manager.py), [`tests/test_core.py`](tests/test_core.py) | `pytest tests/test_core.py` |
+| **A plugin can only do what its capability allows**: an observer cannot stop the arm, a modifier may only make a chunk stricter (slower, inside limits), one control plugin at a time, each writes only its own key of the result. | [`plugin.py`](dreamkit/plugin.py), [`tests/test_standard_enforcement.py`](tests/test_standard_enforcement.py) | `pytest tests/test_standard_enforcement.py` |
+| **The standard is checked at import**: a plugin that breaks [PLUGIN_STANDARD.md](docs/PLUGIN_STANDARD.md) does not even import, and the error says the rule, the file:line and the fix. | [`standard.py`](dreamkit/standard.py) | `dreamkit check --all` |
+| **budget-guard stops before the credits run out**: at 95% of the budget the arms go home and the run ends. | [`budget_guard`](dreamkit/plugins/budget_guard/plugin.py), [`tests/plugins/test_budget_guard.py`](tests/plugins/test_budget_guard.py) | budget-guard with `budget_usd: 0.05, count_mock: true`, then `python examples/sim_loop.py --mock --episodes 6` |
+| **When the model fails, the loop goes on**: a model error ends that attempt with a reason; 5 in a row and recovery stops the run instead of spinning. A camera judge without a key or quota writes *not judged* and the run continues. | [`recovery`](dreamkit/plugins/recovery/plugin.py), [`llm.py`](dreamkit/llm.py), [`tests/plugins/test_recovery.py`](tests/plugins/test_recovery.py) | `dreamkit install vision-judge`, then without `GEMINI_API_KEY`: `python examples/sim_loop.py --mock --episodes 1` → *not judged: GEMINI_API_KEY is not set* |
+| **A broken camera is caught**: black, uniform or frozen, before the next model call. | [`camera_check`](dreamkit/plugins/camera_check/plugin.py), [`tests/plugins/test_camera_check.py`](tests/plugins/test_camera_check.py) | `python examples/sim_loop.py --mock --fault-camera top --fault-kind black` |
+| **Mock and replay need no network and no credits**: the scripted arm in the simulator, and 12 recorded attempts every plugin test replays. | [`mock.py`](dreamkit/mock.py), [`testing.py`](dreamkit/testing.py), [`dreamkit/fixtures/`](dreamkit/fixtures) | `pytest -q` |
+| **Generated plugins pass the same checks as installed ones** (`dreamkit check`, its replay tests, the 1 ms bench) and a scan of the code: no network, files outside its folder, subprocesses or dynamic code. Honestly: a filter, not a sandbox — read the code before you keep it. | [`create.py`](dreamkit/create.py), [`tests/test_create.py`](tests/test_create.py) | `pytest tests/test_create.py` |
+| **A plugin's page runs in a sandboxed iframe** and reads only its own folder of the run, `run.json` and `events.jsonl`. | [`server.py`](dreamkit/server.py), [`tests/test_plugin_page.py`](tests/test_plugin_page.py) | `pytest tests/test_plugin_page.py` |
+
+![budget-guard at 95%: arms home, the run stops](docs/media/budget-stop.jpg)
+
+## What didn't work
+
+- **The camera judge missed failures between its frames.** Judging an attempt from its last frame (or a few) misses
+  an apple dropped and picked up again; it now judges each try that recovery cut short on its own, and needs key
+  frames around the moments failure-monitor marks, or more frames.
+- **Free Gemini quotas.** About 20 requests a model a day: on a long run most attempts went *not judged*
+  (114 of 152, see [RESULTS](docs/RESULTS.md)). The judge falls back across models and to Claude, and says *not judged*
+  instead of guessing.
+- **Create writes plugins with a model, and checks them with a filter, not a sandbox.** A weaker model often needs a
+  second or third try to pass the checks.
+- **Fine-tuning takes 7–8 hours** on Dream Labs' side, so we could not close the loop (collect → fine-tune → measure)
+  within the hackathon.
+- **What a real arm cannot tell.** From joints, gripper and commands alone, *released off target* and *never reached*
+  look like other failures; in the simulator only the world can name them (failure-monitor: 8 of 12 recorded
+  scenarios, see [RESULTS](docs/RESULTS.md)).
+
+## What's next
+
+- Key frames for the camera judge around failure-monitor's marks, and its accuracy measured on labelled attempts.
+- A finished fine-tune measured against the base model on the same scenes (the Data tab's Evaluate, McNemar).
+- A real robot: the same plugins on what a real arm reports (they already need nothing else), and a person's ✓/✗ in
+  History where nothing can judge.
+- Create in a real sandbox (a container without network) instead of a code filter.
+
+## Troubleshooting
+
+| Problem | What to do |
+|---|---|
+| *not judged: GEMINI_API_KEY is not set* | Put `GEMINI_API_KEY=…` (or `ANTHROPIC_API_KEY=…`) in `.env` next to `dreamkit.yaml`, or mark attempts ✓/✗ in History. The run is not affected. |
+| *Gemini quota exhausted* / 429 | The free tier allows about 20 requests a model a day; it resets the next day. Add `ANTHROPIC_API_KEY` to `.env` to fall back to Claude. The panel's Create tab shows today's calls per model. |
+| Live is empty: *No robot running yet* | Nothing is running: click **Try demo** (free), or start your loop. If the demo does not start, the page shows its last lines and what to do. |
+| *Dream Labs simulator not found* | `uv pip install dreamlabs` (the simulator comes with it), or set `sim_path` in `dreamkit.yaml` to a checkout's `dream_library/examples/yam_mujoco`. |
+| *port 8800 is already in use* | Another `dreamkit ui` is running (open http://127.0.0.1:8800), or use another port: `dreamkit ui --port 8801` (`PORT=8801 ./demo.sh`). |
 
 ## Develop the panel
 
