@@ -376,7 +376,14 @@ simulator skip themselves there and run locally).
 
 ![budget-guard at 95%: arms home, the run stops](docs/media/budget-stop.jpg)
 
-## What didn't work
+## What didn't work (known limitations)
+
+**Conditions of these runs.** The team's Dream-1 API credits arrived only on the second day of the hackathon.
+During the final runs the Dream-1 API often answered *pool full* / `DA-2000 NO_CAPACITY` under the hackathon's load,
+and our own network dropped for a stretch of one run. dreamkit counts these as server/network refusals, not as
+failures of the model, and recovery stopped one run by itself after 5 refusals in a row. The success rate
+(**30%, 20 of 66**) counts only attempts where the model actually ran; the judge's accuracy (**84%, 36 of 43**)
+counts only attempts that both the camera judge and the simulator judged.
 
 - **The camera judge missed failures between its frames.** Judging an attempt from its last frame (or a few) misses
   an apple dropped and picked up again; it now judges each try that recovery cut short on its own, and needs key

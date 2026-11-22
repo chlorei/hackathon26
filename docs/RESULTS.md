@@ -7,6 +7,13 @@ measured and the command that gives it again. Nothing here is estimated.
 2026-11-21 and 2026-11-22. Enough to see where attempts go wrong and what they cost; too few to rank models or
 prompts with confidence (see the intervals).
 
+**Conditions of these runs.** The team's Dream-1 API credits arrived only on the second day of the hackathon.
+During the final runs the Dream-1 API often answered *pool full* / `DA-2000 NO_CAPACITY` under the hackathon's load,
+and our own network dropped for a stretch of one run. dreamkit counts these as server/network refusals, not as
+failures of the model, and recovery stopped one run by itself after 5 refusals in a row. The success rate
+(**30%, 20 of 66**) counts only attempts where the model actually ran; the judge's accuracy (**84%, 36 of 43**)
+counts only attempts that both the camera judge and the simulator judged.
+
 The run folders (videos, frames, about 1 GB) stay on our machine. One row per attempt is in git:
 [`docs/results/dream1-attempts.json`](results/dream1-attempts.json) (no messages, addresses, session ids or paths).
 
