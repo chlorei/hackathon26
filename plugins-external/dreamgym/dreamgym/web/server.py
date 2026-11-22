@@ -52,6 +52,28 @@ def _running(run_id: str) -> bool:
         return proc is not None and proc.poll() is None
 
 
+def _pid_alive(pid) -> bool:
+    try:
+        os.kill(int(pid), 0)
+    except PermissionError:
+        return True  # exists, owned by someone else
+    except (OSError, TypeError, ValueError):
+        return False
+    return True
+
+
+def _record_pid(folder: Path) -> int | None:
+    """The pid of a recording still writing into this dataset, also one this panel did not start (recordings run in
+    their own session, so they outlive a restart of `dreamkit ui`)."""
+    progress = _read_json(folder / ".dreamgym" / "record.progress.json") or {}
+    pid = progress.get("pid")
+    return int(pid) if progress.get("status") == "running" and pid and _pid_alive(pid) else None
+
+
+def _recording(data: Path, name: str) -> bool:
+    return _running(f"data:{name}:record") or _record_pid(data / name) is not None
+
+
 def _sub_runs(folder: Path) -> list[tuple[str, Path]]:
     """(label, folder) of each variant of a compare run, in launch order."""
     meta = _read_json(folder / "meta.json") or {}
@@ -262,7 +284,7 @@ def list_datasets(data: Path) -> list[dict]:
             job = _read_json(state / f"{kind}.job.json")
             if not job:
                 continue
-            running = _running(f"data:{folder.name}:{kind}")
+            running = _recording(data, folder.name) if kind == "record" else _running(f"data:{folder.name}:{kind}")
             if job.get("status") == "running" and not running:
                 job["status"] = "stopped"
             log = state / f"{kind}.log"
@@ -313,6 +335,8 @@ def launch_record(root: Path, body: dict) -> dict:
             cmd += [flag, str(float(body[key]))]
     if body.get("vary_prompts", True):
         cmd.append("--vary-prompts")
+    if _recording(data, name):
+        raise ValueError(f"already recording into {name}: stop it first")
     (data / name).mkdir(parents=True, exist_ok=True)
     return {**_spawn_data_job(data, name, "record", cmd), "name": name}
 
@@ -328,7 +352,7 @@ def _next_seed(folder: Path) -> int:
 def _busy(data: Path, name: str) -> bool:
     session = TELEOP["session"]
     teleop_here = session is not None and session.running and Path(session.dataset).resolve() == (data / name).resolve()
-    return _running(f"data:{name}:record") or teleop_here
+    return _recording(data, name) or teleop_here
 
 
 def dataset_detail(root: Path, name: str) -> dict:
@@ -341,8 +365,11 @@ def dataset_detail(root: Path, name: str) -> dict:
         raise KeyError("no such dataset")
     out = dataset.describe(folder)
     summary = next((d for d in list_datasets(data) if d["name"] == name), {})
+    recording = _recording(data, name)
+    if out.get("progress") and out["progress"].get("status") == "running" and not recording:
+        out["progress"]["status"] = "interrupted"  # the process died without writing its last status
     out.update(jobs=summary.get("jobs", {}), validate=summary.get("validate"), finetune=summary.get("finetune"),
-               recording=_running(f"data:{name}:record"), busy=_busy(data, name))
+               recording=recording, busy=_busy(data, name))
     ev = _read_json(folder / ".dreamgym" / "evaluate.json")
     if ev:
         results = []
@@ -411,8 +438,11 @@ def dataset_action(root: Path, name: str, action: str, body: dict) -> dict:
     if action == "stop":
         with LOCK:
             proc = PROCS.get(f"data:{name}:record")
+        # the recording keeps what it saved and writes status "stopped"
         if proc and proc.poll() is None:
             os.killpg(proc.pid, signal.SIGINT)
+        elif pid := _record_pid(data / name):
+            os.kill(pid, signal.SIGINT)  # started elsewhere (before a panel restart, or from a terminal)
         return {"ok": True}
     raise ValueError(f"unknown action {action}")
 

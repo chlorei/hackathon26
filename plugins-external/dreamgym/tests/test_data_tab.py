@@ -126,3 +126,35 @@ def test_page_is_only_the_four_steps():
     for gone in ("New run", "Prompt Tuner", "Arena · one policy"):
         assert gone not in page
     assert '"/api/' not in page and "`/api/" not in page  # paths stay relative to the app's mount
+
+
+def test_recording_started_elsewhere_is_seen(tmp_path):
+    """A recording outlives a restart of the panel (its own session): the tab still sees it by its pid, refuses a
+    second recording and removing episodes, and a recording that died without a last word reads "interrupted"."""
+    import os
+    import subprocess
+    import sys
+
+    from dreamgym.web import server
+
+    root = tmp_path / "gym" / "runs"
+    data = server.data_root(root)
+    folder = data / "fruit"
+    LeRobotWriter(folder)._write_meta()
+    alive = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        dataset.write_progress(folder, {"plan": {"banana_plate": 2}, "kept": {}, "tried": {}, "source": "scripted",
+                                        "status": "running", "pid": alive.pid})
+        d = server.dataset_detail(root, "fruit")
+        assert d["recording"] and d["busy"] and d["progress"]["status"] == "running"
+        with pytest.raises(ValueError, match="already recording"):
+            server.launch_record(root, {"name": "fruit", "mix": {"banana_plate": 1}})
+        with pytest.raises(ValueError, match="stop it first"):
+            server.remove(root, "fruit", {"indices": [0]})
+        server.dataset_action(root, "fruit", "stop", {})
+        assert alive.wait(timeout=10) != 0  # SIGINT reached it
+    finally:
+        alive.kill()
+    assert not server._pid_alive(alive.pid) or os.name == "nt"
+    d = server.dataset_detail(root, "fruit")
+    assert not d["recording"] and not d["busy"] and d["progress"]["status"] == "interrupted"

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -144,7 +145,7 @@ def cmd_record(args) -> int:
     kept = {name: 0 for name in want}
     tried = {name: 0 for name in want}
     progress = {"plan": want, "kept": kept, "tried": tried, "source": source, "status": "running",
-                "started": time.time(), "last": None, "current": None}
+                "started": time.time(), "last": None, "current": None, "pid": os.getpid()}
     dataset.write_progress(out, progress)
     env = sim.make_env()
     kit = open_kit(PolicyClient(policy), model=policy.name,
