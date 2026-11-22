@@ -154,3 +154,14 @@ def test_checks_that_keep_failing_name_the_check(model):
     script += [package(**{"tests/test_grip_watch.py": ("def test", "def test_broken():\n    assert False\n\n\ndef test")})] * 3
     job = create.run(create.Job("c", [{"role": "user", "text": "x"}]), None, set())
     assert job.status == "failed" and job.error.startswith("generated plugin failed test")
+
+
+def test_model_calls_are_counted_by_day_and_model(tmp_path, monkeypatch):
+    from dreamkit import llm
+
+    monkeypatch.setattr(llm, "USAGE", tmp_path / "usage.json")
+    for outcome in ("ok", "ok", "429"):
+        llm.record("gemini-3.6-flash", outcome)
+    llm.record("gemini-3.8-flash", "504")
+    assert llm.usage_today() == {"gemini-3.6-flash": {"requests": 3, "ok": 2, "429": 1},
+                                 "gemini-3.8-flash": {"requests": 1, "504": 1}}

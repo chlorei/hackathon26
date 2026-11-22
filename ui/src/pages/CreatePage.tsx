@@ -96,6 +96,7 @@ export default function CreatePage({ onOpenPlugins }: { onOpenPlugins: () => voi
             className="min-w-0 flex-1 resize-none rounded-lg border border-line bg-panel px-3 py-2 text-[14px] outline-none focus:border-signal" />
           <Button type="submit" variant="go" disabled={running || !text.trim()} aria-label="Send"><Send className="h-4 w-4" /></Button>
         </form>
+        <ModelUsage key={messages.length} />
       </Panel>
       <Preview job={ready} onOpenPlugins={onOpenPlugins} />
     </div>
@@ -193,5 +194,19 @@ function Preview({ job, onOpenPlugins }: { job: CreateJob | null; onOpenPlugins:
         </div>
       </Panel>
     </div>
+  )
+}
+
+/** This machine's Gemini calls today (dreamkit counts its own; the free tier allows about 20 a model a day). */
+function ModelUsage() {
+  const usage = useQuery({ queryKey: ['llm-usage'], queryFn: api.llmUsage, refetchInterval: 10_000 })
+  const rows = Object.entries(usage.data?.today ?? {}).filter(([m]) => m.startsWith('gemini') || m.startsWith('claude'))
+  if (!rows.length) return null
+  return (
+    <p className="border-t border-line px-4 py-2 text-[12px] text-faint">
+      Model calls today: {rows.map(([m, c], i) => (
+        <span key={m}>{i ? ' · ' : ''}<b className="font-medium text-dim">{m.replace('gemini-', '')}</b> {c.requests}{c['429'] ? ` (${c['429']} over quota)` : ''}</span>
+      ))}
+    </p>
   )
 }

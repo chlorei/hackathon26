@@ -9,10 +9,18 @@
 // monitor-stats: what the camera judge saw in each try (its frames and verdicts), and how often it agreed.
 const judged = (r) => typeof r.success === 'boolean'
 const isFinal = (r) => r.final !== false
+// this machine's model calls today (dreamkit counts its own; Gemini's free tier allows about 20 a model a day)
+const usageLine = (u) => {
+  const rows = Object.entries(u || {}).filter(([m]) => m.startsWith('gemini') || m.startsWith('claude'))
+  if (!rows.length) return dk.h('p', { class: 'dk-faint' }, 'No model calls from this machine today.')
+  return dk.h('p', { class: 'dk-faint' }, 'Model calls from this machine today: ', rows.map(([m, c], i) => [i ? ' · ' : '',
+    dk.h('b', {}, m.replace('gemini-', '')), ` ${c.requests}`, c['429'] ? ` (${c['429']} over quota)` : '', c.timeout || c['504'] ? ` (${(c.timeout || 0) + (c['504'] || 0)} timed out)` : '']))
+}
 dk.plugin({
   how: (P) => [
     dk.h('p', {}, `At the end of each attempt, and of every try a recovery cut short, it sends ${P.frames} frames of the ${P.camera} camera (at most ${P.image_width} px wide) and the task to a vision model (${P.provider === 'gemini' ? 'Gemini Flash-Lite, then Flash' : 'Claude'}), which says success or not, a score, the reason, and a comment on every frame.`),
-    dk.h('p', {}, `It waits at most ${P.timeout_s} s for a model call and ${P.max_wait_s} s for a verdict; the robot never waits for it. It also tells how often the camera agrees with success-check.`),
+    dk.h('p', {}, `It waits at most ${P.timeout_s} s for a model call and ${P.max_wait_s} s for a verdict; the robot never waits for it. It also tells how often the camera agrees with success-check. An attempt it could not judge says why (not judged: quota, no key, timeout).`),
+    usageLine(dk.INFO.llm_usage),
   ],
   numbers: async (c) => {
     c.rows = (await dk.json('monitor-stats/attempts.json')) || []

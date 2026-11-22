@@ -8,12 +8,17 @@ Gemini model answers, Claude is asked if ANTHROPIC_API_KEY is set.
 from __future__ import annotations
 
 import base64
+import datetime
+import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
 
+USAGE = Path("~/.dreamkit/llm_usage.json").expanduser()  # this machine's model calls by day and model
+_usage_lock = threading.Lock()
 GEMINI_RETRIES = 1  # per model, for 500 only
 MIN_CALL_S = 3.0  # less time than this left before the deadline: do not start another call
 
@@ -36,6 +41,32 @@ def load_env(start: Path | None = None) -> None:
                 if sep and key.strip() and not key.lstrip().startswith("#"):
                     os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
             return
+
+
+def record(model: str, outcome: str) -> None:
+    """Counts one call (outcome: ok, 429, 503, …) for today. Gemini does not say how much of a quota is used, so
+    dreamkit counts its own calls; best effort, never in the way of the call."""
+    try:
+        with _usage_lock:
+            data = json.loads(USAGE.read_text()) if USAGE.is_file() else {}
+            day = data.setdefault(datetime.date.today().isoformat(), {})
+            row = day.setdefault(model, {})
+            row[outcome] = row.get(outcome, 0) + 1
+            for old in sorted(data)[:-7]:  # a week is enough
+                del data[old]
+            USAGE.parent.mkdir(parents=True, exist_ok=True)
+            USAGE.write_text(json.dumps(data, indent=1))
+    except (OSError, ValueError):
+        pass
+
+
+def usage_today() -> dict[str, dict[str, int]]:
+    """{model: {"requests": n, "ok": k, "429": q, …}} for today, on this machine."""
+    try:
+        day = json.loads(USAGE.read_text()).get(datetime.date.today().isoformat(), {}) if USAGE.is_file() else {}
+    except (OSError, ValueError):
+        return {}
+    return {m: {"requests": sum(c.values()), **c} for m, c in sorted(day.items())}
 
 
 def gemini(images: list[bytes], prompt: str, models: list[str], timeout_s: float, deadline: float,
@@ -64,12 +95,15 @@ def gemini(images: list[bytes], prompt: str, models: list[str], timeout_s: float
                 config=types.GenerateContentConfig(response_mime_type="application/json",
                                                    max_output_tokens=max_tokens))
         except errors.APIError as e:
+            record(model, str(e.code))
             if e.code not in (404, 429, 500, 503, 504):
                 raise  # 400/401/403: the key or the request, another model will not help
             failures.append(f"{model}: {e.code}")
         except httpx2.TransportError as e:
+            record(model, "timeout")
             failures.append(f"{model}: {type(e).__name__}")
         else:
+            record(model, "ok")
             if failures:
                 print(f"[dreamkit.llm] answered by {model} after {', '.join(failures)}", file=sys.stderr)
             return str(resp.text), model
@@ -99,6 +133,7 @@ def claude(images: list[bytes], prompt: str, model: str, timeout_s: float, deadl
             betas=["server-side-fallback-2026-07-01"],
             fallbacks="default",  # on a refusal the API reruns the request on a fallback model
         )
+    record(model, "ok" if resp.stop_reason != "refusal" else "refusal")
     if resp.stop_reason == "refusal":
         raise RuntimeError("claude declined the request")
     return "".join(b.text for b in resp.content if b.type == "text")

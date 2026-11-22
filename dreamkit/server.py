@@ -325,6 +325,12 @@ def create_app(config_path: str | Path) -> FastAPI:
         taken = {n for n, e in found.items() if e["source"] != "generated"} | set(host.apps)
         return create.start(body.messages, body.files, taken).public()
 
+    @app.get("/api/llm/usage")
+    def llm_usage():
+        from . import llm
+
+        return {"today": llm.usage_today()}
+
     @app.get("/api/create/{job_id}")
     def create_get(job_id: str):
         return create_job(job_id).public()
@@ -614,6 +620,10 @@ def create_app(config_path: str | Path) -> FastAPI:
             row = next((p for p in plugin_list()["plugins"] if p["name"] == name), {"name": name})
         except Exception:  # noqa: BLE001 - the page still shows, with only its name
             row = {"name": name}
+        if name == "monitor-stats":  # its page tells how many model calls this machine made today
+            from . import llm
+
+            row = {**row, "llm_usage": llm.usage_today()}
         info = json.dumps(row, default=str).replace("</", "<\\/")
         head = f'<base href="/plugin-ui/{name}/">{THEME_LINK}<script>window.DK_PLUGIN = {info};</script>'
         lower = html.lower()

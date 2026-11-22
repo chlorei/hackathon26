@@ -218,6 +218,7 @@ export const api = {
   create: (messages: ChatMessage[], files?: Record<string, string> | null) =>
     call<CreateJob>('/api/create', { method: 'POST', body: JSON.stringify({ messages, files: files ?? null }) }),
   createJob: (id: string) => call<CreateJob>(`/api/create/${id}`),
+  llmUsage: () => call<{ today: Record<string, { requests: number; ok?: number; '429'?: number }> }>('/api/llm/usage'),
   addToCatalog: (id: string, enable: boolean) =>
     call<{ plugins: PluginInfo[] }>(`/api/create/${id}/catalog`, { method: 'POST', body: JSON.stringify({ enable }) }),
 }
