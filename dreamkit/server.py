@@ -66,6 +66,40 @@ def _is_live(folder: Path, info: dict[str, Any] | None) -> bool:
     return bool(info and info.get("status") == "running" and beat and time.time() - beat.get("updated", 0) < LIVE_FRESH_S)
 
 
+def _annotate(run: dict[str, Any]) -> None:
+    """Fields the panel reads on every run, filled for runs written before they existed.
+
+    - source: "gym" for DreamGym's runs, "loop" for everything else.
+    - kind: "dream" when Dream-1 (or a fine-tune of it) drove the robot, "scripted" for the mock, DreamGym's scripted
+      expert, teleop and test policies: only "dream" runs say anything about the model.
+    - episodes[].task_readable: whether dreamkit can read an object and a target out of the attempt's task; without
+      them nothing judged success, so such attempts are counted apart (invalid), not as failures."""
+    from .task import parse
+
+    run.setdefault("source", "loop")
+    model = str(run.get("model") or "")
+    scripted = bool(run.get("mock")) or not model or any(w in model.lower() for w in ("scripted", "fake", "mock", "teleop"))
+    run["kind"] = "scripted" if scripted or "dream" not in model.lower() else "dream"
+    # every field the panel reads is there, whatever wrote the run (older dreamkit, a crash, another tool)
+    run.setdefault("task", "")
+    run.setdefault("model", "")
+    run.setdefault("plugins", [])
+    episodes = run.setdefault("episodes", [])
+    run.setdefault("summary", {"attempts": len(episodes), "successes": sum(1 for e in episodes if e.get("success")),
+                               "scenes": 0, "scene_successes": 0, "reasons": {}})
+    if not isinstance(run.get("seconds"), (int, float)):  # the attempt length the loop allowed; older runs lack it
+        run["seconds"] = max([float(e.get("duration_s") or 0) for e in episodes] + [0.0])
+    for e in episodes:
+        e.setdefault("duration_s", 0.0)
+        e.setdefault("videos", [])
+        e.setdefault("requests", 0)
+        e.setdefault("scene", 0)
+        e.setdefault("attempt", 1)
+        if "task_readable" not in e:
+            obj, target = parse(str(e.get("task") or run.get("task") or ""))
+            e["task_readable"] = bool(obj and target)
+
+
 class AppsHost:
     """Serves every app plugin under /apps/<name>/: its router at api/, its page at /. Apps are looked up again on
     refresh() (after an install, on /api/apps), so a new app works without restarting the panel (§13)."""
@@ -338,6 +372,7 @@ def create_app(config_path: str | Path) -> FastAPI:
                 r["cost_usd"] = round(cost.usd(calls, cost.price_per_hour(r.get("model"), bool(r.get("mock")), cfg.prices)), 4)
             if r.get("status") == "running" and not _is_live(runs_root() / r["id"], r):
                 r["status"] = "interrupted"  # its loop is gone
+            _annotate(r)
         return {"runs": runs}
 
     @app.get("/api/runs/{run_id}")
@@ -359,6 +394,7 @@ def create_app(config_path: str | Path) -> FastAPI:
         report = next((r for r in (folder / "history" / "report.html", folder / "report" / "report.html",
                                    folder / "report.html") if r.is_file()), None)
         info["report"] = str(report.relative_to(folder)) if report else None
+        _annotate(info)
         return info
 
     @app.delete("/api/runs/{run_id}")

@@ -188,8 +188,14 @@ def cmd_record(args) -> int:
         kit.close()
         env.close()
     print(f"\n{sum(kept.values())} episodes kept, {writer.total_frames} frames at {args.fps} fps in {out}")
+    if status == "stopped":
+        print("recording stopped by the user")
+        return 0  # a stop is not a failure, whatever was kept by then
+    if not sum(kept.values()):
+        print(f"Error: no episode succeeded in {sum(tried.values())} tries, so nothing was kept")
+        return 1
     print(f"next: dreamgym finetune {out} --validate-only")
-    return 0 if sum(kept.values()) else 1
+    return 0
 
 
 def cmd_finetune(args) -> int:

@@ -53,6 +53,11 @@ export default function CreatePage({ onOpenPlugins }: { onOpenPlugins: () => voi
   }
 
   return (
+    <div className="space-y-4">
+    <div className="flex flex-wrap items-center gap-3">
+      <a href="#/plugins" className="inline-flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] text-dim hover:bg-raised hover:text-ink">‹ Plugins</a>
+      <h1 className="text-[22px] font-semibold">Create a plugin with AI</h1>
+    </div>
     <div className="grid gap-6 xl:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
       <Panel className="flex min-h-[560px] flex-col">
         <PanelTitle>Describe a plugin</PanelTitle>
@@ -93,6 +98,7 @@ export default function CreatePage({ onOpenPlugins }: { onOpenPlugins: () => voi
         </form>
       </Panel>
       <Preview job={ready} onOpenPlugins={onOpenPlugins} />
+    </div>
     </div>
   )
 }

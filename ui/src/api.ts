@@ -38,6 +38,7 @@ export interface EpisodeResult {
   timeline?: { t: number; kind: string; message: string }[]
   duration_s: number
   requests: number
+  task_readable?: boolean  // dreamkit could read an object and a target from the task (false: not judged, invalid)
   cost_usd?: number  // what this attempt's model calls cost (dreamkit.cost)
   videos: string[]
   latency?: { mean_ms: number; p95_ms: number; max_ms: number; n: number }
@@ -51,7 +52,6 @@ export interface EpisodeResult {
 }
 
 export const recoveriesOf = (e: EpisodeResult) => e.recovery?.count ?? e.recoveries ?? 0
-export const latencyOf = (e: EpisodeResult) => e['latency-monitor'] ?? e.latency
 
 export interface AppInfo {
   name: string
@@ -67,7 +67,8 @@ export interface AppInfo {
 
 export interface RunInfo {
   id: string
-  source?: string
+  source: 'gym' | 'loop'  // filled by the server for every run
+  kind: 'dream' | 'scripted'  // Dream-1 drove it, or a mock / scripted / test policy
   task: string
   model: string
   mock: boolean
@@ -157,20 +158,35 @@ export type StreamRecord =
   | { type: 'episode_end'; episode: number; scene: number; attempt: number; duration_s: number; result: EpisodeResult }
   | { type: 'run_end'; run_id: string; status: string; attempts?: number; successes?: number }
 
+/** A failed request: `message` is for people; `details` (status, server text) goes in a Details fold. */
+export class ApiError extends Error {
+  details: string
+  status: number
+  constructor(message: string, details: string, status: number) {
+    super(message)
+    this.details = details
+    this.status = status
+  }
+}
+
+/** The one fetch every page uses. Errors come back as ApiError with a short message and the rest as details. */
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...init,
-    headers: { 'content-type': 'application/json', ...(init?.headers || {}) },
-  })
+  let response: Response
+  try {
+    response = await fetch(path, { ...init, headers: { 'content-type': 'application/json', ...(init?.headers || {}) } })
+  } catch (error) {
+    throw new ApiError('The dreamkit server does not answer. Is dreamkit ui still running?', String(error), 0)
+  }
   if (!response.ok) {
     let detail = response.statusText
     try {
       const body = await response.json()
-      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+      detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail ?? body)
     } catch {
       /* not json */
     }
-    throw new Error(detail)
+    const short = detail.split('\n')[0].replace(/\/(Users|home|private|var)\/[^\s:]+/g, '…')  // no local paths up front
+    throw new ApiError(short.length > 160 ? `${short.slice(0, 157)}…` : short, `${response.status} ${path}\n${detail}`, response.status)
   }
   return response.json() as Promise<T>
 }
@@ -253,29 +269,4 @@ export function wsUrl(path: string): string {
   return `${proto}://${window.location.host}${path}`
 }
 
-export const REASON_LABEL: Record<string, string> = {
-  fell_off_table: 'fell off table',
-  dropped: 'dropped',
-  missed_target: 'released off target',  // runs before the merge
-  released_off_target: 'released off target',
-  camera_failure: 'camera failure',
-  stopped_by_plugin: 'camera failure',
-  grasped_air: 'grasped air',
-  collision: 'collision',
-  stalled: 'stalled',
-  still_held: 'still held at the end',
-  untouched: 'not reached',  // DreamGym runs before the shared codes
-  misplaced: 'released off target',
-  not_settled: 'timeout',
-  api_error: 'model error',
-  ik_error: 'error',
-  invalid_action: 'error',
-  not_reached: 'not reached',
-  slow_model: 'slow model',
-  timeout: 'timeout',
-  stopped: 'stopped',
-  model_error: 'model error',
-  error: 'error',
-  marked_failed: 'marked failed',
-  unknown: 'unknown',
-}
+export { REASON_LABEL } from './labels'

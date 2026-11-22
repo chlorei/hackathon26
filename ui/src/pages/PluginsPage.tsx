@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
-import { Download, GitBranch, Loader2, Trash2 } from 'lucide-react'
+import { Download, GitBranch, Loader2, Sparkles } from 'lucide-react'
 import { api, type PluginInfo, type SchemaProp } from '../api'
-import { Button, ICON_BY_PLUGIN, Input, Panel, PanelTitle, PluginIcon, PluginPageDrawer, StatusDot, Tag, Toggle, type PluginPage } from '../ui'
+import { Button, ICON_BY_PLUGIN, Input, MoreMenu, Panel, PanelTitle, PluginIcon, PluginPageDrawer, StatusDot, Toggle, type PluginPage } from '../ui'
+import { count } from '../labels'
 
 /** Plugins grouped by what they are for, in the order a failure goes through them: Detect → Recover → Learn. */
 const STAGES: { key: 'detect' | 'recover' | 'learn'; n: number; title: string; hint: string; lead: string }[] = [
@@ -11,7 +12,6 @@ const STAGES: { key: 'detect' | 'recover' | 'learn'; n: number; title: string; h
   { key: 'recover', n: 2, title: 'Recover', hint: 'Act on it: fix the attempt, or keep the robot safe', lead: 'recovery' },
   { key: 'learn', n: 3, title: 'Learn', hint: 'Keep the videos and data that come out of it', lead: 'harvester' },
 ]
-const CAPABILITY: Record<string, string> = { observe: 'watches', modify_actions: 'adjusts actions', control: 'controls the robot' }
 
 function stageOf(p: PluginInfo): 'detect' | 'recover' | 'learn' {
   if (p.name === 'failure-monitor') return 'detect'
@@ -32,49 +32,60 @@ export default function PluginsPage({ focus }: { focus?: string | null }) {
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs })
   const lastRun = runs.data?.runs[0]?.id ?? null  // newest first
   const [page, setPage] = useState<PluginPage | null>(null)
-  const list = useMemo(() => (plugins.data?.plugins ?? []).slice().sort((a, b) => a.order - b.order), [plugins.data])
+  const list = useMemo(() => (plugins.data?.plugins ?? []).filter((p) => p.installed).sort((a, b) => a.order - b.order), [plugins.data])
+  const missing = (plugins.data?.plugins ?? []).filter((p) => !p.installed)
   useEffect(() => {
     for (const p of list) ICON_BY_PLUGIN[p.name] = p.icon
   }, [list])
   if (plugins.isLoading) return <p className="text-dim">Loading plugins…</p>
   if (plugins.isError) return <p className="text-bad">Cannot reach the dreamkit server: {(plugins.error as Error).message}</p>
   const on = list.filter((p) => p.enabled).length
+  const control = list.find((p) => p.enabled && p.capability === 'control')?.name ?? null
   const toggle = (name: string) => setOpen(open === name ? null : name)
   return (
     <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-6">
-        <div className="flex flex-wrap items-end justify-between gap-2">
+        <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-[26px] font-bold tracking-[-0.015em]">Plugins</h1>
-            <p className="mt-1 text-dim">{on} of {list.length} on. Changes apply the next time your loop starts (<code className="text-ink">dreamkit.wrap()</code>).</p>
+            <p className="mt-1 text-dim">{on} of {list.length} on. Changes apply the next time your loop starts.</p>
           </div>
+          <a href="#/plugins/create" className="inline-flex items-center gap-2 rounded-lg border border-line bg-panel px-3.5 py-1.5 text-[13px] font-medium hover:bg-raised">
+            <Sparkles className="h-4 w-4" strokeWidth={1.75} /> Create with AI
+          </a>
         </div>
         {STAGES.map((stage) => {
           const items = list.filter((p) => stageOf(p) === stage.key)
-            .sort((a, b) => Number(b.name === stage.lead) - Number(a.name === stage.lead))
+            .sort((a, b) => Number(b.enabled) - Number(a.enabled) || Number(b.name === stage.lead) - Number(a.name === stage.lead))
           if (!items.length) return null
           return (
             <section key={stage.key}>
               <div className="mb-2.5 flex items-baseline gap-3">
-                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-[13px] font-bold text-white">{stage.n}</span>
+                <span className="text-[15px] font-semibold text-faint tabular-nums">{stage.n}</span>
                 <h2 className="text-[19px] font-semibold">{stage.title}</h2>
                 <span className="text-dim">{stage.hint}</span>
               </div>
               <Panel>
                 {items.map((p) => (
-                  <PluginRow key={p.name} plugin={p} lead={p.name === stage.lead} open={open === p.name} onOpen={() => toggle(p.name)}
+                  <PluginRow key={p.name} plugin={p} open={open === p.name} onOpen={() => toggle(p.name)}
+                    blockedBy={p.capability === 'control' && !p.enabled && control && control !== p.name ? control : null}
                     lastRun={lastRun} onPage={() => setPage({ plugin: p.name, runId: lastRun ?? '', episode: null })} />
                 ))}
               </Panel>
             </section>
           )
         })}
-        {(plugins.data?.problems.length ?? 0) > 0 && (
-          <Panel className="border-bad/40">
-            <PanelTitle>Refused by the plugin standard</PanelTitle>
-            <pre className="mx-5 mb-4 max-h-60 overflow-auto rounded-lg bg-log p-3 font-mono text-[12.5px] whitespace-pre-wrap text-[#e8e6e1]">
-              {plugins.data?.problems.join('\n\n')}
-            </pre>
+        {(missing.length > 0 || (plugins.data?.problems.length ?? 0) > 0) && (
+          <Panel className="border-bad/40 px-5 py-4">
+            <p className="text-[15px] text-bad">
+              {missing.length > 0 && <>dreamkit.yaml names {missing.length === 1 ? 'a plugin that is' : 'plugins that are'} not installed: {missing.map((m) => m.name).join(', ')}. </>}
+              {(plugins.data?.problems.length ?? 0) > 0 && <>{count(plugins.data!.problems.length, 'plugin')} refused by the plugin standard.</>}
+            </p>
+            {(plugins.data?.problems.length ?? 0) > 0 && (
+              <details className="mt-2 text-[13px] text-dim"><summary className="cursor-pointer">Details</summary>
+                <pre className="mt-2 max-h-60 overflow-auto font-mono text-[12px] whitespace-pre-wrap">{plugins.data?.problems.join('\n\n')}</pre>
+              </details>
+            )}
           </Panel>
         )}
       </div>
@@ -95,25 +106,26 @@ function useSetPlugins() {
   }
 }
 
-/** Status dot, ms per step, errors and why it was switched off — from the most recent run. */
+/** A dot and one short fact from the most recent run; the longer story is in the tooltip. */
 function StatusLine({ plugin, className }: { plugin: PluginInfo; className?: string }) {
   const s = plugin.stats
   const tone = !plugin.enabled ? 'off' : plugin.refused || s?.disabled ? 'bad' : s?.errors ? 'warn' : 'ok'
-  const text = !plugin.enabled ? 'Off'
-    : plugin.refused ? `Not running: ${plugin.refused}`
-    : s?.disabled ? s.disabled
-    : s ? (s.errors ? `${s.errors} error${s.errors > 1 ? 's' : ''} last run` : 'Healthy last run') + ` · ${s.ms_per_step.toFixed(2)} ms/step`
-    : 'On · no run yet'
+  const text = !plugin.enabled ? 'off'
+    : plugin.refused || s?.disabled ? 'not running'
+    : s?.errors ? count(s.errors, 'error')
+    : s ? `${s.ms_per_step.toFixed(2)} ms/step` : 'no run yet'
+  const why = plugin.refused ?? s?.disabled ?? s?.last_error ?? (s ? 'healthy in the last run' : undefined)
   return (
-    <div className={clsx('flex items-start gap-2 text-[13px]', className)} title={s?.last_error ?? undefined}>
-      <span className="mt-[3px]"><StatusDot tone={tone} /></span>
-      <span className={clsx(tone === 'bad' ? 'text-bad' : 'text-dim')}>{text}</span>
+    <div className={clsx('flex items-center gap-2 text-[13px] tabular-nums', className)} title={why}>
+      <StatusDot tone={tone} />
+      <span className={clsx(tone === 'bad' ? 'text-bad' : tone === 'warn' ? 'text-warn' : 'text-dim')}>{text}</span>
     </div>
   )
 }
 
-function PluginRow({ plugin, open, onOpen, lead, lastRun, onPage }: {
-  plugin: PluginInfo; open: boolean; onOpen: () => void; lead?: boolean
+function PluginRow({ plugin, open, onOpen, blockedBy, onPage }: {
+  plugin: PluginInfo; open: boolean; onOpen: () => void
+  blockedBy: string | null  // another control plugin is on: only one may be
   lastRun: string | null; onPage: () => void  // the plugin's own page (§7a), for the newest run
 }) {
   const set = useSetPlugins()
@@ -136,29 +148,27 @@ function PluginRow({ plugin, open, onOpen, lead, lastRun, onPage }: {
   const external = plugin.source && plugin.source !== 'builtin'
   return (
     <div id={`plugin-${plugin.name}`} className="border-b border-line last:border-0">
-      <div className={clsx('flex items-center gap-4 px-5', lead ? 'py-4' : 'py-3.5')}>
-        <span className={clsx('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', plugin.enabled ? 'bg-raised text-ink' : 'bg-raised/60 text-faint')}>
+      <div className={clsx('flex items-center gap-4 px-5 py-3.5', !plugin.enabled && 'opacity-60')}>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-raised text-ink">
           <PluginIcon name={plugin.name} icon={plugin.icon} className="!h-[18px] !w-[18px]" />
         </span>
-        <button onClick={onOpen} className="min-w-0 flex-1 text-left" aria-expanded={open}>
-          <span className={clsx('flex flex-wrap items-center gap-2 font-semibold', lead ? 'text-[16.5px]' : 'text-[15px]')}>
+        <button onClick={onOpen} className="min-w-0 flex-1 text-left" aria-expanded={open} title={plugin.description}>
+          <span className="flex items-center gap-2 text-[15px] font-semibold">
             {plugin.name}
-            {lead && <Tag tone="plain">main</Tag>}
-            {plugin.capability !== 'observe' && <Tag tone={plugin.capability === 'control' ? 'signal' : 'warn'}>{CAPABILITY[plugin.capability]}</Tag>}
-            {plugin.needs?.includes('world') && <Tag tone="plain" title="Reads positions and contacts, which only the simulator has: off on a real robot">sim only</Tag>}
-            {external && <Tag tone="steel">{plugin.source === 'pip' ? 'installed' : plugin.source}</Tag>}
-            {!plugin.installed && <Tag tone="bad">not installed</Tag>}
+            {plugin.needs?.includes('world') && <span className="text-[12px] font-normal text-dim" title="Reads positions and contacts, which only the simulator has: off on a real robot">sim only</span>}
           </span>
-          <span className="mt-0.5 block text-[13.5px] leading-snug text-dim">{plugin.description}</span>
-          {plugin.capability === 'control' && plugin.conflicts.length > 0 && (
-            <span className="mt-0.5 block text-[12.5px] text-dim">Conflicts with {plugin.conflicts.join(', ')}: only one control plugin can be on.</span>
-          )}
+          <span className="mt-0.5 block truncate text-[14px] text-dim">{plugin.description}</span>
+          {blockedBy && <span className="mt-0.5 block text-[13px] text-warn">Only one plugin may control the robot: turn off {blockedBy} first.</span>}
         </button>
-        <StatusLine plugin={plugin} className="hidden w-60 shrink-0 lg:flex" />
-        <Button variant="quiet" onClick={onPage} className="!px-2.5"
-          title={lastRun ? `What ${plugin.name} did in the last run (${lastRun})` : `What ${plugin.name} does`}>Open page</Button>
-        <Button variant="quiet" onClick={onOpen} className="!px-2.5">{open ? 'Close' : 'Settings'}</Button>
-        <Toggle checked={plugin.enabled} disabled={!plugin.installed || update.isPending} onChange={(v) => update.mutate({ enabled: v })} />
+        <StatusLine plugin={plugin} className="hidden w-36 shrink-0 lg:flex" />
+        <MoreMenu label={`More for ${plugin.name}`} items={[
+          { label: open ? 'Close settings' : 'Settings', onSelect: onOpen },
+          { label: 'Open page', onSelect: onPage },
+          ...(external ? [{ label: plugin.source === 'generated' ? 'Delete' : 'Uninstall', tone: 'bad' as const, onSelect: () => remove.mutate() }] : []),
+        ]} />
+        <span title={blockedBy ? `turn off ${blockedBy} first` : undefined}>
+          <Toggle checked={plugin.enabled} disabled={update.isPending || Boolean(blockedBy)} onChange={(v) => update.mutate({ enabled: v })} />
+        </span>
       </div>
       {open && (
         <div className="space-y-3 bg-base/70 px-5 py-4">
@@ -175,8 +185,7 @@ function PluginRow({ plugin, open, onOpen, lead, lastRun, onPage }: {
             </p>
           )}
           <div className="flex items-center gap-2 pt-1">
-            <span className="flex-1 text-[12.5px] text-bad">{error}</span>
-            {external && <Button variant="stop" onClick={() => remove.mutate()} disabled={remove.isPending}><Trash2 className="h-3.5 w-3.5" /> {plugin.source === 'generated' ? 'Delete' : 'Uninstall'}</Button>}
+            <span className="flex-1 text-[13px] text-bad">{error}</span>
             {props.length > 0 && <Button variant="quiet" onClick={() => setValues(plugin.defaults)}>Defaults</Button>}
             {props.length > 0 && <Button variant="go" disabled={!dirty || update.isPending} onClick={() => update.mutate({ params: values })}>Save settings</Button>}
           </div>
@@ -271,13 +280,15 @@ function useInstall() {
 function InstallLog({ result }: { result?: { ok: boolean; log: string; app?: string | null } }) {
   if (!result) return null
   return (
-    <div className="space-y-2">
-      <p className={clsx('text-[13px] font-medium', result.ok ? 'text-ok' : 'text-bad')}>
-        {!result.ok ? 'Not installed: it did not pass the checks below.'
-          : result.app ? `Installed: it passed check and its tests. Its tab "${result.app}" is in the top bar.`
-          : 'Installed: it passed check, tests and bench. Switch it on in the list.'}
+    <div>
+      <p className={clsx('text-[14px]', result.ok ? 'text-ok' : 'text-bad')}>
+        {!result.ok ? 'Not installed: it did not pass the checks.'
+          : result.app ? `Installed. Its tab "${result.app}" is in the top bar.`
+          : 'Installed. Switch it on in the list.'}
       </p>
-      <pre className="max-h-72 overflow-auto rounded-lg bg-log p-3 font-mono text-[12px] whitespace-pre-wrap text-[#e8e6e1]">{result.log}</pre>
+      <details className="mt-1 text-[13px] text-dim"><summary className="cursor-pointer">Details</summary>
+        <pre className="mt-1 max-h-72 overflow-auto font-mono text-[12px] whitespace-pre-wrap">{result.log}</pre>
+      </details>
     </div>
   )
 }
@@ -294,11 +305,9 @@ function AddFromGitHub() {
           {install.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <GitBranch className="h-4 w-4" />} {install.isPending ? 'Checking and installing…' : 'Install'}
         </Button>
         <p className="text-[12px] leading-relaxed text-dim">
-          Before anything is installed it must pass <code className="text-ink">dreamkit check</code>, its own tests and the 1 ms/step bench on
-          the fixture library. A plugin is code that runs on this machine: install what you trust.
+          It must pass dreamkit's checks and its own tests first. A plugin runs code on this machine: install what you trust.
         </p>
         <InstallLog result={install.data} />
-        {install.isError && <p className="text-[12.5px] text-bad">{(install.error as Error).message}</p>}
       </form>
     </Panel>
   )
@@ -310,16 +319,16 @@ function Catalogue() {
   const entries = (registry.data?.plugins ?? []).filter((p) => p.repo !== 'builtin')
   return (
     <Panel>
-      <PanelTitle right={<span className="text-[12px] text-dim">{registry.data?.source}</span>}>Catalogue</PanelTitle>
+      <PanelTitle>Catalogue</PanelTitle>
       <div className="border-t border-line">
         {entries.map((p) => (
           <div key={p.name} className="flex items-start gap-3 border-b border-line px-5 py-3 last:border-0">
             <div className="min-w-0 flex-1">
               <p className="text-[14px] font-medium">{p.name}</p>
-              <p className="text-[12.5px] text-dim">{p.description}</p>
-              <a href={p.repo} target="_blank" rel="noreferrer" className="text-[12px] text-signal hover:underline">{p.repo.replace('https://github.com/', '')}</a>
+              <p className="text-[13px] text-dim">{p.description}</p>
+              <a href={p.repo} target="_blank" rel="noreferrer" className="text-[12px] text-dim underline-offset-2 hover:underline">GitHub</a>
             </div>
-            {p.installed ? <Tag tone="ok">installed</Tag> : (
+            {p.installed ? <span className="text-[13px] text-dim">installed</span> : (
               <Button onClick={() => install.mutate(p.name)} disabled={install.isPending}>
                 {install.isPending && install.variables === p.name ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />} Install
               </Button>

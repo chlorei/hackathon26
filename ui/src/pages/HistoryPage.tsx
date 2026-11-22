@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import clsx from 'clsx'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { ArrowLeft, Clapperboard, Database, FileText, FolderOpen, Trash2 } from 'lucide-react'
-import { api, atOf, recoveriesOf, REASON_LABEL, type EpisodeResult, type RunInfo } from '../api'
-import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTitle, PluginIcon, PluginPageDrawer, Tag, when, type Mark, type PluginPage } from '../ui'
+import { ArrowLeft, FolderOpen, Trash2 } from 'lucide-react'
+import { api, ApiError, atOf, recoveriesOf, type EpisodeResult, type RunInfo } from '../api'
+import { count, POLICY_FILTER, reasonLabel, SOURCE_LABEL, TERM } from '../labels'
+import { AttemptStrip, Button, Fold, ICON_BY_PLUGIN, MoreMenu, Outcome, pagesOf, Panel, PanelTitle, PluginIcon, PluginPageDrawer, Tag, when, type Mark, type MenuItem, type PluginPage } from '../ui'
 
-const TIP = { contentStyle: { background: '#ffffff', border: '1px solid #e4e2dc', borderRadius: 8, fontSize: 12, color: '#17181a' } }
+const TIP = { contentStyle: { background: 'var(--dk-panel)', border: '1px solid var(--dk-line)', borderRadius: 8, fontSize: 12, color: 'var(--dk-ink)' } }
 const BAD_KINDS = new Set(['separated', 'fell', 'collision', 'stalled'])
 
 export default function HistoryPage({ runId, episode, onOpen, onBack }: {
@@ -18,205 +19,235 @@ export default function HistoryPage({ runId, episode, onOpen, onBack }: {
   return runId ? <RunDetail id={runId} initial={episode} onBack={onBack} onOpen={onOpen} /> : <RunList onOpen={onOpen} />
 }
 
-type Policy = 'real' | 'mock' | 'all'
-const DASH = '—'
-const field = (e: EpisodeResult, key: string) => (e as unknown as Record<string, unknown>)[key] as Record<string, unknown> | undefined
+type Filter = 'dream' | 'scripted' | 'all'
 
-/** One run as the table shows it: every number from what the run already recorded; DASH where it did not. */
-function rowOf(r: RunInfo) {
-  const eps = r.episodes ?? []
-  const lat = eps.map((e) => field(e, 'failure-monitor')?.latency as { mean_ms?: number; calls?: number } | undefined)
+/** An attempt that counts: it ran, and dreamkit could read what success meant. The rest is shown grey as invalid. */
+const valid = (e: EpisodeResult) => e.task_readable !== false
+/** Mean model round trip of a run's attempts (failure-monitor's latency), in ms. */
+function latencyMs(eps: EpisodeResult[]): number | null {
+  const lat = eps.map((e) => (e as unknown as Record<string, { latency?: { mean_ms?: number; calls?: number } }>)['failure-monitor']?.latency)
     .filter((l): l is { mean_ms: number; calls: number } => Boolean(l && l.mean_ms != null && l.calls))
   const calls = lat.reduce((a, l) => a + l.calls, 0)
-  const meanMs = calls ? lat.reduce((a, l) => a + l.mean_ms * l.calls, 0) / calls : null
-  const judged = eps.filter((e) => typeof field(e, 'monitor-stats')?.success === 'boolean' && typeof e.success === 'boolean')
-  const agree = judged.filter((e) => field(e, 'monitor-stats')!.success === e.success).length
-  const helped = eps.filter((e) => (field(e, 'recovery')?.count as number | undefined))
-  const duration = eps.reduce((a, e) => a + (e.duration_s ?? 0), 0)
-  return {
-    duration: eps.length ? `${duration.toFixed(0)} s` : DASH,
-    latency: meanMs == null ? DASH : meanMs >= 1000 ? `${(meanMs / 1000).toFixed(1)} s` : `${Math.round(meanMs)} ms`,
-    cost: typeof r.cost_usd === 'number' ? `$${r.cost_usd.toFixed(2)}` : DASH,
-    judge: judged.length ? `${agree}/${judged.length} agree` : DASH,
-    judgeTone: judged.length && agree < judged.length ? 'text-warn' : 'text-dim',
-    saves: helped.length ? `${helped.filter((e) => e.success).length} of ${helped.length}` : DASH,
-  }
+  return calls ? lat.reduce((a, l) => a + l.mean_ms * l.calls, 0) / calls : null
+}
+const ms = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`)
+
+/** Failures by meaning (an old code and its new name are one reason), most frequent first. */
+function reasonsOf(eps: EpisodeResult[]) {
+  const by: Record<string, number> = {}
+  for (const e of eps) if (e.success === false) by[reasonLabel(e.reason)] = (by[reasonLabel(e.reason)] ?? 0) + 1
+  return Object.entries(by).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
 }
 
 function RunList({ onOpen }: { onOpen: (id: string) => void }) {
   const runs = useQuery({ queryKey: ['runs'], queryFn: api.runs, refetchInterval: 6000 })
-  const [policy, setPolicy] = useState<Policy>(() => (localStorage.getItem('dk-history-policy') as Policy) || 'real')
-  const choose = (p: Policy) => { localStorage.setItem('dk-history-policy', p); setPolicy(p) }
+  const [filter, setFilter] = useState<Filter>(() => {
+    const saved = localStorage.getItem('dk-history-filter') as Filter | null
+    return saved && saved in POLICY_FILTER ? saved : 'dream'
+  })
+  const choose = (f: Filter) => { localStorage.setItem('dk-history-filter', f); setFilter(f) }
+  if (runs.isError) return <LoadError error={runs.error} what="the runs" />
   const everything = runs.data?.runs ?? []
-  const list = everything.filter((r) => policy === 'all' || (policy === 'mock') === Boolean(r.mock))
-  const all = list.flatMap((r) => r.episodes ?? [])
-  // one bar per meaning: an old code and its new name (stopped_by_plugin / camera_failure) are the same reason
-  const byReason: Record<string, number> = {}
-  for (const e of all) if (e.success === false) {
-    const label = REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason ?? 'unknown'
-    byReason[label] = (byReason[label] ?? 0) + 1
-  }
-  const reasons = Object.entries(byReason).map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n)
-  const ok = all.filter((e) => e.success).length
-  const counts = { real: everything.filter((r) => !r.mock).length, mock: everything.filter((r) => r.mock).length, all: everything.length }
-  const scope = { real: 'real policy runs only', mock: 'mock runs only (scripted failures, not the model)', all: 'all runs, real and mock' }[policy]
-  const top = Math.max(1, ...reasons.map((r) => r.n))
+  const list = everything.filter((r) => filter === 'all' || r.kind === filter)
+  const attempts = list.flatMap((r) => r.episodes ?? [])
+  const counted = attempts.filter(valid)
+  const invalid = attempts.length - counted.length + list.filter((r) => !(r.episodes ?? []).length).length
+  const ok = counted.filter((e) => e.success).length
+  const reasons = reasonsOf(counted)
+  const counts = { dream: everything.filter((r) => r.kind === 'dream').length, scripted: everything.filter((r) => r.kind === 'scripted').length, all: everything.length }
+  const spent = list.reduce((a, r) => a + (r.cost_usd ?? 0), 0)
+  const top = reasons[0]
+  const topLat = top?.reason === reasonLabel('slow_model') ? latencyMs(counted.filter((e) => e.reason === 'slow_model')) : null
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex rounded-lg border border-line bg-panel p-0.5 text-[13px]" role="tablist" aria-label="Which runs">
-          {(['real', 'mock', 'all'] as const).map((p) => (
-            <button key={p} role="tab" aria-selected={policy === p} onClick={() => choose(p)}
-              className={clsx('rounded-md px-3 py-1', policy === p ? 'bg-raised font-medium text-ink' : 'text-dim hover:text-ink')}>
-              {p === 'real' ? 'Real' : p === 'mock' ? 'Mock' : 'All'} <span className="text-faint">{counts[p]}</span>
+          {(['dream', 'scripted', 'all'] as const).map((f) => (
+            <button key={f} role="tab" aria-selected={filter === f} onClick={() => choose(f)}
+              className={clsx('rounded-md px-3 py-1', filter === f ? 'bg-raised font-medium text-ink' : 'text-dim hover:text-ink')}>
+              {POLICY_FILTER[f]} <span className="text-faint">{counts[f]}</span>
             </button>
           ))}
         </div>
-        <p className="text-[13px] text-faint">Showing {scope}.</p>
+        <p className="text-[13px] text-dim">
+          {filter === 'dream' ? 'Runs where Dream-1 drove the robot.' : filter === 'scripted' ? 'Mock and scripted policies: they test the machinery, not the model.' : 'Every run.'}
+        </p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <Panel className="px-4 py-4">
-          <p className="text-[13px] text-dim">Across {policy === 'all' ? 'all' : policy} runs</p>
-          <p className="mt-1 text-[40px] font-semibold leading-none">{all.length ? Math.round((100 * ok) / all.length) : 0}<span className="text-[20px] text-dim">%</span></p>
-          <p className="mt-2 text-[13px] text-dim">{ok} of {all.length} attempts worked in {list.length} runs</p>
-          {(() => {
-            const spent = list.reduce((a, r) => a + (r.cost_usd ?? 0), 0)
-            return (
-              <p className="mt-2 border-t border-line pt-2 text-[13px] text-dim">
-                Spent <b className="text-ink tabular-nums">${spent.toFixed(2)}</b>
-                {ok ? <> · <b className="text-ink tabular-nums">${(spent / ok).toFixed(2)}</b> per success</> : null}
-                {policy === 'mock' ? ' (mock runs bill nothing)' : ''}
-              </p>
-            )
-          })()}
-        </Panel>
-        <Panel>
-          <PanelTitle>Why attempts failed</PanelTitle>
-          {!reasons.length ? <p className="px-5 pb-4 text-[13px] text-faint">No failures recorded{policy === 'all' ? '' : ` in ${policy} runs`}.</p>
-            : reasons.length <= 3 ? (
-              <ul className="px-5 pb-4 text-[14px]">
-                {reasons.map((r) => (
-                  <li key={r.reason} className="flex items-baseline justify-between border-b border-line/60 py-1.5 last:border-0">
-                    <span>{r.reason}</span><span className="font-semibold tabular-nums">{r.n}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <div className="px-2 pb-2" style={{ height: reasons.length * 22 + 30 }}>
+
+      {list.length > 0 && (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+          <Panel className="px-6 py-5">
+            <p className="text-[14px] text-dim">{count(counted.length, TERM.attempt)} in {count(list.length, TERM.run)}</p>
+            <p className="mt-1 flex items-baseline gap-3">
+              <span className="text-[44px] font-semibold leading-none tabular-nums">{counted.length ? Math.round((100 * ok) / counted.length) : 0}%</span>
+              <span className="text-[15px] text-dim">worked ({ok} of {counted.length})</span>
+            </p>
+            <p className="mt-3 text-[15px]">
+              {top ? <>Most failures: <b className="text-bad">{top.reason}</b>{topLat != null ? `, avg ${ms(topLat)}` : ''} ({top.n} of {counted.length - ok})</>
+                : counted.length ? 'No failures.' : 'No attempt was judged yet.'}
+            </p>
+            <p className="mt-3 border-t border-line pt-3 text-[13px] text-dim">
+              {filter !== 'scripted' && <>Spent <b className="text-ink tabular-nums">${spent.toFixed(2)}</b>{ok ? <> · ${(spent / ok).toFixed(2)} per success</> : null}. </>}
+              {invalid > 0 && <span title="Runs without attempts, and attempts whose task names no object and target dreamkit can read (nothing judged them)">{count(invalid, 'invalid attempt')} not counted.</span>}
+            </p>
+          </Panel>
+          <Panel>
+            <PanelTitle>Why attempts failed</PanelTitle>
+            {!reasons.length ? <p className="px-5 pb-4 text-[14px] text-dim">No failures in these runs.</p> : (
+              <div className="px-2 pb-3" style={{ height: reasons.length * 24 + 34 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={reasons} layout="vertical" margin={{ left: 8, right: 16 }}>
-                    <XAxis type="number" allowDecimals={false} domain={[0, top]} tickCount={Math.min(top, 6) + 1} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
+                    <XAxis type="number" allowDecimals={false} domain={[0, Math.max(1, reasons[0].n)]} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis type="category" dataKey="reason" tick={{ fill: 'var(--dk-dim)', fontSize: 12 }} width={150} interval={0} axisLine={false} tickLine={false} />
-                    <Tooltip {...TIP} cursor={{ fill: '#efede8' }} />
-                    <Bar dataKey="n" name="attempts" fill="#c8402f" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={12} />
+                    <Tooltip {...TIP} cursor={{ fill: 'var(--dk-raised)' }} />
+                    <Bar dataKey="n" name="attempts" fill="var(--dk-bad)" radius={[0, 3, 3, 0]} isAnimationActive={false} barSize={12} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             )}
-        </Panel>
-      </div>
+          </Panel>
+        </div>
+      )}
+
       <Panel>
-        <PanelTitle>Runs</PanelTitle>
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead className="border-y border-line text-left text-[12px] text-faint">
-              <tr>
-                {['Started', 'Task', 'Attempts', 'Duration', 'Avg model latency', 'Cost', 'Camera judge', 'Recovery saves', 'Failures', 'Policy'].map((h) => (
-                  <th key={h} className="whitespace-nowrap px-3 py-2 font-normal first:pl-4">{h}</th>
-                ))}
-              </tr>
+        {!list.length ? (
+          <div className="px-6 py-8">
+            <p className="text-[15px]">{everything.length ? `No ${POLICY_FILTER[filter]} runs yet.` : 'No runs yet.'}</p>
+            {everything.length && filter !== 'all'
+              ? <button className="mt-2 text-[14px] text-signal hover:underline" onClick={() => choose('all')}>Show all runs</button>
+              : <a href="#/live" className="mt-2 inline-block text-[14px] text-signal hover:underline">Start one: see Live</a>}
+          </div>
+        ) : (
+          <table className="w-full table-fixed text-[14px]">
+            <colgroup><col className="w-[150px]" /><col /><col className="w-[180px]" /><col className="w-[280px]" /><col className="w-[90px]" /></colgroup>
+            <thead className="border-b border-line text-left text-[13px] text-dim">
+              <tr>{['Started', 'Task', 'Attempts', 'Result', 'Source'].map((h) => <th key={h} className="px-3 py-2.5 font-normal first:pl-5">{h}</th>)}</tr>
             </thead>
             <tbody>
               {list.map((r) => {
-                const row = rowOf(r)
+                const eps = r.episodes ?? []
+                const judged = eps.filter(valid)
+                const worked = judged.filter((e) => e.success).length
+                const main = reasonsOf(judged)[0]
                 return (
                   <tr key={r.id} tabIndex={0} onClick={() => onOpen(r.id)} onKeyDown={(e) => e.key === 'Enter' && onOpen(r.id)}
-                    className="cursor-pointer border-b border-line/60 hover:bg-raised/50">
-                    <td className="whitespace-nowrap py-2.5 pr-3 pl-4 text-dim">{when(r.started)}{r.status === 'running' && <Tag tone="signal">running</Tag>}</td>
-                    <td className="px-3 py-2.5">{r.source === 'gym' && <span className="mr-1.5"><Tag tone="steel" title="Run by the Gym app (Arena, Compare, Record or Teleop)">Gym</Tag></span>}{r.task}</td>
-                    <td className="px-3 py-2.5"><span className="tracking-[2px]">{(r.episodes ?? []).map((e) => <Outcome key={e.episode} success={e.success} />)}</span>{!(r.episodes ?? []).length && DASH}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-dim tabular-nums">{row.duration}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-dim tabular-nums">{row.latency}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-dim tabular-nums">{row.cost}</td>
-                    <td className={clsx('whitespace-nowrap px-3 py-2.5', row.judgeTone)}>{row.judge}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-dim">{row.saves}</td>
-                    <td className="px-3 py-2.5"><div className="flex flex-wrap gap-1">{Object.entries(Object.entries(r.summary?.reasons ?? {}).reduce<Record<string, number>>((acc, [k, n]) => {
-                      const label = REASON_LABEL[k] ?? k
-                      acc[label] = (acc[label] ?? 0) + n
-                      return acc
-                    }, {})).map(([label, n]) => <Tag key={label} tone="bad">{label}{n > 1 ? ` ×${n}` : ''}</Tag>)}{!Object.keys(r.summary?.reasons ?? {}).length && <span className="text-faint">{DASH}</span>}</div></td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-dim">{r.mock ? <Tag tone="warn">mock</Tag> : r.model || DASH}</td>
+                    className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-raised/50">
+                    <td className="py-2.5 pr-3 pl-5 whitespace-nowrap text-dim">{when(r.started)}</td>
+                    <td className="truncate px-3 py-2.5" title={r.task}>{r.task || <span className="text-faint">no task</span>}</td>
+                    <td className="truncate px-3 py-2.5 tracking-[2px]">
+                      {r.status === 'running' && <span className="mr-2 tracking-normal"><Tag tone="signal">running</Tag></span>}
+                      {eps.map((e) => valid(e) ? <Outcome key={e.episode} success={e.success} />
+                        : <span key={e.episode} className="text-faint" title="invalid: dreamkit cannot read an object and a target in this task">–</span>)}
+                      {!eps.length && <span className="tracking-normal text-faint" title="the run recorded no attempt">invalid</span>}
+                    </td>
+                    <td className="truncate px-3 py-2.5">
+                      {judged.length ? <><span className="tabular-nums">{worked}/{judged.length}</span>{main && <span className="text-bad"> · {main.reason}</span>}</>
+                        : <span className="text-faint">invalid</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-dim">{SOURCE_LABEL[r.source] ?? r.source}</td>
                   </tr>
                 )
               })}
-              {!list.length && <tr><td colSpan={10} className="px-4 py-10 text-center text-faint">
-                {everything.length ? `No ${policy} runs yet. ${policy === 'real' ? 'Mock runs are under Mock.' : ''}` : 'No runs yet. Start one with python examples/sim_loop.py.'}
-              </td></tr>}
             </tbody>
           </table>
-        </div>
+        )}
       </Panel>
     </div>
   )
 }
 
+function LoadError({ error, what }: { error: unknown; what: string }) {
+  return (
+    <div className="pt-6">
+      <p className="text-bad">Could not load {what}: {(error as Error).message}</p>
+      {error instanceof ApiError && (
+        <details className="mt-2 text-[13px] text-dim"><summary className="cursor-pointer">Details</summary><pre className="mt-1 font-mono whitespace-pre-wrap">{error.details}</pre></details>
+      )}
+    </div>
+  )
+}
+
 function RunDetail({ id, initial, onBack, onOpen }: { id: string; initial: number | null; onBack: () => void; onOpen: (id: string, ep?: number) => void }) {
+  const queryClient = useQueryClient()
   const run = useQuery({ queryKey: ['run', id], queryFn: () => api.run(id), refetchInterval: (q) => (q.state.data?.live ? 3000 : false) })
   const plugins = useQuery({ queryKey: ['plugins'], queryFn: api.plugins })
   for (const p of plugins.data?.plugins ?? []) ICON_BY_PLUGIN[p.name] = p.icon
   const pages = useMemo(() => pagesOf(plugins.data?.plugins), [plugins.data])
   const [page, setPage] = useState<PluginPage | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => api.deleteRun(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['runs'] }); onBack() },
+  })
   const episodes = run.data?.episodes ?? []
   const selected = initial ?? (episodes.find((e) => e.success === false) ?? episodes[0])?.episode ?? null
   const ep = episodes.find((e) => e.episode === selected) ?? null
+  if (run.isError) return <LoadError error={run.error} what="this run" />
   if (!run.data) return <p className="text-dim">Loading the run…</p>
   const r: RunInfo = run.data
+  const judged = episodes.filter(valid)
+  const menu: MenuItem[] = [
+    ...(r.report ? [{ label: 'Open the report', href: `/media/${id}/${r.report}`, onSelect: () => undefined }] : []),
+    ...(r.live ? [] : [{ label: 'Delete run…', tone: 'bad' as const, onSelect: () => setDeleting(true) }]),
+  ]
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <Button variant="quiet" onClick={onBack}><ArrowLeft className="h-4 w-4" /> All runs</Button>
-        <div className="min-w-0">
-          <h1 className="text-[18px] font-semibold">{r.task}</h1>
-          {r.source === 'gym' && <div className="mb-1"><Tag tone="steel" title="Run by the Gym app: open the Gym tab for its statistics">Gym</Tag></div>}
-          {r.mock && <div className="mb-1"><Tag tone="warn" title="The mock policy fails on purpose so the plugins can be tested; no model is called">mock: scripted failures</Tag></div>}
-          <p className="text-[12px] text-dim">{when(r.started)}, {r.mock ? 'mock policy' : r.model}, {r.summary.successes} of {r.summary.attempts} attempts worked</p>
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[20px] font-semibold" title={r.task}>{r.task || 'Run without a task'}</h1>
+          <p className="text-[13px] text-dim">
+            {when(r.started)} · {r.mock ? 'mock policy' : r.model || 'unknown policy'} · {SOURCE_LABEL[r.source] ?? r.source}
+            {r.mock && <span title="The mock fails on purpose so the plugins can be tested; no model is called"> · scripted failures</span>}
+          </p>
         </div>
-        <div className="ml-auto flex gap-2">
-          <Button onClick={() => api.reveal(id)}><FolderOpen className="h-4 w-4" /> Open folder</Button>
-          <DeleteRun id={id} live={Boolean(r.live)} onDone={onBack} />
-          {r.report && <a href={`/media/${id}/${r.report}`} target="_blank" rel="noreferrer"><Button><FileText className="h-4 w-4" /> Report</Button></a>}
-        </div>
+        <Button onClick={() => api.reveal(id)}><FolderOpen className="h-4 w-4" /> Open folder</Button>
+        <MoreMenu items={menu} label="More for this run" />
       </div>
-      <Harvest id={id} />
-      {r.recap?.text && (
-        <Panel className="flex gap-3 px-4 py-3">
-          <Clapperboard className="mt-0.5 h-4 w-4 shrink-0 text-ink" strokeWidth={1.75} />
-          <p className="text-[14px] leading-relaxed">{r.recap.text}</p>
+      {deleting && (
+        <Panel className="flex flex-wrap items-center gap-3 border-bad/40 px-5 py-3">
+          <p className="flex-1 text-[14px]">Delete this run's videos, datasets and results? This cannot be undone.</p>
+          <Button variant="quiet" onClick={() => setDeleting(false)}>Keep it</Button>
+          <Button variant="stop" disabled={remove.isPending} onClick={() => remove.mutate()}><Trash2 className="h-4 w-4" /> Delete run</Button>
         </Panel>
       )}
-      <div className="grid gap-4 lg:grid-cols-[250px_minmax(0,1fr)]">
+
+      <p className="text-[17px]">
+        {judged.length ? <><b>{judged.filter((e) => e.success).length} of {count(judged.length, TERM.attempt)}</b> worked</>
+          : <span className="text-dim">No attempt in this run could be judged.</span>}
+        {judged.length > 0 && reasonsOf(judged)[0] && <span className="text-dim"> · most failures: {reasonsOf(judged)[0].reason}</span>}
+      </p>
+
+      <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
         <Panel className="self-start">
           <PanelTitle>Attempts</PanelTitle>
           <ul className="border-t border-line pb-1">
             {episodes.map((e) => (
               <li key={e.episode}>
                 <button onClick={() => onOpen(id, e.episode)} className={clsx('w-full px-4 py-2 text-left', selected === e.episode ? 'bg-raised' : 'hover:bg-raised/50')}>
-                  <div className="flex items-center gap-2 text-[13px]">
-                    <Outcome success={e.success} />
-                    <span>Scene {e.scene + 1}{e.attempt > 1 ? `, retry ${e.attempt - 1}` : ''}</span>
-                    {recoveriesOf(e) > 0 && <Tag tone="ok">recovered{recoveriesOf(e) > 1 ? ` ×${recoveriesOf(e)}` : ''}</Tag>}
-                    <span className="ml-auto text-[12px] text-faint">{e.duration_s.toFixed(0)} s</span>
+                  <div className="flex items-center gap-2 text-[14px]">
+                    {valid(e) ? <Outcome success={e.success} /> : <span className="text-faint">–</span>}
+                    <span>Attempt {e.episode}</span>
+                    {recoveriesOf(e) > 0 && (e.success
+                      ? <span className="text-[12px] text-ok">recovered</span>
+                      : <span className="text-[12px] text-dim" title="recovery stepped in, the attempt still failed">recovery tried</span>)}
+                    <span className="ml-auto text-[12px] text-faint tabular-nums">{e.duration_s.toFixed(0)} s</span>
                   </div>
-                  {e.success == null && <LabelButtons runId={id} episode={e.episode} />}
-                  {e.labeled_by === 'person' && <p className="pl-5 text-[11.5px] text-dim">marked by a person</p>}
-                  {e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{REASON_LABEL[e.reason ?? 'unknown'] ?? e.reason}{atOf(e) != null && ` at ${atOf(e)!.toFixed(1)} s`}</p>}
+                  {!valid(e) && <p className="pl-5 text-[12px] text-faint">invalid: task not readable</p>}
+                  {valid(e) && e.success == null && <LabelButtons runId={id} episode={e.episode} />}
+                  {e.labeled_by === 'person' && <p className="pl-5 text-[12px] text-dim">marked by a person</p>}
+                  {valid(e) && e.success === false && <p className="mt-0.5 truncate pl-5 text-[12px] text-bad">{reasonLabel(e.reason)}{atOf(e) != null && ` at ${atOf(e)!.toFixed(1)} s`}</p>}
                 </button>
               </li>
             ))}
           </ul>
         </Panel>
-        {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} pages={pages}
-          onPage={(plugin) => setPage({ plugin, runId: id, episode: ep.episode })} /> : <p className="text-faint">This run has no finished attempts.</p>}
+        <div className="min-w-0 space-y-4">
+          {ep ? <EpisodeView key={ep.episode} runId={id} ep={ep} seconds={r.seconds} pages={pages}
+            onPage={(plugin) => setPage({ plugin, runId: id, episode: ep.episode })} /> : <p className="text-dim">This run has no finished attempts.</p>}
+          {r.recap?.text && <Fold title="Run summary"><p className="px-5 py-4 text-[14px] leading-relaxed">{r.recap.text}</p></Fold>}
+          <Harvest id={id} />
+        </div>
         <PluginPageDrawer page={page} onClose={() => setPage(null)} />
       </div>
     </div>
@@ -234,26 +265,23 @@ function Harvest({ id }: { id: string }) {
   if (!h || (h.success === 0 && h.failed === 0)) return null
   const v = h.validation
   return (
-    <Panel className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-      <Database className="h-4 w-4 shrink-0 text-ok" strokeWidth={1.75} />
-      <p className="text-[14px]">
-        <span className="font-medium text-ok">{h.success} successful episode{h.success === 1 ? '' : 's'}</span> ready for fine-tuning
-        <span className="text-dim">{h.failed ? `, ${h.failed} failed kept for analysis` : ''}</span>
-      </p>
-      <div className="ml-auto flex items-center gap-3">
-        {v && (v.ok ? (
-          <span className="text-[13px] text-ok">validate_dataset passed: {v.episodes} episodes, {v.frames} frames, {v.fps} fps</span>
-        ) : <span className="max-w-[48ch] text-[13px] text-bad">validate_dataset: {v.error}</span>)}
-        {h.success > 0 && (
-          <Button onClick={() => check.mutate()} disabled={check.isPending}>
-            {check.isPending ? 'Checking…' : v ? 'Check again' : 'Check with validate_dataset'}
-          </Button>
-        )}
+    <Fold title={<>Dataset <span className="font-normal text-dim">· {count(h.success, 'successful episode')} for fine-tuning</span></>}>
+      <div className="space-y-2 px-5 py-4 text-[14px]">
+        <p>{count(h.success, 'successful episode')} ready for fine-tuning{h.failed ? `, ${h.failed} failed kept for analysis` : ''}. Nothing is uploaded.</p>
+        {v && (v.ok ? <p className="text-ok">Checked with validate_dataset: {v.episodes} episodes, {v.frames} frames, {v.fps} fps.</p> : (
+          <div>
+            <p className="text-bad">validate_dataset refused it.</p>
+            <details className="text-[13px] text-dim"><summary className="cursor-pointer">Details</summary><pre className="mt-1 font-mono whitespace-pre-wrap">{v.error}</pre></details>
+          </div>
+        ))}
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          {h.success > 0 && (
+            <Button onClick={() => check.mutate()} disabled={check.isPending}>{check.isPending ? 'Checking…' : v ? 'Check again' : 'Check with validate_dataset'}</Button>
+          )}
+          <span className="text-[13px] text-dim">Several runs into one dataset: <code className="text-ink">dreamkit harvest export {id}</code></span>
+        </div>
       </div>
-      <p className="basis-full text-[12px] text-faint">
-        Local check only, nothing is uploaded. To gather several runs: <code className="text-dim">dreamkit harvest export {id}</code>
-      </p>
-    </Panel>
+    </Fold>
   )
 }
 
@@ -272,23 +300,6 @@ function LabelButtons({ runId, episode }: { runId: string; episode: number }) {
       <button disabled={mark.isPending} onClick={() => mark.mutate(false)}
         className="rounded-md border border-line bg-panel px-1.5 text-[12px] text-bad hover:bg-bad-soft" title="It failed">✗</button>
     </div>
-  )
-}
-
-function DeleteRun({ id, live, onDone }: { id: string; live: boolean; onDone: () => void }) {
-  const queryClient = useQueryClient()
-  const [sure, setSure] = useState(false)
-  const remove = useMutation({
-    mutationFn: () => api.deleteRun(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['runs'] }); onDone() },
-  })
-  if (live) return null
-  return sure ? (
-    <Button variant="stop" onClick={() => remove.mutate()} disabled={remove.isPending} onBlur={() => setSure(false)}>
-      <Trash2 className="h-4 w-4" /> Delete videos and results
-    </Button>
-  ) : (
-    <Button variant="quiet" onClick={() => setSure(true)}><Trash2 className="h-4 w-4" /> Delete run</Button>
   )
 }
 
@@ -343,17 +354,16 @@ function EpisodeView({ runId, ep, seconds, pages, onPage }: {
     <div className="min-w-0 space-y-4">
       <Panel>
         <div className="flex flex-wrap items-center gap-3 px-4 pt-3 pb-2">
-          <h2 className={clsx('text-[15px] font-medium', failed ? 'text-bad' : ep.success ? 'text-ok' : 'text-ink')}>
-            {failed ? `${ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']} at ${at!.toFixed(1)} s` : ep.success ? `Done in ${ep.duration_s.toFixed(1)} s` : 'Outcome unknown: mark it on the left'}
+          <h2 className={clsx('text-[16px] font-semibold', failed ? 'text-bad' : ep.success ? 'text-ok' : 'text-ink')}
+            title={failed && (ep.details as { source?: string } | undefined)?.source
+              ? `judged from ${(ep.details as { source?: string }).source === 'world' ? 'the simulator world' : 'the robot signals'}` : undefined}>
+            Attempt {ep.episode}: {!valid(ep) ? 'invalid, the task names no object and target dreamkit can read'
+              : failed ? `${ep.message ?? reasonLabel(ep.reason)} at ${at!.toFixed(1)} s`
+              : ep.success ? `done in ${ep.duration_s.toFixed(1)} s` : 'outcome unknown, mark it on the left'}
           </h2>
-          {failed && (ep.details as { source?: string } | undefined)?.source && (
-            <Tag tone="plain" title="What the verdict rests on: the robot's own signals, or the simulator's world">
-              from {(ep.details as { source?: string }).source === 'world' ? 'the simulator world' : 'robot signals'}
-            </Tag>
-          )}
           <div className="ml-auto flex items-center gap-1 rounded-md bg-base p-0.5 text-[12px]">
             {ep.recap?.video && (
-              <button onClick={() => setMode(mode === 'recap' ? 'full' : 'recap')} className={clsx('rounded px-2 py-0.5', mode === 'recap' ? 'bg-signal text-base' : 'text-dim')}>Recap</button>
+              <button onClick={() => setMode(mode === 'recap' ? 'full' : 'recap')} className={clsx('rounded px-2 py-0.5', mode === 'recap' ? 'bg-raised text-ink' : 'text-dim')}>Recap</button>
             )}
             {cams.map((c) => (
               <button key={c} onClick={() => { setMode('full'); setCam(c) }} className={clsx('rounded px-2 py-0.5', mode === 'full' && cam === c ? 'bg-raised text-ink' : 'text-dim')}>{c}</button>
@@ -378,29 +388,20 @@ function EpisodeView({ runId, ep, seconds, pages, onPage }: {
         {ep.recap?.headline && <p className="border-t border-line px-4 py-3 text-[13px] text-dim">{ep.recap.headline}</p>}
       </Panel>
 
-      {((ep.timeline?.length ?? 0) > 0 || failed || pageRows.length > 0) && (
+      {((ep.timeline?.length ?? 0) > 0 || failed) && (
         <Panel>
           <PanelTitle>Moments</PanelTitle>
-          {pageRows.map((row) => (
-            <button key={row.plugin} onClick={() => onPage(row.plugin)} title={`Open ${row.plugin}'s page`}
-              className="flex w-full items-center gap-3 border-t border-line px-4 py-2 text-left text-[13px] hover:bg-raised/50">
-              <PluginIcon name={row.plugin} className="text-dim" />
-              <span className="min-w-0 flex-1 truncate">{row.text}</span>
-              <span className="text-[11px] text-faint">{row.plugin}</span>
-              <span className="text-[16px] text-faint" aria-hidden>›</span>
-            </button>
-          ))}
           {failed && (
-            <button onClick={() => seek(start)} className="flex w-full gap-3 border-y border-line bg-bad-soft px-4 py-2 text-left text-[13px] hover:brightness-95">
-              <span className="w-12 shrink-0 text-right text-bad">{at!.toFixed(1)} s</span>
-              <span className="font-medium text-bad">Verdict: {ep.message ?? REASON_LABEL[ep.reason ?? 'unknown']}</span>
+            <button onClick={() => seek(start)} className="flex w-full gap-3 border-y border-line bg-bad-soft px-4 py-2 text-left text-[14px] hover:brightness-95">
+              <span className="w-12 shrink-0 text-right text-bad tabular-nums">{at!.toFixed(1)} s</span>
+              <span className="font-medium text-bad">Verdict: {ep.message ?? reasonLabel(ep.reason)}</span>
             </button>
           )}
-          <ol className={clsx(!failed && 'border-t border-line')}>
+          <ol className={clsx(!failed && 'border-t border-line', 'pb-1')}>
             {[...(ep.timeline ?? [])].sort((a, b) => a.t - b.t).map((m, i) => (
               <li key={i}>
-                <button onClick={() => seek(Math.max(0, m.t - 0.5))} className="flex w-full gap-3 px-4 py-1.5 text-left text-[13px] hover:bg-raised/50">
-                  <span className="w-12 shrink-0 text-right text-faint">{m.t.toFixed(1)} s</span>
+                <button onClick={() => seek(Math.max(0, m.t - 0.5))} className="flex w-full gap-3 px-4 py-1.5 text-left text-[14px] hover:bg-raised/50">
+                  <span className="w-12 shrink-0 text-right text-faint tabular-nums">{m.t.toFixed(1)} s</span>
                   <span className={BAD_KINDS.has(m.kind) ? 'text-warn' : 'text-ink'}>{m.message}</span>
                 </button>
               </li>
@@ -409,28 +410,38 @@ function EpisodeView({ runId, ep, seconds, pages, onPage }: {
         </Panel>
       )}
 
+      {pageRows.length > 0 && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[14px] text-dim">
+          Plugin pages:
+          {pageRows.map((row) => (
+            <button key={row.plugin} onClick={() => onPage(row.plugin)} className="inline-flex items-center gap-1.5 text-ink hover:underline" title={row.text}>
+              <PluginIcon name={row.plugin} className="text-dim" />{row.plugin}
+            </button>
+          ))}
+        </p>
+      )}
+
       {trace.data && trace.data.rows.length > 1 && (
-        <Panel>
-          <PanelTitle>What failure-monitor measured</PanelTitle>
-          <div className="h-44 px-2 pb-3">
+        <Fold title="What failure-monitor measured">
+          <div className="h-44 px-2 pt-3 pb-3">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trace.data.rows} onClick={(s) => { const t = Number(s?.activeLabel); if (Number.isFinite(t)) seek(t) }}>
-                <CartesianGrid stroke="#e4e2dc" vertical={false} />
-                <XAxis dataKey="t" type="number" domain={[0, 'dataMax']} tick={{ fill: '#6b6f76', fontSize: 11 }} unit=" s" axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 'auto']} tickFormatter={(v) => `${Math.round(v * 100)}`} unit=" cm" tick={{ fill: '#6b6f76', fontSize: 11 }} width={48} axisLine={false} tickLine={false} />
+                <CartesianGrid stroke="var(--dk-line)" vertical={false} />
+                <XAxis dataKey="t" type="number" domain={[0, 'dataMax']} tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} unit=" s" axisLine={false} tickLine={false} />
+                <YAxis domain={[0, 'auto']} tickFormatter={(v) => `${Math.round(v * 100)}`} unit=" cm" tick={{ fill: 'var(--dk-dim)', fontSize: 11 }} width={48} axisLine={false} tickLine={false} />
                 <Tooltip {...TIP} labelFormatter={(t) => `${Number(t).toFixed(1)} s`} formatter={(v) => `${(100 * Number(v)).toFixed(1)} cm`} />
-                {failed && <ReferenceLine x={at} stroke="#c8402f" strokeWidth={2} />}
-                <ReferenceLine x={Number(now.toFixed(1))} stroke="#2f5bd3" />
-                <Line dataKey="d" name="hand to object" stroke="#2f8fb3" dot={false} strokeWidth={1.75} isAnimationActive={false} />
-                <Line dataKey="z" name="object lifted" stroke="#1f8a5b" dot={false} strokeWidth={1.75} isAnimationActive={false} />
-                <Line dataKey="dt" name="object to target" stroke="#8a5cc2" dot={false} strokeWidth={1.5} isAnimationActive={false} />
+                {failed && <ReferenceLine x={at} stroke="var(--dk-bad)" strokeWidth={2} />}
+                <ReferenceLine x={Number(now.toFixed(1))} stroke="var(--dk-ink)" strokeDasharray="2 3" />
+                <Line dataKey="d" name="hand to object" stroke="var(--dk-ink)" dot={false} strokeWidth={1.75} isAnimationActive={false} />
+                <Line dataKey="z" name="object lifted" stroke="var(--dk-dim)" strokeDasharray="5 3" dot={false} strokeWidth={1.75} isAnimationActive={false} />
+                <Line dataKey="dt" name="object to target" stroke="var(--dk-faint)" strokeDasharray="1 3" dot={false} strokeWidth={1.75} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
-          <p className="px-4 pb-3 text-[12px] text-faint">
-            <span className="text-steel">Blue</span> hand to object, <span className="text-ok">green</span> how high the object is, <span className="text-[#8a5cc2]">violet</span> object to target. Click the chart to jump the video there.
+          <p className="px-5 pb-4 text-[13px] text-dim">
+            Solid: hand to object · dashed: how high the object is · dotted: object to target. The red line is the verdict; click the chart to jump the video there.
           </p>
-        </Panel>
+        </Fold>
       )}
     </div>
   )

@@ -9,18 +9,13 @@ import { AttemptStrip, Button, ICON_BY_PLUGIN, Outcome, pagesOf, Panel, PanelTit
 
 const CAMS: Record<string, string> = { top: 'Overhead', left: 'Left wrist', right: 'Right wrist' }
 
-const SNIPPET = `import dream, dreamkit
-
-client = dreamkit.wrap(dream.DreamClient(), config="dreamkit.yaml")
-client.policy({"checkpoint": "dreamlabs/dream-1-beta"})
-
+// The same API as README.md: five lines, the loop around them is yours.
+const SNIPPET = `client = dreamkit.wrap(dream.DreamClient())        # the one line
 with client.episode("put apple into the bowl", env=env):
-    while client.t < 60:
-        client.set_observation(frames, observation)
-        reply = client.get_action()
-        for left, right in rows(reply):
-            env.step(left, right)
-            client.step(env, images=env.images(), command=(left, right))`
+    reply = client.get_action()                       # plugins run around the model
+    env.step(left, right)                             # each row of the reply
+    client.step(env, command=(left, right))           # robot: state=... instead of env`
+const MOCK = 'dreamkit sim --mock dropped,grasped_air,success'
 
 /** Watches whatever run the user's loop is writing. It never starts anything. */
 export default function LivePage({ onOpenRun }: { onOpenRun: (id: string, episode?: number) => void }) {
@@ -116,7 +111,7 @@ function StatusBar({ task, mode, running, mock, model, current, episodes, live, 
   const meanMs = calls ? lat.reduce((a, l) => a + l.mean_ms * l.calls, 0) / calls : null
   const item = (label: string, value: ReactNode, title?: string) => (
     <div className="min-w-0" title={title}>
-      <p className="text-[11px] tracking-wide text-faint uppercase">{label}</p>
+      <p className="text-[12px] text-dim">{label}</p>
       <p className="truncate text-[15px] font-semibold tabular-nums">{value}</p>
     </div>
   )
@@ -170,7 +165,7 @@ function NowCard({ events, episodes, current, running, live }: {
   return (
     <Panel className={clsx('px-6 py-5', tone === 'bad' && 'border-bad/50', tone === 'recover' && 'border-signal/50')}>
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-        <span className="text-[13px] font-semibold uppercase tracking-[.06em] text-dim">
+        <span className="text-[14px] font-semibold text-dim">
           {current ? `Attempt ${current.episode} · scene ${current.scene + 1}${current.attempt > 1 ? ` · retry ${current.attempt - 1}` : ''}` : 'Now'}
         </span>
         {current && <span className="text-[15px] font-semibold text-signal">{live.t.toFixed(1)} s</span>}
@@ -190,28 +185,23 @@ function NowCard({ events, episodes, current, running, live }: {
 }
 
 function Waiting() {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<string | null>(null)
+  const copy = (what: string) => { void navigator.clipboard.writeText(what); setCopied(what) }
   return (
     <div className="mx-auto max-w-[760px] pt-10">
-      <div className="flex items-center gap-3">
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-signal" />
-        <h1 className="text-[22px] font-semibold">Waiting for a run</h1>
-      </div>
-      <p className="mt-2 max-w-[62ch] text-[15px] leading-relaxed text-dim">
-        Start your loop with <code className="rounded bg-raised px-1.5 py-0.5 text-ink">dreamkit.wrap(...)</code>. This page picks it up on its
-        own and shows the cameras, what every plugin says, and each attempt as it happens.
-      </p>
-      <Panel className="mt-6">
-        <PanelTitle right={
-          <button className="text-[12px] text-dim hover:text-ink" onClick={() => { void navigator.clipboard.writeText(SNIPPET); setCopied(true) }}>
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-        }>your_loop.py</PanelTitle>
-        <pre className="overflow-x-auto border-t border-line px-4 py-3 font-mono text-[12.5px] leading-relaxed text-ink">{SNIPPET}</pre>
+      <h1 className="text-[22px] font-semibold">No run yet</h1>
+      <p className="mt-1.5 text-[15px] text-dim">Start a loop wrapped in dreamkit; this page picks it up on its own.</p>
+      <Panel className="mt-5">
+        <PanelTitle right={<button className="text-[13px] text-dim hover:text-ink" onClick={() => copy(SNIPPET)}>{copied === SNIPPET ? 'Copied' : 'Copy'}</button>}>
+          In your loop
+        </PanelTitle>
+        <pre className="overflow-x-auto border-t border-line px-5 py-3.5 font-mono text-[12.5px] leading-relaxed text-ink">{SNIPPET}</pre>
       </Panel>
-      <p className="mt-4 text-[13px] text-dim">
-        Or try it on Dream Labs' simulator without credits: <code className="rounded bg-raised px-1.5 py-0.5 text-ink">python examples/sim_loop.py --mock</code>
-      </p>
+      <div className="mt-4 flex flex-wrap items-center gap-2 text-[14px] text-dim">
+        Or try it free on Dream Labs' simulator:
+        <code className="rounded bg-raised px-2 py-0.5 font-mono text-[13px] text-ink">{MOCK}</code>
+        <button className="text-[13px] text-dim hover:text-ink" onClick={() => copy(MOCK)}>{copied === MOCK ? 'Copied' : 'Copy'}</button>
+      </div>
     </div>
   )
 }
@@ -285,7 +275,7 @@ function Spent({ live, episodes, mock, running }: { live: LiveStore; episodes: E
   const share = budget ? spent / budget : 0
   return (
     <div className="min-w-[120px]" title={mock ? 'a mock run calls no model: nothing is billed' : 'model time, at the price per robot-hour in dreamkit.yaml'}>
-      <p className="text-[11px] tracking-wide text-faint uppercase">Spent</p>
+      <p className="text-[12px] text-dim">Spent</p>
       <p className="text-[15px] font-semibold tabular-nums">${spent.toFixed(2)}
         {budget != null && <span className="text-[12px] font-normal text-dim"> of ${budget.toFixed(2)}{left != null ? ` · ~${left} attempts left` : ''}</span>}
         {mock && budget == null && <span className="text-[12px] font-normal text-dim"> mock</span>}

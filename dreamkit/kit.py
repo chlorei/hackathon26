@@ -462,6 +462,7 @@ class Kit:
             "success": r.get("success"),
             "reason": r.get("reason", "timeout") if r.get("success") is False else None,  # unknown outcome: no reason
             "duration_s": round(ctx.t, 2), "requests": self._requests,
+            "task_readable": bool(ctx.target.get("object") and ctx.target.get("target")),
             "cost_usd": round(cost.usd(self._requests, self._price()), 4),
             "wall_s": round(time.time() - self._episode_started, 2), "retry_requested": ctx._retry,
             **{k: v for k, v in r.items() if k not in ("success", "reason")},

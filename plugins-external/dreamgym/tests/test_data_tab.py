@@ -121,7 +121,7 @@ def test_remove_episodes_renumbers(tmp_path):
 
 def test_page_is_only_the_four_steps():
     page = PAGE.read_text()
-    for step in ("Collect", "Review", "Train", "Evaluate"):
+    for step in ("Collect", "Check", "Fine-tune", "Compare"):
         assert f'"{step}"' in page
     for gone in ("New run", "Prompt Tuner", "Arena · one policy"):
         assert gone not in page

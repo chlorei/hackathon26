@@ -176,6 +176,8 @@ kbd{display:inline-block;min-width:24px;text-align:center;padding:1px 6px;border
 .stephead .num.off{background:var(--soft);color:var(--muted)}
 .stephead h2{margin:0;font-size:17px}
 .stephead .state{margin-left:auto;color:var(--muted);font-size:13px}
+.stepcard.locked > :not(.stephead){opacity:.45;pointer-events:none;user-select:none}
+.stepcard.locked .stephead h2{color:var(--muted)}
 .taskrows{display:grid;grid-template-columns:auto 1fr 110px;gap:8px 12px;align-items:center;margin-bottom:12px}
 .taskrows input[type=checkbox]{width:auto}
 .taskrows .tn{font-weight:600}
@@ -263,7 +265,16 @@ async function api(path, body) {
   return data;
 }
 const changed = (key, value) => { const s = JSON.stringify(value); if (sig[key] === s) return false; sig[key] = s; return true; };
-const lastLine = log => esc((log || "").trim().split("\n").slice(-1)[0] || "");
+// A job's log, read for people: no local paths up front; the full log goes under Details.
+const unpath = t => String(t || "").replace(/(\/(Users|home|private|var|tmp)\/[^\s'"]+)/g, "…");
+const lastLine = log => esc(unpath((log || "").trim().split("\n").slice(-1)[0] || ""));
+function failure(log, fallback) {
+  const lines = (log || "").trim().split("\n");
+  const why = [...lines].reverse().find(l => /(Error|Exception|refused|failed)\b/.test(l) && !/^\s*File "/.test(l));
+  const text = why ? unpath(why.replace(/^.*?(\w*(Error|Exception)):\s*/, "")).trim() : fallback;
+  return `<span>${esc(text || fallback)}</span><details class="hint" style="margin-top:4px"><summary style="cursor:pointer">Details</summary>
+    <pre class="log" style="margin-top:6px">${esc(lines.slice(-40).join("\n"))}</pre></details>`;
+}
 function when(t) {
   if (typeof t !== "number") return "";
   const d = new Date(t * 1000);
@@ -301,13 +312,13 @@ function stepHead(n, title, state, on = true) {
   return `<div class="stephead"><div class="num ${on ? "" : "off"}">${n}</div><h2>${title}</h2><div class="state" id="state${n}">${state || ""}</div></div>`;
 }
 async function select(name) {
-  sel = name; chosen = new Set(); for (const k in sig) delete sig[k];
+  sel = name; chosen = new Set(); formOpen = false; for (const k in sig) delete sig[k];
   $("#detail").innerHTML = `
     <div class="headrow"><div style="flex:1"><h1>${esc(name)}</h1><div class="prompt" id="dsSub"></div></div></div>
-    <div class="stepcard">${stepHead(1, "Collect", "")}<div id="collectForm"></div><div id="collectLive"></div><div id="teleHost" class="hidden"></div><div class="error" id="collectErr"></div></div>
-    <div class="stepcard">${stepHead(2, "Review", "")}<div id="review"></div><div class="error" id="reviewErr"></div></div>
-    <div class="stepcard">${stepHead(3, "Train", "")}<div id="train"></div><div class="error" id="trainErr"></div></div>
-    <div class="stepcard">${stepHead(4, "Evaluate", "")}<div id="evaluate"></div><div class="error" id="evalErr"></div></div>`;
+    <div class="stepcard" id="step1">${stepHead(1, "Collect", "")}<div id="collectEmpty"></div><div id="collectForm"></div><div id="collectLive"></div><div id="teleHost" class="hidden"></div><div class="error" id="collectErr"></div></div>
+    <div class="stepcard" id="step2">${stepHead(2, "Check", "")}<div id="review"></div><div class="error" id="reviewErr"></div></div>
+    <div class="stepcard" id="step3">${stepHead(3, "Fine-tune", "")}<div id="train"></div><div class="error" id="trainErr"></div></div>
+    <div class="stepcard" id="step4">${stepHead(4, "Compare", "")}<div id="evaluate"></div><div class="error" id="evalErr"></div></div>`;
   $("#teleHost").appendChild($("#teleopTpl").content.cloneNode(true));
   fillTaskSelects(); bindTeleop();
   renderList();
@@ -323,13 +334,30 @@ async function refreshDetail() {
 }
 function renderAll() {
   const d = detail || {name: sel, episodes: 0, frames: 0, minutes: 0, balance: [], warnings: [], rows: [], jobs: {}};
-  $("#dsSub").textContent = d.episodes ? `${d.episodes} episodes · ${d.minutes} min of robot time · ${d.balance.length} task${d.balance.length === 1 ? "" : "s"}` : "Empty: record some episodes in step 1.";
+  $("#dsSub").textContent = d.episodes ? `${d.episodes} episodes · ${d.minutes} min of robot time · ${d.balance.length} task${d.balance.length === 1 ? "" : "s"}` : "No episodes yet.";
   renderCollect(d); renderReview(d); renderTrain(d); renderEvaluate(d);
+  // a stepper: a step that cannot run yet stays visible, greyed, and says what it waits for
+  const empty = !d.episodes && !d.recording;
+  lockStep(2, empty ? "record episodes first" : null);
+  lockStep(3, empty ? "record episodes first" : null);
+  lockStep(4, empty ? "record episodes first" : null);
+}
+function lockStep(n, reason) {
+  const card = $(`#step${n}`); if (!card) return;
+  card.classList.toggle("locked", !!reason);
+  card.querySelector(".num")?.classList.toggle("off", !!reason);
+  if (reason) $(`#state${n}`).textContent = reason;
 }
 
 // 1 · Collect
+let formOpen = false;
 function renderCollect(d) {
   const recording = !!d.recording;
+  const closed = !d.episodes && !recording && !formOpen;
+  $("#collectEmpty").innerHTML = closed
+    ? `<div class="actions" style="margin-top:0"><span class="hint">Nothing recorded in this dataset yet.</span><button class="btn primary" id="cOpen">Record</button></div>` : "";
+  $("#collectForm").classList.toggle("hidden", closed);
+  if (closed) { $("#cOpen").onclick = () => { formOpen = true; renderCollect(d); }; }
   if (changed("collectForm", [source, recording, tasks.length])) {
     const seg = [["scripted", "Scripted expert · free"], ["dream-1", "Dream-1 · uses credits"], ["teleop", "Teleop · you drive"]]
       .map(([k, l]) => `<button type="button" data-src="${k}" class="${source === k ? "on" : ""}">${l}</button>`).join("");
@@ -373,14 +401,15 @@ function renderCollect(d) {
           <div class="hint"><b style="color:var(--ink)">${k}</b> / ${want} kept · ${tr} tried</div></div>`;
       }).join("");
       const last = p.last ? `Last: ${esc(p.last.task)} seed ${p.last.seed} → ${esc(p.last.reason)} (${p.last.kept ? "kept" : "dropped"})` : "Loading the simulator…";
-      html = `<div class="card" style="margin-top:14px"><h3>Recording · ${esc(p.source)} · episodes appear in Review as they are saved</h3>${rows}
+      html = `<div class="card" style="margin-top:14px"><h3>Recording · ${esc(p.source)} · episodes appear in Check as they are saved</h3>${rows}
         <div class="actions"><span class="hint">${last}</span><button class="btn danger" id="cStop">Stop</button></div></div>`;
     } else if (p && p.status && p.status !== "running") {
       const kept = Object.values(p.kept || {}).reduce((a, b) => a + b, 0), tried = Object.values(p.tried || {}).reduce((a, b) => a + b, 0);
       html = `<div class="hint" style="margin-top:10px">Last recording ${esc(p.status)}: ${kept} kept of ${tried} tried (${esc(p.source)}), ${when(p.updated)}.</div>`;
     }
     const rec = d.jobs?.record;
-    if (rec && rec.status === "failed") html += `<div class="error">Recording failed: ${lastLine(rec.log)}</div>`;
+    // a recording someone stopped is not a failure (its progress says "stopped"), whatever the exit code said
+    if (rec && rec.status === "failed" && p?.status !== "stopped") html += `<div class="error">Recording failed: ${failure(rec.log, "the recorder stopped before it saved an episode")}</div>`;
     $("#collectLive").innerHTML = html;
     const stop = $("#cStop");
     if (stop) stop.onclick = async () => { stop.disabled = true; await api(`api/dataset/${encodeURIComponent(sel)}/stop`, {}).catch(() => {}); refreshDetail(); };
@@ -416,7 +445,7 @@ async function startRecording() {
   catch (e) { $("#collectErr").textContent = e.message; $("#cGo").disabled = false; }
 }
 
-// 2 · Review
+// 2 · Check
 function renderReview(d) {
   if (!changed("review", [d.rows, d.balance, d.warnings, d.busy, [...chosen]])) return;
   $("#state2").textContent = d.warnings.length ? `${d.warnings.length} thing${d.warnings.length > 1 ? "s" : ""} to look at` : (d.episodes ? "looks balanced" : "");
@@ -465,7 +494,7 @@ function openVideo(i, role = "overhead") {
 document.querySelectorAll("#vidDlg [data-role]").forEach(b => b.onclick = () => openVideo(vidIndex, b.dataset.role));
 $("#vidClose").onclick = () => { $("#vid").pause(); $("#vidDlg").close(); };
 
-// 3 · Train
+// 3 · Fine-tune
 function renderTrain(d) {
   const j = d.jobs || {}, v = d.validate, f = d.finetune || {};
   if (!changed("train", [d.episodes, d.warnings, d.busy, j.validate, j.finetune, j.status, v, f])) return;
@@ -473,14 +502,14 @@ function renderTrain(d) {
   const checking = j.validate?.running, training = j.finetune?.running;
   const checkLine = checking ? '<span class="dot run"></span> checking…' :
     (v ? (v.ok ? `<span class="dot ok"></span> ready: ${v.episodes} episodes, ${v.frames} frames at ${v.fps} fps` : `<span class="dot bad"></span> <span style="color:var(--bad)">${esc(v.error)}</span>`)
-       : (j.validate?.status === "failed" ? `<span class="dot bad"></span> <span style="color:var(--bad)">${lastLine(j.validate.log)}</span>` : '<span class="dot"></span> not checked since the last change'));
+       : (j.validate?.status === "failed" ? `<span class="dot bad"></span> <span style="color:var(--bad)">${failure(j.validate.log, "the check did not finish")}</span>` : '<span class="dot"></span> not checked since the last change'));
   let ftLine = '<span class="dot"></span> not started';
   if (training) ftLine = `<span class="dot run"></span> ${esc(f.stage || "starting")}… <span class="hint">${lastLine(j.finetune.log)}</span>`;
   else if (f.stage) ftLine = `<span class="dot ${f.stage === "done" ? "ok" : (f.stage === "failed" ? "bad" : "run")}"></span> ${esc(f.stage)}${f.error ? ` <span style="color:var(--bad)">${esc(f.error)}</span>` : ""}${f.started ? ` <span class="hint">since ${when(f.started)}</span>` : ""}`;
-  else if (j.finetune?.status === "failed") ftLine = `<span class="dot bad"></span> <span style="color:var(--bad)">${lastLine(j.finetune.log)}</span>`;
+  else if (j.finetune?.status === "failed") ftLine = `<span class="dot bad"></span> <span style="color:var(--bad)">${failure(j.finetune.log, "fine-tuning did not start")}</span>`;
   $("#state3").textContent = f.model ? "fine-tune ready" : (f.stage || (v?.ok ? "ready to train" : ""));
   $("#train").innerHTML = `
-    <div class="check"><span class="dot ${enough ? "ok" : ""}"></span> Enough data: ${d.episodes} episodes${d.warnings.length ? ` <span class="hint">(${d.warnings.length} warning${d.warnings.length > 1 ? "s" : ""} in Review)</span>` : ""}</div>
+    <div class="check"><span class="dot ${enough ? "ok" : ""}"></span> Enough data: ${d.episodes} episodes${d.warnings.length ? ` <span class="hint">(${d.warnings.length} warning${d.warnings.length > 1 ? "s" : ""} in Check)</span>` : ""}</div>
     <div class="check">${checkLine} <button class="btn sm" id="tCheck" ${d.episodes && !d.busy && !checking ? "" : "disabled"}>Check format</button></div>
     <div class="check">${ftLine}
       <button class="btn sm primary" id="tTrain" ${v?.ok && !d.busy && !training && !f.job_id ? "" : "disabled"}>Upload &amp; fine-tune</button>
@@ -493,7 +522,7 @@ function renderTrain(d) {
   const job = $("#tJob"); if (job) job.onclick = () => act("status");
 }
 
-// 4 · Evaluate
+// 4 · Compare
 function verdict(p) {
   const sig = p.p_value < 0.05, dd = p.delta;
   const text = sig ? (dd > 0 ? "the fine-tune is better, and it is not luck" : "the fine-tune is worse, and it is not luck") : "no proven difference yet: could be luck";

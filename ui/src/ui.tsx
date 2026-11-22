@@ -11,7 +11,7 @@ export function Panel({ className, children }: { className?: string; children: R
 export function PanelTitle({ children, right, className }: { children: ReactNode; right?: ReactNode; className?: string }) {
   return (
     <div className={clsx('flex items-center justify-between gap-3 px-5 pt-4 pb-2.5', className)}>
-      <h2 className="text-[13px] font-semibold uppercase tracking-[.06em] text-dim">{children}</h2>
+      <h2 className="text-[15px] font-semibold text-ink">{children}</h2>
       {right}
     </div>
   )
@@ -31,16 +31,6 @@ export function Button({ variant = 'line', className, ...props }: ButtonHTMLAttr
         className,
       )}
     />
-  )
-}
-
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[12px] text-dim">{label}</span>
-      {children}
-      {hint && <span className="mt-1 block text-[11px] text-faint">{hint}</span>}
-    </label>
   )
 }
 
@@ -139,12 +129,12 @@ export function AttemptStrip({ duration, marks, verdict, playhead, onSeek, live 
         }}
       >
         {playhead != null && (
-          <div className={clsx('absolute inset-y-0 left-0 rounded-l-lg', live ? 'bg-signal-soft' : 'bg-white/70')} style={{ width: pct(playhead) }} />
+          <div className={clsx('absolute inset-y-0 left-0 rounded-l-lg', live ? 'bg-signal-soft' : 'bg-panel/70')} style={{ width: pct(playhead) }} />
         )}
         {marks.map((m, i) => (
           <div key={i} title={`${m.t.toFixed(1)} s  ${m.label}`} className="group absolute inset-y-0" style={{ left: pct(m.t) }}>
             <div className={clsx('absolute top-2 bottom-2 w-[3px] -translate-x-1/2 rounded-full',
-              m.tone === 'bad' && 'bg-bad', m.tone === 'warn' && 'bg-warn', m.tone === 'ok' && 'bg-ok', m.tone === 'info' && 'bg-steel/80')} />
+              m.tone === 'bad' && 'bg-bad', m.tone === 'warn' && 'bg-warn', m.tone === 'ok' && 'bg-ok', m.tone === 'info' && 'bg-faint')} />
           </div>
         ))}
         {verdict && (
@@ -154,7 +144,7 @@ export function AttemptStrip({ duration, marks, verdict, playhead, onSeek, live 
           </div>
         )}
         {playhead != null && (
-          <div className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-signal" style={{ left: pct(playhead) }} />
+          <div className="absolute inset-y-0 w-[2px] -translate-x-1/2 bg-ink" style={{ left: pct(playhead) }} />
         )}
         {hover != null && onSeek && (
           <div className="pointer-events-none absolute inset-y-0 w-px bg-ink/40" style={{ left: pct(hover) }}>
@@ -169,6 +159,49 @@ export function AttemptStrip({ duration, marks, verdict, playhead, onSeek, live 
       </div>
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// A plugin's own page (PLUGIN_STANDARD.md §7a): a side panel with a sandboxed iframe. The server links the theme in.
+export type PluginPage = { plugin: string; runId: string; episode: number | null }
+
+export function PluginPageDrawer({ page, onClose }: { page: PluginPage | null; onClose: () => void }) {
+  useEffect(() => {
+    if (!page) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    // the page's "Change settings" (a sandboxed page cannot navigate the panel; it asks)
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'dreamkit:open-settings' && e.data.plugin === page.plugin) {
+        onClose()
+        window.location.hash = `/plugins/${encodeURIComponent(page.plugin)}`
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('message', onMessage)
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('message', onMessage) }
+  }, [page, onClose])
+  if (!page) return null
+  const q = new URLSearchParams({ ...(page.runId ? { run_id: page.runId } : {}), ...(page.episode != null ? { attempt: String(page.episode) } : {}) })
+  return (
+    <aside className="fixed inset-y-0 right-0 z-40 flex w-[min(620px,100vw)] flex-col border-l border-line bg-base shadow-[0_0_40px_rgba(0,0,0,.12)]"
+      role="dialog" aria-label={`${page.plugin} page`}>
+      <div className="flex items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
+        <PluginIcon name={page.plugin} />
+        <span className="text-[14px] font-medium">{page.plugin}</span>
+        {page.episode != null && <span className="text-[12px] text-faint">attempt {page.episode}</span>}
+        <button onClick={onClose} className="ml-auto rounded-md px-2 py-0.5 text-[13px] text-dim hover:bg-raised hover:text-ink" aria-label="Close">
+          Close <kbd>Esc</kbd>
+        </button>
+      </div>
+      <iframe key={`${page.plugin}-${q}`} aria-label={`${page.plugin} page`} src={`/plugin-ui/${encodeURIComponent(page.plugin)}/?${q}`}
+        sandbox="allow-scripts allow-downloads" className="w-full flex-1 border-0 bg-base" />
+    </aside>
+  )
+}
+
+/** Every plugin has a page: its own (manifest ui) or the standard one the server gives it (§7a). */
+export function pagesOf(plugins: { name: string }[] | undefined): Set<string> {
+  return new Set((plugins ?? []).map((p) => p.name))
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -240,44 +273,50 @@ export function Sparkline({ live, field, label, unit, color, scale = 1, max, war
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// A plugin's own page (PLUGIN_STANDARD.md §7a): a side panel with a sandboxed iframe. The server links the theme in.
-export type PluginPage = { plugin: string; runId: string; episode: number | null }
+// "…": the secondary actions of a row or a page, out of the way until asked for.
 
-export function PluginPageDrawer({ page, onClose }: { page: PluginPage | null; onClose: () => void }) {
+export interface MenuItem { label: string; onSelect: () => void; tone?: 'bad'; href?: string }
+
+export function MoreMenu({ items, label = 'More actions' }: { items: MenuItem[]; label?: string }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!page) return
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
-    // the page's "Change settings" (a sandboxed page cannot navigate the panel; it asks)
-    const onMessage = (e: MessageEvent) => {
-      if (e.data?.type === 'dreamkit:open-settings' && e.data.plugin === page.plugin) {
-        onClose()
-        window.location.hash = `/plugins/${encodeURIComponent(page.plugin)}`
-      }
+    if (!open) return
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !box.current?.contains(e.target as Node)) setOpen(false)
     }
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('message', onMessage)
-    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('message', onMessage) }
-  }, [page, onClose])
-  if (!page) return null
-  const q = new URLSearchParams({ ...(page.runId ? { run_id: page.runId } : {}), ...(page.episode != null ? { attempt: String(page.episode) } : {}) })
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', close)
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', close) }
+  }, [open])
+  if (!items.length) return null
   return (
-    <aside className="fixed inset-y-0 right-0 z-40 flex w-[min(620px,100vw)] flex-col border-l border-line bg-base shadow-[0_0_40px_rgba(0,0,0,.12)]"
-      role="dialog" aria-label={`${page.plugin} page`}>
-      <div className="flex items-center gap-2 border-b border-line bg-panel px-4 py-2.5">
-        <PluginIcon name={page.plugin} />
-        <span className="text-[14px] font-medium">{page.plugin}</span>
-        {page.episode != null && <span className="text-[12px] text-faint">attempt {page.episode}</span>}
-        <button onClick={onClose} className="ml-auto rounded-md px-2 py-0.5 text-[13px] text-dim hover:bg-raised hover:text-ink" aria-label="Close">
-          Close <kbd>Esc</kbd>
-        </button>
-      </div>
-      <iframe key={`${page.plugin}-${q}`} aria-label={`${page.plugin} page`} src={`/plugin-ui/${encodeURIComponent(page.plugin)}/?${q}`}
-        sandbox="allow-scripts allow-downloads" className="w-full flex-1 border-0 bg-base" />
-    </aside>
+    <div ref={box} className="relative" onClick={(e) => e.stopPropagation()}>
+      <button aria-label={label} aria-expanded={open} onClick={() => setOpen(!open)}
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-[18px] leading-none text-dim hover:bg-raised hover:text-ink">…</button>
+      {open && (
+        <div role="menu" className="absolute right-0 z-30 mt-1 min-w-[180px] rounded-xl border border-line bg-panel py-1 shadow-[0_4px_16px_rgba(23,24,26,.08)]">
+          {items.map((it) => it.href ? (
+            <a key={it.label} role="menuitem" href={it.href} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}
+              className="block px-3.5 py-1.5 text-[14px] hover:bg-raised">{it.label}</a>
+          ) : (
+            <button key={it.label} role="menuitem" onClick={() => { setOpen(false); it.onSelect() }}
+              className={clsx('block w-full px-3.5 py-1.5 text-left text-[14px] hover:bg-raised', it.tone === 'bad' && 'text-bad')}>{it.label}</button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
-/** Every plugin has a page: its own (manifest ui) or the standard one the server gives it (§7a). */
-export function pagesOf(plugins: { name: string }[] | undefined): Set<string> {
-  return new Set((plugins ?? []).map((p) => p.name))
+/** Secondary content, folded: a title line that opens it. */
+export function Fold({ title, children, open }: { title: ReactNode; children: ReactNode; open?: boolean }) {
+  return (
+    <details open={open} className="group rounded-xl border border-line bg-panel">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3.5 text-[15px] font-semibold select-none">
+        <span className="text-faint transition-transform group-open:rotate-90" aria-hidden>›</span>{title}
+      </summary>
+      <div className="border-t border-line">{children}</div>
+    </details>
+  )
 }
