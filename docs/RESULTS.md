@@ -3,7 +3,7 @@
 What dreamkit measured, on real Dream-1 runs and on recorded scenarios. Every number below has the date it was
 measured and the command that gives it again. Nothing here is estimated.
 
-**How much real data there is:** 6 runs with Dream-1 in Dream Labs' MuJoCo simulator, **172 attempts**, on
+**How much real data there is:** 7 runs with Dream-1 in Dream Labs' MuJoCo simulator, **178 attempts**, on
 2026-11-21 and 2026-11-22. Enough to see where attempts go wrong and what they cost; too few to rank models or
 prompts with confidence (see the intervals).
 
@@ -11,7 +11,7 @@ prompts with confidence (see the intervals).
 During the final runs the Dream-1 API often answered *pool full* / `DA-2000 NO_CAPACITY` under the hackathon's load,
 and our own network dropped for a stretch of one run. dreamkit counts these as server/network refusals, not as
 failures of the model, and recovery stopped one run by itself after 5 refusals in a row. The success rate
-(**30%, 20 of 66**) counts only attempts where the model actually ran; the judge's accuracy (**84%, 36 of 43**)
+(**33%, 24 of 72**) counts only attempts where the model actually ran; the judge's accuracy (**80%, 37 of 46**)
 counts only attempts that both the camera judge and the simulator judged.
 
 The run folders (videos, frames, about 1 GB) stay on our machine. One row per attempt is in git:
@@ -26,7 +26,7 @@ python tools/results.py          # every number in sections 1–2, from that fil
 Measured 2026-11-22 with `python tools/results.py`. Success was decided by the simulator (success-check). The
 150-attempt run was recorded through the Data tab (apple → bowl, orange → bowl, banana → plate, 24 phrasings).
 
-**104 of the 172 attempts never reached the model**: the API refused them or could not be reached. They are
+**104 of the 178 attempts never reached the model**: the API refused them or could not be reached. They are
 counted separately, **not** as Dream-1 failures:
 
 | Server/network refusals | Attempts |
@@ -41,19 +41,36 @@ counted separately, **not** as Dream-1 failures:
 
 | Dream-1, attempts where the model worked | |
 |---|---|
-| Success | **20 / 66 = 30%** (95% Wilson interval 21–42%) |
-| apple → bowl / orange → bowl / banana → plate | 11/33 = 33% (20–50%) · 6/18 = 33% (16–56%) · 3/15 = 20% (7–45%) |
-| Why the rest failed | slow model 30 (the arm waited past 700 ms for a chunk) · timeout 9 · grasped air 6 |
-| Model round trip | median of per-attempt means **784 ms**, median p95 **2.19 s** (74 attempts with calls) |
-| Cost | **$2.09** for 1,604 model calls → **$0.105 per success** |
-| A successful attempt took | 37.5 s on average |
+| Success | **24 / 72 = 33%** (95% Wilson interval 24–45%) |
+| apple → bowl / orange → bowl / banana → plate | 15/39 = 38% (25–54%) · 6/18 = 33% (16–56%) · 3/15 = 20% (7–45%) |
+| Why the rest failed | slow model 30 (the arm waited past 700 ms for a chunk) · timeout 11 · grasped air 6 |
+| Model round trip | median of per-attempt means **765 ms**, median p95 **2.11 s** (80 attempts with calls) |
+| Cost | **$2.34** for 1,793 model calls → **$0.098 per success** |
+| A successful attempt took | 35.7 s on average |
+
+**By phrasing of the task** (the long run used 24 phrasings). The samples are small: most rates stand on 1–5
+attempts, and their intervals overlap almost entirely, so they do **not** show that one phrasing works better.
+The phrasings with at least 3 attempts:
+
+| Phrasing | n | Success (95% interval) |
+|---|---|---|
+| put apple into the bowl | 23 | 8 = 35% (19–55%) |
+| put orange into the bowl | 5 | 2 = 40% (12–77%) |
+| place the orange fruit into the ceramic bowl | 5 | 2 = 40% (12–77%) |
+| pick up the apple and put it into the bowl | 3 | 2 = 67% (21–94%) |
+| grasp the red apple, lift it, and release it into the bowl | 3 | 2 = 67% (21–94%) |
+| place the yellow banana onto the blue plate | 3 | 2 = 67% (21–94%) |
+| 7 others with 3 attempts each | 3 each | 1 of 3 each |
+
+The latest run (`20261122-161518-14a8`, *put apple into the bowl*): **4 of 6**. Every phrasing:
+`python tools/results.py`.
 
 ## 2. What the plugins did on those runs
 
 | Plugin | Result |
 |---|---|
-| recovery | stepped in on **41** attempts; **8** of them then succeeded. When Dream-1's servers were full (run `20261122-160346-2fd1`), it **stopped the run itself after 5 refusals in a row** instead of spinning |
-| vision-judge (camera) vs success-check (simulator) | agreed on **36 / 43 = 84%** of the attempts both judged (in the last run, 1 of 1). 129 not judged: 31 because its Gemini call failed (free-tier quota, 503), the rest got no verdict. `dreamkit judge --all-unjudged` judged 21 of them again later, until the quota (429) stopped it |
+| recovery | stepped in on **42** attempts; **8** of them then succeeded. When Dream-1's servers were full (run `20261122-160346-2fd1`), it **stopped the run itself after 5 refusals in a row** instead of spinning |
+| vision-judge (camera) vs success-check (simulator) | agreed on **37 / 46 = 80%** of the attempts both judged (in the latest run, 1 of 3). 132 not judged: 34 because its Gemini call failed (free-tier quota, 503), the rest got no verdict. `dreamkit judge --all-unjudged` judged 21 of them again later, until the quota (429) stopped it |
 | budget-guard | never had to stop a real run |
 
 ## 3. Recorded scenarios (no model, no credits)

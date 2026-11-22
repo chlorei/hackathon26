@@ -24,7 +24,7 @@ three attempts 107 s. Python 3.11–3.13 and [uv](https://docs.astral.sh/uv/) ne
 | The credits run out mid-run | **budget-guard** warns at 50% and 80%, and at 95% sends the arms home and stops the run |
 | Recording demonstrations for fine-tuning | **harvester** turns good attempts into LeRobot datasets that pass Dream Labs' `validate_dataset`; the **Data** tab records, checks, uploads and fine-tunes (`dreamkit datasets train`) |
 
-**Results** (6 real Dream-1 runs, 172 attempts — 30% success where the model worked — and 12 recorded scenarios): [docs/RESULTS.md](docs/RESULTS.md) ·
+**Results** (7 real Dream-1 runs, 178 attempts — 33% success where the model worked — and 12 recorded scenarios): [docs/RESULTS.md](docs/RESULTS.md) ·
 **[Robustness](#robustness)** · **Video:** VIDEO_LINK · **Slides:** SLIDES_LINK
 
 ## How it fits
@@ -382,14 +382,14 @@ simulator skip themselves there and run locally).
 During the final runs the Dream-1 API often answered *pool full* / `DA-2000 NO_CAPACITY` under the hackathon's load,
 and our own network dropped for a stretch of one run. dreamkit counts these as server/network refusals, not as
 failures of the model, and recovery stopped one run by itself after 5 refusals in a row. The success rate
-(**30%, 20 of 66**) counts only attempts where the model actually ran; the judge's accuracy (**84%, 36 of 43**)
+(**33%, 24 of 72**) counts only attempts where the model actually ran; the judge's accuracy (**80%, 37 of 46**)
 counts only attempts that both the camera judge and the simulator judged.
 
 - **The camera judge missed failures between its frames.** Judging an attempt from its last frame (or a few) misses
   an apple dropped and picked up again; it now judges each try that recovery cut short on its own, and needs key
   frames around the moments failure-monitor marks, or more frames.
 - **Free Gemini quotas.** About 20 requests a model a day: on a long run most attempts went *not judged*
-  (129 of 172, see [RESULTS](docs/RESULTS.md); `dreamkit judge --all-unjudged` judges them again later). The judge falls back across models and to Claude, and says *not judged*
+  (132 of 178, see [RESULTS](docs/RESULTS.md); `dreamkit judge --all-unjudged` judges them again later). The judge falls back across models and to Claude, and says *not judged*
   instead of guessing.
 - **Create writes plugins with a model, and checks them with a filter, not a sandbox.** A weaker model often needs a
   second or third try to pass the checks.

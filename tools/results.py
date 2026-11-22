@@ -82,6 +82,12 @@ def report(rows: list[dict]) -> None:
         if sub:
             print(f"  {fam}: {pct(sum(1 for r in sub if r['success']), len(sub))}")
     reasons = collections.Counter(r["reason"] for r in ran if r["success"] is False)
+    by_task: dict[str, list[dict]] = collections.defaultdict(list)
+    for r in ran:
+        by_task[r["task"]].append(r)
+    print("by phrasing (small samples: n is what each rate stands on):")
+    for task, sub in sorted(by_task.items(), key=lambda kv: -len(kv[1])):
+        print(f"  n={len(sub):>2}  {pct(sum(1 for r in sub if r['success']), len(sub))}  {task}")
     print("Dream-1 failure reasons:", dict(reasons.most_common()))
     print("refusals:", dict(collections.Counter(r["model_error"] for r in rows if r["model_error"]).most_common()))
     rtt = [r["rtt_mean_ms"] for r in rows if r["rtt_mean_ms"]]
