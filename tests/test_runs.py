@@ -13,9 +13,16 @@ spec.loader.exec_module(sim_loop)
 
 
 def _run(config_path, *args):
-    code = sim_loop.main(["--mock", "--fast", "--config", str(config_path), "--seconds", "20", *args])
+    # with the world: success-check (an evaluation tool) says whether the attempt worked, and the plugins may read it
+    world = [] if "--no-world" in args else ["--with-world"]
+    code = sim_loop.main(["--mock", "--fast", "--config", str(config_path), "--seconds", "20", *world, *args])
     (folder,) = list((config_path.parent / "runs").iterdir())
     return code, json.loads((folder / "run.json").read_text()), folder
+
+
+# What a real arm's signals can tell apart (failure-monitor); where the object ended up (off target, never reached) only
+# the world knows, so for those world-judge (the evaluation tool) names the failure and failure-monitor just sees one.
+ROBOT_CAN_TELL = {"dropped", "grasped_air", "stalled", "collision"}
 
 
 @pytest.mark.parametrize("behavior, reason", [
@@ -29,15 +36,19 @@ def _run(config_path, *args):
     ("collision", "collision"),
 ])
 def test_failure_monitor_names_the_scripted_failure(make_config, behavior, reason):
-    code, info, _ = _run(make_config(), "--episodes", "1", "--behaviors", behavior)
+    code, info, _ = _run(make_config(plugins=["success-check", "failure-monitor", "world-judge"]),
+                         "--episodes", "1", "--behaviors", behavior)
     assert code == 0
     (episode,) = info["episodes"]
     if reason is None:
         assert episode["success"] is True
     else:
         assert episode["success"] is False
-        assert episode["reason"] == reason, episode.get("candidates")
-        assert 0 < episode["at_s"] < 20
+        # a hand that closes short of the object: never reached it, or grasped air next to it
+        assert episode["world-judge"]["reason"] in ({reason, "grasped_air"} if reason == "not_reached" else {reason})
+        if reason in ROBOT_CAN_TELL:
+            assert episode["reason"] == reason, episode.get("candidates")
+            assert 0 < episode["at_s"] < 20
 
 
 def test_scenes_differ_and_retry_then_success_with_video_and_recap(make_config):
@@ -74,14 +85,14 @@ def test_camera_failure_stops_the_robot(make_config):
 def test_recovery_fixes_failures_mid_attempt_without_resetting_the_scene(make_config):
     code, info, folder = _run(make_config(
         plugins=["success-check", "failure-monitor", "recovery", "harvester"],
-    ), "--episodes", "3", "--seconds", "45", "--behaviors", "dropped,grasped_air,released_off_target")
+    ), "--episodes", "2", "--seconds", "45", "--behaviors", "dropped,grasped_air")  # failures the arm can tell
     eps = info["episodes"]
-    assert [e["success"] for e in eps] == [True, True, True]
-    assert [e["recovery"]["count"] for e in eps] == [1, 2, 1]  # grasped air: back off, then stalled: home + ask again
+    assert [e["success"] for e in eps] == [True, True]
+    assert [e["recovery"]["count"] for e in eps] == [1, 2]
     assert all(e["attempt"] == 1 for e in eps)  # one attempt each: no scene reset, no retry
     events = [json.loads(line) for line in (folder / "events.jsonl").read_text().splitlines()]
     actions = [e["data"].get("action") for e in events if e.get("plugin") == "recovery" and (e.get("data") or {}).get("action")]
-    assert actions == ["home", "lift", "home", "home"]
+    assert actions == ["home", "open", "home"]  # grasped air: open the gripper, then stalled: home + ask again
 
 
 def test_harvested_episodes_pass_dream_labs_dataset_checks(make_config, tmp_path):

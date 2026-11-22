@@ -24,7 +24,9 @@ def test_overlay_on_dream_labs_loop_recovers_and_reports(tmp_path):
     run = next((tmp_path / "runs").iterdir())
     events = [json.loads(line) for line in (run / "events.jsonl").read_text().splitlines()]
     said = [(e.get("plugin"), e.get("message", "")) for e in events]
-    assert any(p == "failure-monitor" and "grasped air" in m for p, m in said)
+    # robot-only wording ("left gripper closed on nothing"); the verdict's reason is the code
+    assert any(e.get("plugin") == "failure-monitor" and (e.get("data") or {}).get("reason") == "grasped_air"
+               for e in events)
     assert any(p == "recovery" and "grasped air" in m for p, m in said)
     ep = json.loads((run / "run.json").read_text())["episodes"][0]
     assert ep["success"] is None  # the arm's signals cannot tell done from not: vision-judge or a person decides

@@ -108,7 +108,7 @@ export default function PluginsPage({ focus }: { focus?: string | null }) {
               // the one-line answer: what the plugins that are on do for the run
               const has = (n: string) => list.some((p) => p.name === n && p.enabled)
               const does = [has('failure-monitor') ? 'watch every attempt' : '', has('recovery') ? 'rescue failing ones' : '',
-                has('harvester') || has('fine-tune') ? 'keep good ones for training' : ''].filter(Boolean)
+                has('harvester') ? 'keep good ones for training' : ''].filter(Boolean)
               return `${on} of ${list.length} on${does.length ? `: they ${does.join(', ')}` : ''}. Changes apply the next time your loop starts.`
             })()}</p>
           </div>

@@ -97,6 +97,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- the one line dreamkit asks for ----------------------------------------------------------------------
     overrides = {"light": True} if args.light else {}
+    if args.with_world:
+        overrides["evaluation"] = True  # the evaluation tools (success-check, world-judge) may load and judge
     if args.fault_camera:
         overrides["faults"] = {f"camera_{args.fault_kind}": args.fault_camera, "at_s": args.fault_at,
                                "episode": args.fault_episode}

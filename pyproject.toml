@@ -27,7 +27,6 @@ dreamkit = "dreamkit.cli:main"
 
 # Built-in plugins register the same way an external plugin does.
 [project.entry-points."dreamkit.plugins"]
-success-check = "dreamkit.plugins.success_check:SuccessCheck"
 failure-monitor = "dreamkit.plugins.failure_monitor:FailureMonitor"
 camera-check = "dreamkit.plugins.camera_check:CameraCheck"
 recovery = "dreamkit.plugins.recovery:Recovery"

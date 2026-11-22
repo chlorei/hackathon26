@@ -113,7 +113,8 @@ def test_a_try_cut_short_by_recovery_gets_its_own_verdict(model):
     rows = json.loads((result.run_dir / "vision-judge" / "attempts.json").read_text())
     n = len(calls)
     assert [(r["try"], r["final"]) for r in rows] == [(i + 1, i == n - 1) for i in range(n)]
-    assert rows[0]["check"] is None and rows[-1]["check"] == result.result["success"]
+    # no success-check in this replay: the physics check said nothing, the camera decided (who decides, §7b)
+    assert rows[0]["check"] is None and rows[-1]["check"] is None and result.result["judged_by"] == "vision"
     assert not result.errors("vision-judge")
 
 
