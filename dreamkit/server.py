@@ -59,7 +59,7 @@ DEMO_ARGS = {
     # the free demo: scripted arm in the simulator, judged by the simulator's world (so recovery can be seen to work),
     # and no plugin that calls an outside model (no network, no credits, nothing to time out on camera)
     "mock": ["--mock", "--episodes", "3", "--behaviors", "dropped,success,dropped", "--with-world",
-             "--without", "monitor-stats"],
+             "--without", "vision-judge", "--without", "monitor-stats"],  # its name before and after the rename
     "dream": ["--episodes", "2", "--seconds", "30"],
 }
 

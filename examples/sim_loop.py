@@ -99,10 +99,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # ---- the one line dreamkit asks for ----------------------------------------------------------------------
     overrides = {"light": True} if args.light else {}
-    if args.without:  # e.g. the panel's free demo: no plugin that calls an outside model
-        overrides["plugins"] = dk_config.dump_plugins([s for s in cfg.plugins if s.name not in args.without])
+    plugins = [s for s in cfg.plugins if s.name not in args.without]  # e.g. the free demo: no outside model
+    if args.without:
+        overrides["plugins"] = dk_config.dump_plugins(plugins)
     if args.with_world:
         overrides["evaluation"] = True  # the evaluation tools (success-check, world-judge) may load and judge
+        if not any(s.name == "success-check" for s in plugins):  # the simulator judges, whatever the config lists
+            overrides["plugins"] = ["success-check", *dk_config.dump_plugins(plugins)]
     if args.fault_camera:
         overrides["faults"] = {f"camera_{args.fault_kind}": args.fault_camera, "at_s": args.fault_at,
                                "episode": args.fault_episode}
