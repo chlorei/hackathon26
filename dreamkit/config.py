@@ -83,10 +83,29 @@ class Config(BaseModel):
         return self.runs_path(base).parent
 
     def sim_dir(self, base: Path | None = None) -> Path:
+        """`sim_path`; when no simulator is there, the one `pip install dreamlabs` ships (dream_examples/yam_mujoco),
+        so the README's pip-only setup runs without a checkout of Dream Labs' repo beside this one."""
         path = Path(self.sim_path).expanduser()
         if not path.is_absolute() and base is not None:
             path = (base / path).resolve()
-        return path
+        if (path / "yam_env.py").is_file():
+            return path
+        return installed_sim() or path
+
+
+def installed_sim() -> Path | None:
+    """The YAM MuJoCo example inside the installed dreamlabs package, if there is one."""
+    import importlib
+
+    for package in ("dream_examples", "robots.examples"):
+        try:
+            module = importlib.import_module(package)
+        except ImportError:
+            continue
+        for folder in getattr(module, "__path__", []):
+            if (Path(folder) / "yam_mujoco" / "yam_env.py").is_file():
+                return Path(folder) / "yam_mujoco"
+    return None
 
 
 def load(path: str | Path | None, **overrides: Any) -> tuple[Config, Path]:

@@ -32,7 +32,12 @@ class MockClient:
     def __init__(self, env, behaviors: list[str] | None = None, seed: int = 0, latency_ms: float = 0.0,
                  recovery_behaviors: list[str] | None = None, fake_rtt_ms: float | None = None):
         self.env = env
-        self.solve = importlib.import_module("mock_pickups").solve  # the simulator folder is on sys.path
+        try:  # a checkout of Dream Labs' repo: the simulator folder (on sys.path) has mock_pickups.py
+            self.solve = importlib.import_module("mock_pickups").solve
+        except ImportError:  # the pip-installed dreamlabs ships the simulator without it: the same IK, vendored
+            from .ik import solve
+
+            self.solve = solve
         self.behaviors = list(behaviors or ["success"])
         ## What the "model" does after a recovery reset it mid-attempt (cycled); real Dream-1 decides for itself.
         self.recovery_behaviors = list(recovery_behaviors or ["success"])
